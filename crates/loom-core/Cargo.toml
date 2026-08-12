@@ -8,6 +8,8 @@ description = "diagram-loom 的領域模型、驗證與 lint。不得相依 taur
 # ⚠️ 紀律：這個 crate 不准出現 tauri 相依。
 # 領域邏輯必須能用 cargo test 驗證，不需要開視窗。
 [dependencies]
+calamine = "0.36.1"
+csv = "1.4.0"
 serde = { version = "1.0.229", features = ["derive"] }
 uuid = { version = "1.24.0", features = ["v4"] }
 yaml_serde = "0.10.6"

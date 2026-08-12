@@ -21,6 +21,7 @@
 pub mod batch;
 pub mod environment;
 pub mod id;
+pub mod importer;
 pub mod lint;
 pub mod logical;
 pub mod pattern;
