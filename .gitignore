@@ -1,0 +1,15 @@
+# Rust
+/target
+**/target
+
+# Node
+node_modules
+dist
+
+# 真實去識別化樣本：即使改過 IP，架構形狀仍屬敏感資訊
+/fixtures/real/
+
+# draw.io 靜態檔由建置流程下載
+/vendor/drawio/
+
+.DS_Store

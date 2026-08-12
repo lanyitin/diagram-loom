@@ -1,0 +1,10 @@
+environment,purpose,serves,from_node,from_service,from_endpoint,to_node,to_service,to_endpoint,to_address,protocol,expect,note
+prod,訂單服務讀寫快取,app-to-redis,app-vm-01,order-api,,f5-01,,vip-redis,10.0.0.100:6379,TCP,,經過 F5 的第一段
+prod,訂單服務讀寫快取,app-to-redis,f5-01,,,redis-vm-01,redis,client-port,10.0.1.11:6379,TCP,,經過 F5 的第二段
+prod,訂單服務讀寫快取,app-to-redis,f5-01,,,redis-vm-02,redis,client-port,10.0.1.12:6379,TCP,,
+prod,訂單服務查詢主資料庫,app-to-oracle,app-vm-01,order-api,,db-vm-01,oracle,jdbc,jdbc:oracle:thin:@10.0.2.10:1521/ORCL,JDBC,,
+prod,服務註冊與健康檢查,app-to-consul,app-vm-01,order-api,,consul-vm-01,consul,http-api,10.0.3.10:8500,TCP,,
+prod,對帳批次寫入共用檔案區,batch-to-nfs,batch-vm-01,settlement-batch,,nfs-01,,share,/mnt/settlement/out,FILE,,每日 02:00 執行
+prod,本機日誌收集,api-to-fluentd,app-vm-01,order-api,,app-vm-01,fluentd,unix-sock,/var/run/fluentd.sock,UNIX_SOCKET,,同機通訊
+prod,DNS 查詢,app-to-dns,app-vm-01,order-api,,dns-01,,resolver,10.0.0.53:53,UDP,,
+test,訂單服務讀寫快取,app-to-redis,app-vm-t01,order-api,,redis-vm-t*,redis,client-port,,TCP,6,萬用字元寫法：位址由 Instance 定義提供
