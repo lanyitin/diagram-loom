@@ -16,11 +16,29 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 存取失敗的種類。
+///
+/// **`NotFound` 一定要跟其他失敗分開。** 有些檔案不存在是正常的
+/// （例如還沒對帳過就沒有 base 快照），可以安靜地當成空的；
+/// 但權限不足、檔案毀損若也被當成空的，使用者會以為資料消失了。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreErrorKind {
+    NotFound,
+    Other,
+}
+
 /// 存取失敗。路徑一律附上，否則使用者不知道是哪個檔出事。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreError {
     pub path: String,
+    pub kind: StoreErrorKind,
     pub message: String,
+}
+
+impl StoreError {
+    pub fn is_not_found(&self) -> bool {
+        self.kind == StoreErrorKind::NotFound
+    }
 }
 
 impl std::fmt::Display for StoreError {
@@ -64,6 +82,10 @@ impl FileStore for FsStore {
     fn read(&self, path: &str) -> Result<String, StoreError> {
         fs::read_to_string(self.resolve(path)).map_err(|e| StoreError {
             path: path.to_string(),
+            kind: match e.kind() {
+                std::io::ErrorKind::NotFound => StoreErrorKind::NotFound,
+                _ => StoreErrorKind::Other,
+            },
             message: e.to_string(),
         })
     }
@@ -73,11 +95,13 @@ impl FileStore for FsStore {
         if let Some(parent) = full.parent() {
             fs::create_dir_all(parent).map_err(|e| StoreError {
                 path: path.to_string(),
+                kind: StoreErrorKind::Other,
                 message: e.to_string(),
             })?;
         }
         fs::write(&full, contents).map_err(|e| StoreError {
             path: path.to_string(),
+            kind: StoreErrorKind::Other,
             message: e.to_string(),
         })
     }
@@ -114,6 +138,7 @@ impl FileStore for MemoryStore {
     fn read(&self, path: &str) -> Result<String, StoreError> {
         self.files.get(path).cloned().ok_or_else(|| StoreError {
             path: path.to_string(),
+            kind: StoreErrorKind::NotFound,
             message: "找不到這個檔案".into(),
         })
     }
@@ -141,10 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn 讀不存在的檔案會附上路徑() {
+    fn 讀不存在的檔案會附上路徑並標記為找不到() {
         let store = MemoryStore::new();
         let err = store.read("project.yaml").unwrap_err();
         assert_eq!(err.path, "project.yaml");
+        assert!(err.is_not_found(), "必須能跟其他失敗分開");
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub mod importer;
 pub mod lint;
 pub mod logical;
 pub mod pattern;
+pub mod reconcile;
 pub mod repository;
 pub mod slug;
 pub mod store;
