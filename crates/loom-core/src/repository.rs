@@ -24,12 +24,16 @@
 //!
 //! 檔名是給人看的。UUID 檔名的 `git diff` 完全讀不出改了哪個環境。
 //! 環境的 UUID 仍然存在檔案內容裡，改名只會改檔名，參照不會斷。
+//!
+//! # 這裡不碰磁碟
+//!
+//! 佈局與 YAML 是領域知識，留在核心；「字串放哪裡」交給
+//! [`FileStore`](crate::store::FileStore)。
+//! 想直接對資料夾操作可以用 [`save_to_dir`] / [`load_from_dir`]。
 
 use std::collections::HashSet;
 use std::fmt;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +41,12 @@ use crate::Project;
 use crate::id::Id;
 use crate::logical::{Container, Logical, Person, Relationship, SoftwareSystem};
 use crate::slug;
+use crate::store::{FileStore, FsStore, StoreError};
+
+const PROJECT_FILE: &str = "project.yaml";
+const SYSTEMS_FILE: &str = "logical/systems.yaml";
+const CONTAINERS_FILE: &str = "logical/containers.yaml";
+const RELATIONSHIPS_FILE: &str = "logical/relationships.yaml";
 
 /// `project.yaml` 的內容。環境不寫在這裡，各自一個檔。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,14 +81,11 @@ struct RelationshipsFile {
     relationships: Vec<Relationship>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepositoryError {
-    Io {
-        path: PathBuf,
-        source: io::Error,
-    },
+    Store(StoreError),
     Yaml {
-        path: PathBuf,
+        path: String,
         message: String,
     },
     /// 環境的 slug 不是正規寫法，無法安全地當檔名。
@@ -93,11 +100,9 @@ pub enum RepositoryError {
 impl fmt::Display for RepositoryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RepositoryError::Io { path, source } => {
-                write!(f, "讀寫 {} 失敗：{source}", path.display())
-            }
+            RepositoryError::Store(e) => write!(f, "讀寫失敗：{e}"),
             RepositoryError::Yaml { path, message } => {
-                write!(f, "解析 {} 失敗：{message}", path.display())
+                write!(f, "解析 {path} 失敗：{message}")
             }
             RepositoryError::BadEnvironmentSlug { slug, suggestion } => {
                 write!(f, "環境名稱 {slug} 不能安全地當檔名，建議改成 {suggestion}")
@@ -111,18 +116,21 @@ impl fmt::Display for RepositoryError {
 
 impl std::error::Error for RepositoryError {}
 
+impl From<StoreError> for RepositoryError {
+    fn from(value: StoreError) -> Self {
+        RepositoryError::Store(value)
+    }
+}
+
 type Result<T> = std::result::Result<T, RepositoryError>;
 
-/// 把專案寫進資料夾。資料夾不存在會自動建立。
-pub fn save(project: &Project, dir: &Path) -> Result<()> {
+/// 把專案寫進任意的儲存體。
+pub fn save(project: &Project, store: &mut impl FileStore) -> Result<()> {
     check_environment_slugs(project)?;
 
-    create_dir(dir)?;
-    create_dir(&dir.join("logical"))?;
-    create_dir(&dir.join("environments"))?;
-
     write_yaml(
-        &dir.join("project.yaml"),
+        store,
+        PROJECT_FILE,
         &ProjectFile {
             id: project.id.clone(),
             slug: project.slug.clone(),
@@ -136,38 +144,41 @@ pub fn save(project: &Project, dir: &Path) -> Result<()> {
     )?;
 
     write_yaml(
-        &dir.join("logical/systems.yaml"),
+        store,
+        SYSTEMS_FILE,
         &SystemsFile {
             people: project.logical.people.clone(),
             systems: project.logical.systems.clone(),
         },
     )?;
     write_yaml(
-        &dir.join("logical/containers.yaml"),
+        store,
+        CONTAINERS_FILE,
         &ContainersFile {
             containers: project.logical.containers.clone(),
         },
     )?;
     write_yaml(
-        &dir.join("logical/relationships.yaml"),
+        store,
+        RELATIONSHIPS_FILE,
         &RelationshipsFile {
             relationships: project.logical.relationships.clone(),
         },
     )?;
 
     for env in &project.environments {
-        write_yaml(&environment_path(dir, &env.slug), env)?;
+        write_yaml(store, &environment_path(&env.slug), env)?;
     }
 
     Ok(())
 }
 
-/// 從資料夾讀出專案。
-pub fn load(dir: &Path) -> Result<Project> {
-    let meta: ProjectFile = read_yaml(&dir.join("project.yaml"))?;
-    let systems: SystemsFile = read_yaml(&dir.join("logical/systems.yaml"))?;
-    let containers: ContainersFile = read_yaml(&dir.join("logical/containers.yaml"))?;
-    let relationships: RelationshipsFile = read_yaml(&dir.join("logical/relationships.yaml"))?;
+/// 從任意的儲存體讀出專案。
+pub fn load(store: &impl FileStore) -> Result<Project> {
+    let meta: ProjectFile = read_yaml(store, PROJECT_FILE)?;
+    let systems: SystemsFile = read_yaml(store, SYSTEMS_FILE)?;
+    let containers: ContainersFile = read_yaml(store, CONTAINERS_FILE)?;
+    let relationships: RelationshipsFile = read_yaml(store, RELATIONSHIPS_FILE)?;
 
     let mut seen = HashSet::new();
     let mut environments = Vec::with_capacity(meta.environments.len());
@@ -175,7 +186,7 @@ pub fn load(dir: &Path) -> Result<Project> {
         if !seen.insert(env_slug.clone()) {
             return Err(RepositoryError::DuplicateEnvironment(env_slug.clone()));
         }
-        environments.push(read_yaml(&environment_path(dir, env_slug))?);
+        environments.push(read_yaml(store, &environment_path(env_slug))?);
     }
 
     Ok(Project {
@@ -192,8 +203,18 @@ pub fn load(dir: &Path) -> Result<Project> {
     })
 }
 
-fn environment_path(dir: &Path, env_slug: &str) -> PathBuf {
-    dir.join("environments").join(format!("{env_slug}.yaml"))
+/// 直接寫進磁碟上的資料夾。資料夾不存在會自動建立。
+pub fn save_to_dir(project: &Project, dir: &Path) -> Result<()> {
+    save(project, &mut FsStore::new(dir))
+}
+
+/// 直接從磁碟上的資料夾讀取。
+pub fn load_from_dir(dir: &Path) -> Result<Project> {
+    load(&FsStore::new(dir))
+}
+
+fn environment_path(env_slug: &str) -> String {
+    format!("environments/{env_slug}.yaml")
 }
 
 /// 環境 slug 會直接變成檔名，所以必須是正規寫法。
@@ -212,31 +233,19 @@ fn check_environment_slugs(project: &Project) -> Result<()> {
     Ok(())
 }
 
-fn create_dir(path: &Path) -> Result<()> {
-    fs::create_dir_all(path).map_err(|source| RepositoryError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+fn write_yaml<T: Serialize>(store: &mut impl FileStore, path: &str, value: &T) -> Result<()> {
     let text = yaml_serde::to_string(value).map_err(|e| RepositoryError::Yaml {
-        path: path.to_path_buf(),
+        path: path.to_string(),
         message: e.to_string(),
     })?;
-    fs::write(path, text).map_err(|source| RepositoryError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+    store.write(path, &text)?;
+    Ok(())
 }
 
-fn read_yaml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let text = fs::read_to_string(path).map_err(|source| RepositoryError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+fn read_yaml<T: for<'de> Deserialize<'de>>(store: &impl FileStore, path: &str) -> Result<T> {
+    let text = store.read(path)?;
     yaml_serde::from_str(&text).map_err(|e| RepositoryError::Yaml {
-        path: path.to_path_buf(),
+        path: path.to_string(),
         message: e.to_string(),
     })
 }

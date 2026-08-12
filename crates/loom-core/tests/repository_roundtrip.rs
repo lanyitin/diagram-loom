@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use common::*;
 use loom_core::lint::lint;
-use loom_core::repository::{load, save};
+use loom_core::repository::{load_from_dir, save_to_dir};
 
 /// 每個測試用自己的暫存資料夾，避免互相干擾。
 struct 暫存資料夾(PathBuf);
@@ -41,8 +41,8 @@ fn 存檔再讀回來得到一模一樣的專案() {
     let dir = 暫存資料夾::建立("roundtrip");
     let original = healthy_project();
 
-    save(&original, dir.path()).unwrap();
-    let loaded = load(dir.path()).unwrap();
+    save_to_dir(&original, dir.path()).unwrap();
+    let loaded = load_from_dir(dir.path()).unwrap();
 
     assert_eq!(loaded, original);
 }
@@ -53,8 +53,8 @@ fn 讀回來的專案跑lint結果相同() {
     let dir = 暫存資料夾::建立("lint-stable");
     let original = healthy_project();
 
-    save(&original, dir.path()).unwrap();
-    let loaded = load(dir.path()).unwrap();
+    save_to_dir(&original, dir.path()).unwrap();
+    let loaded = load_from_dir(dir.path()).unwrap();
 
     assert_eq!(lint(&loaded), lint(&original));
     assert!(lint(&loaded).is_empty());
@@ -63,7 +63,7 @@ fn 讀回來的專案跑lint結果相同() {
 #[test]
 fn 產生預期的檔案結構() {
     let dir = 暫存資料夾::建立("layout");
-    save(&healthy_project(), dir.path()).unwrap();
+    save_to_dir(&healthy_project(), dir.path()).unwrap();
 
     for 相對路徑 in [
         "project.yaml",
@@ -83,13 +83,13 @@ fn 改一個環境不會動到其他環境的檔案() {
     // 純文字格式的重點就在這裡：改 prod 時 dev 的 diff 應該是空的。
     let dir = 暫存資料夾::建立("isolation");
     let mut project = healthy_project();
-    save(&project, dir.path()).unwrap();
+    save_to_dir(&project, dir.path()).unwrap();
 
     let dev檔 = dir.path().join("environments/dev.yaml");
     let dev原內容 = fs::read_to_string(&dev檔).unwrap();
 
     project.environments[0].connections[0].purpose = "改過的用途".into();
-    save(&project, dir.path()).unwrap();
+    save_to_dir(&project, dir.path()).unwrap();
 
     assert_eq!(fs::read_to_string(&dev檔).unwrap(), dev原內容);
 }
@@ -98,7 +98,7 @@ fn 改一個環境不會動到其他環境的檔案() {
 fn 環境檔用slug當檔名而不是uuid() {
     // 檔名是給人看的。UUID 檔名的 git diff 完全讀不出改了哪個環境。
     let dir = 暫存資料夾::建立("filename");
-    save(&healthy_project(), dir.path()).unwrap();
+    save_to_dir(&healthy_project(), dir.path()).unwrap();
 
     let mut 檔名: Vec<String> = fs::read_dir(dir.path().join("environments"))
         .unwrap()
@@ -112,7 +112,7 @@ fn 環境檔用slug當檔名而不是uuid() {
 #[test]
 fn yaml內容是人看得懂的() {
     let dir = 暫存資料夾::建立("readable");
-    save(&healthy_project(), dir.path()).unwrap();
+    save_to_dir(&healthy_project(), dir.path()).unwrap();
 
     let 內容 = fs::read_to_string(dir.path().join("logical/containers.yaml")).unwrap();
 
@@ -127,7 +127,7 @@ fn yaml內容是人看得懂的() {
 #[test]
 fn 連線的兩端在yaml上讀得出來() {
     let dir = 暫存資料夾::建立("connections");
-    save(&healthy_project(), dir.path()).unwrap();
+    save_to_dir(&healthy_project(), dir.path()).unwrap();
 
     let 內容 = fs::read_to_string(dir.path().join("environments/prod.yaml")).unwrap();
 
@@ -145,7 +145,7 @@ fn 環境名稱不能當檔名時會被擋下() {
     // 這種名稱若直接當檔名，會跳出專案資料夾。
     project.environments[0].slug = "../逃出去".into();
 
-    let err = save(&project, dir.path()).unwrap_err();
+    let err = save_to_dir(&project, dir.path()).unwrap_err();
     assert!(
         err.to_string().contains("不能安全地當檔名"),
         "錯誤訊息不夠清楚：{err}"
@@ -154,9 +154,77 @@ fn 環境名稱不能當檔名時會被擋下() {
 
 #[test]
 fn 讀不存在的資料夾會給出含路徑的錯誤() {
-    let err = load(&PathBuf::from("/tmp/loom-這個資料夾不存在")).unwrap_err();
+    let err = load_from_dir(&PathBuf::from("/tmp/loom-這個資料夾不存在")).unwrap_err();
     assert!(
         err.to_string().contains("project.yaml"),
         "錯誤訊息應該指出是哪個檔案：{err}"
+    );
+}
+
+// ── 用記憶體儲存體，完全不碰磁碟 ─────────────────────────────
+
+#[test]
+fn 記憶體儲存體能完整往返() {
+    use loom_core::repository::{load, save};
+    use loom_core::store::MemoryStore;
+
+    let original = healthy_project();
+    let mut store = MemoryStore::new();
+
+    save(&original, &mut store).unwrap();
+    assert_eq!(load(&store).unwrap(), original);
+}
+
+#[test]
+fn 不碰磁碟就能驗證整份檔案清單() {
+    use loom_core::repository::save;
+    use loom_core::store::MemoryStore;
+
+    let mut store = MemoryStore::new();
+    save(&healthy_project(), &mut store).unwrap();
+
+    assert_eq!(
+        store.paths(),
+        vec![
+            "environments/dev.yaml",
+            "environments/prod.yaml",
+            "environments/test.yaml",
+            "logical/containers.yaml",
+            "logical/relationships.yaml",
+            "logical/systems.yaml",
+            "project.yaml",
+        ]
+    );
+}
+
+#[test]
+fn 存檔前可以先看會寫成什麼() {
+    // 記憶體儲存體也能拿來做「先算出結果、讓使用者確認再落地」。
+    use loom_core::repository::save;
+    use loom_core::store::MemoryStore;
+
+    let mut store = MemoryStore::new();
+    save(&healthy_project(), &mut store).unwrap();
+
+    let prod = store.get("environments/prod.yaml").unwrap();
+    assert!(prod.contains("f5-vip"), "看不到 F5：\n{prod}");
+    assert!(prod.contains("redis-*"), "看不到萬用字元");
+}
+
+#[test]
+fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
+    // 驗證失敗要在寫入之前發生，不能寫到一半才發現。
+    use loom_core::repository::save;
+    use loom_core::store::MemoryStore;
+
+    let mut project = healthy_project();
+    project.environments[0].slug = "../逃出去".into();
+
+    let mut store = MemoryStore::new();
+    assert!(save(&project, &mut store).is_err());
+    assert!(
+        store.is_empty(),
+        "驗證失敗卻已經寫了東西：{:?}",
+        store.paths()
     );
 }
