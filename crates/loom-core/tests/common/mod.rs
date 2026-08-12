@@ -172,7 +172,7 @@ pub fn vms(env: &str, instances: Vec<ContainerInstance>) -> Vec<DeploymentNode> 
 /// 來源端：指名一個 Instance，不指定 endpoint（由 OS 分配 ephemeral port）。
 pub fn from_instance(id: &str) -> Endpointing {
     Endpointing::Instance {
-        instance: InstanceRef::One(Id::new(id)),
+        target: InstanceRef::One(Id::new(id)),
         endpoint: None,
     }
 }
@@ -180,7 +180,7 @@ pub fn from_instance(id: &str) -> Endpointing {
 /// 目標端：一整群 Instance，附期望數量。
 pub fn to_cluster(pattern: &str, expect: Option<usize>, endpoint_def: &str) -> Endpointing {
     Endpointing::Instance {
-        instance: InstanceRef::Pattern {
+        target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
             expect,
         },
@@ -367,7 +367,7 @@ pub fn dev() -> Environment {
                 "訂單服務讀寫快取",
                 from_instance("i-dev-api-01"),
                 Endpointing::Instance {
-                    instance: InstanceRef::One(Id::new("i-dev-redis-01")),
+                    target: InstanceRef::One(Id::new("i-dev-redis-01")),
                     endpoint: Some(Id::new(REDIS_CLIENT)),
                 },
             ),

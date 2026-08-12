@@ -24,6 +24,7 @@ pub mod id;
 pub mod lint;
 pub mod logical;
 pub mod pattern;
+pub mod repository;
 pub mod slug;
 
 use crate::environment::Environment;

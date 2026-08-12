@@ -3,11 +3,14 @@
 //! prod / test / dev 各是一個 [`Environment`]，種類開放不限這三種。
 //! 同一個邏輯服務在不同環境的 IP、port、節點數都可以不同。
 
+use serde::{Deserialize, Serialize};
+
 use crate::id::Id;
 use crate::logical::Protocol;
 
 /// 運算載體的種類。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum NodeKind {
     Physical,
     VirtualMachine,
@@ -15,12 +18,13 @@ pub enum NodeKind {
 }
 
 /// Endpoint 在某環境的實際樣貌：定義加上位址。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Endpoint {
     pub id: Id,
     pub slug: String,
     /// 對應邏輯層的 `EndpointDef`。
     /// [`InfrastructureNode`] 的 endpoint 沒有邏輯層對應，此處為 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub def: Option<Id>,
     pub protocol: Protocol,
     /// `10.0.1.11:6379` / JDBC URL / socket 路徑 / 檔案路徑。
@@ -32,25 +36,29 @@ pub struct Endpoint {
 ///
 /// 叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
 /// 就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContainerInstance {
     pub id: Id,
     pub slug: String,
     pub container: Id,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<Endpoint>,
     /// 標記「刻意獨立」，關閉 L008（沒被任何連線碰到）的警告。
     /// 冷備機是合法情境，但預設應該要叫。
+    #[serde(default, skip_serializing_if = "is_false")]
     pub standalone: bool,
 }
 
 /// 機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeploymentNode {
     pub id: Id,
     pub slug: String,
     pub kind: NodeKind,
     /// 巢狀：機房 → 機器 → 容器。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<DeploymentNode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instances: Vec<ContainerInstance>,
 }
 
@@ -69,13 +77,15 @@ impl DeploymentNode {
 ///
 /// 例如金流系統：prod 用正式閘道，test 用 sandbox。
 /// 它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareSystemInstance {
     pub id: Id,
     pub slug: String,
     pub system: Id,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<Endpoint>,
     /// 同 [`ContainerInstance::standalone`]，關閉 L008 警告。
+    #[serde(default, skip_serializing_if = "is_false")]
     pub standalone: bool,
 }
 
@@ -83,15 +93,17 @@ pub struct SoftwareSystemInstance {
 ///
 /// 它**不含 Container**，但有自己的 endpoint（VIP 位址），
 /// 因此連線可以「經過」它——這也是為什麼經過 F5 的流量會拆成兩段。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InfrastructureNode {
     pub id: Id,
     pub slug: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<Endpoint>,
 }
 
 /// 連線一端指向的 Instance：可以是一個，也可以是一整群。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum InstanceRef {
     /// 指名一個 Instance。
     One(Id),
@@ -102,15 +114,31 @@ pub enum InstanceRef {
     /// 因此沒填 `expect` 要能被 lint 抓出來（L005），型別就不能強制它存在。
     Pattern {
         slug_pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         expect: Option<usize>,
     },
 }
 
 /// 連線的一端。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// YAML 上長這樣（`serves` 相同的連線串起來就是一條路徑）：
+///
+/// ```yaml
+/// from:
+///   instance:
+///     target: { one: i-prod-api-01 }   # 來源不填 endpoint = OS 分配
+/// to:
+///   infra:
+///     node: f5-prod
+///     endpoint: ep-f5-redis
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Endpointing {
     Instance {
-        instance: InstanceRef,
+        /// 欄位叫 `target` 而不是 `instance`，否則 YAML 會出現
+        /// `instance: { instance: ... }` 這種讀不下去的巢狀。
+        target: InstanceRef,
         /// 指向**邏輯層的 [`EndpointDef`](crate::logical::EndpointDef)**，
         /// 不是某一台的具體 [`Endpoint`]。
         ///
@@ -119,6 +147,7 @@ pub enum Endpointing {
         /// 上 `def` 對應的那個 endpoint 提供。
         ///
         /// 來源端可為 `None`，表示由作業系統分配（ephemeral port）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         endpoint: Option<Id>,
     },
     Infra {
@@ -127,6 +156,7 @@ pub enum Endpointing {
         ///
         /// 與 Instance 端不對稱是刻意的：設備不對應任何邏輯層元素，
         /// 它的 endpoint（VIP 位址）沒有 `EndpointDef` 可以指。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         endpoint: Option<Id>,
     },
     /// 外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。
@@ -134,6 +164,7 @@ pub enum Endpointing {
         instance: Id,
         /// 同 Instance 端，指向邏輯層的 `EndpointDef`（掛在
         /// [`SoftwareSystem`](crate::logical::SoftwareSystem) 上）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         endpoint: Option<Id>,
     },
 }
@@ -142,7 +173,7 @@ pub enum Endpointing {
 ///
 /// `serves` 指向它所服務的邏輯 [`Relationship`](crate::logical::Relationship)。
 /// Lint 把貼同一個 `serves` 的連線攤開成一張圖，檢查從來源走不走得到目標。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub id: Id,
     pub serves: Id,
@@ -153,15 +184,19 @@ pub struct Connection {
 }
 
 /// 一個部署環境。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Environment {
     pub id: Id,
     pub slug: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nodes: Vec<DeploymentNode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub infra: Vec<InfrastructureNode>,
     /// 外部系統在此環境的落地。不在 `nodes` 底下，因為那些機器不是我們的。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub systems: Vec<SoftwareSystemInstance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connections: Vec<Connection>,
 }
 
@@ -193,6 +228,11 @@ impl Environment {
             .filter(|i| crate::pattern::matches(pattern, &i.slug))
             .collect()
     }
+}
+
+/// `skip_serializing_if` 用：`false` 是預設值，不必寫進 YAML。
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[cfg(test)]

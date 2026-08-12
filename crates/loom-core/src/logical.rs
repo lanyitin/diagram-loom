@@ -6,13 +6,16 @@
 //! 命名對齊 C4 Model：這裡的 `Container` 是**服務**（Redis、Consul、App），
 //! 不是機器。機器叫 `DeploymentNode`，在環境層。
 
+use serde::{Deserialize, Serialize};
+
 use crate::id::Id;
 
 /// Endpoint 的協定種類。
 ///
 /// 「Port」這個詞不夠準確——Unix socket、JDBC URL 與檔案都不是 port，
 /// 它們的共通點是「服務對外的一個接點」，因此統一叫 Endpoint。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Protocol {
     Tcp,
     Udp,
@@ -22,7 +25,7 @@ pub enum Protocol {
 }
 
 /// 真人使用者。C4 的 `Person`，只出現在 Context 圖。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Person {
     pub id: Id,
     pub slug: String,
@@ -30,7 +33,7 @@ pub struct Person {
 }
 
 /// 軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareSystem {
     pub id: Id,
     pub slug: String,
@@ -43,6 +46,7 @@ pub struct SoftwareSystem {
     /// C4 不把外部系統拆成 Container——我們看不到人家內部長怎樣，
     /// 只知道「有一個 API 可以打」。因此接點直接掛在系統上。
     /// 自家系統留空，它的接點由各個 [`Container`] 自己定義。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<EndpointDef>,
 }
 
@@ -55,7 +59,7 @@ impl SoftwareSystem {
 /// Endpoint 的定義：只有名字與協定，沒有位址。
 ///
 /// 位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointDef {
     pub id: Id,
     pub slug: String,
@@ -63,12 +67,13 @@ pub struct EndpointDef {
 }
 
 /// 一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Container {
     pub id: Id,
     pub slug: String,
     pub name: String,
     pub system: Id,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<EndpointDef>,
 }
 
@@ -85,7 +90,7 @@ impl Container {
 ///
 /// 一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
 /// dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Relationship {
     pub id: Id,
     pub slug: String,
@@ -101,14 +106,15 @@ pub struct Relationship {
 /// 邏輯連線的一端：自家的服務，或一整個外部系統。
 ///
 /// 外部系統不拆成 Container，所以它整個就是一端。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum RelationshipEnd {
     Container(Id),
     System(Id),
 }
 
 /// 邏輯層的全部內容。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Logical {
     pub people: Vec<Person>,
     pub systems: Vec<SoftwareSystem>,

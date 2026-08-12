@@ -59,8 +59,8 @@ fn 萬用字元沒填_expect_只是警告不是錯誤() {
     let mut project = healthy_project();
 
     let prod = &mut project.environments[0];
-    if let Endpointing::Instance { instance, .. } = &mut prod.connections[1].to
-        && let InstanceRef::Pattern { expect, .. } = instance
+    if let Endpointing::Instance { target, .. } = &mut prod.connections[1].to
+        && let InstanceRef::Pattern { expect, .. } = target
     {
         *expect = None;
     }
@@ -148,7 +148,7 @@ fn 連線指向不存在的機器() {
 
     let dev = &mut project.environments[2];
     dev.connections[0].from = Endpointing::Instance {
-        instance: InstanceRef::One(Id::new("i-dev-根本沒這台")),
+        target: InstanceRef::One(Id::new("i-dev-根本沒這台")),
         endpoint: None,
     };
 

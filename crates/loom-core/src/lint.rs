@@ -203,7 +203,7 @@ fn check_endpointing(
     let env_id = Some(env.id.clone());
 
     match side {
-        Endpointing::Instance { instance, endpoint } => match instance {
+        Endpointing::Instance { target, endpoint } => match target {
             InstanceRef::One(id) => match env.instance(id) {
                 None => findings.push(Finding {
                     rule: Rule::L003,
@@ -453,7 +453,7 @@ fn ends_to_nodes(
 /// 把**實際連線的一端**展開成圖上的點。萬用字元會展開成多個點。
 fn resolve(env: &Environment, side: &Endpointing) -> Vec<GraphNode> {
     match side {
-        Endpointing::Instance { instance, .. } => match instance {
+        Endpointing::Instance { target, .. } => match target {
             InstanceRef::One(id) => vec![GraphNode::Instance(id.clone())],
             InstanceRef::Pattern { slug_pattern, .. } => env
                 .instances_matching(slug_pattern)

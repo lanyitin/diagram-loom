@@ -44,7 +44,7 @@ fn prod_with_batch(count: usize, expect: usize) -> loom_core::Project {
         .extend(expand(&redis_batch(count), |hint| Id::new(format!("prod-{hint}"))).unwrap());
 
     prod.connections[1].to = Endpointing::Instance {
-        instance: InstanceRef::Pattern {
+        target: InstanceRef::Pattern {
             slug_pattern: "redis-*".into(),
             expect: Some(expect),
         },
