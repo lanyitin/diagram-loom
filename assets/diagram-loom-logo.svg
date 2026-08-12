@@ -1,0 +1,19 @@
+<svg width="680" height="230" viewBox="0 0 680 230" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>DiagramLoom logo</title>
+<desc>A square loom frame with faint vertical warp threads, and a coral weaving thread connecting three small diagram nodes across the frame, with the wordmark DiagramLoom below.</desc>
+
+<rect x="280" y="15" width="120" height="120" rx="16" fill="none" stroke="#1D9E75" stroke-width="4"/>
+
+<line x1="305" y1="28" x2="305" y2="122" stroke="#1D9E75" stroke-width="3" stroke-linecap="round" opacity="0.3"/>
+<line x1="340" y1="28" x2="340" y2="122" stroke="#1D9E75" stroke-width="3" stroke-linecap="round" opacity="0.3"/>
+<line x1="375" y1="28" x2="375" y2="122" stroke="#1D9E75" stroke-width="3" stroke-linecap="round" opacity="0.3"/>
+
+<path d="M305,40 C325,40 325,75 340,75 S360,110 375,110" fill="none" stroke="#D85A30" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+<rect x="297" y="32" width="16" height="16" rx="4" fill="#F0997B" stroke="#993C1D" stroke-width="2"/>
+<rect x="332" y="67" width="16" height="16" rx="4" fill="#F0997B" stroke="#993C1D" stroke-width="2"/>
+<rect x="367" y="102" width="16" height="16" rx="4" fill="#F0997B" stroke="#993C1D" stroke-width="2"/>
+
+<text x="340" y="175" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="500" fill="#1A1A1A">DiagramLoom</text>
+<text x="340" y="205" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#6B6B6B">Weave data into C4 model diagrams</text>
+</svg>
