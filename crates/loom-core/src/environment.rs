@@ -97,12 +97,22 @@ pub enum InstanceRef {
 pub enum Endpointing {
     Instance {
         instance: InstanceRef,
+        /// 指向**邏輯層的 [`EndpointDef`](crate::logical::EndpointDef)**，
+        /// 不是某一台的具體 [`Endpoint`]。
+        ///
+        /// 因為萬用字元會展開成多台 Instance，各有各的具體 endpoint；
+        /// 只有邏輯層的定義才是它們共通的東西。實際位址由各 Instance
+        /// 上 `def` 對應的那個 endpoint 提供。
+        ///
         /// 來源端可為 `None`，表示由作業系統分配（ephemeral port）。
-        /// 目標端為 `None` 則是缺漏。
         endpoint: Option<Id>,
     },
     Infra {
         node: Id,
+        /// 指向該設備上的具體 [`Endpoint`] id。
+        ///
+        /// 與 Instance 端不對稱是刻意的：設備不對應任何邏輯層元素，
+        /// 它的 endpoint（VIP 位址）沒有 `EndpointDef` 可以指。
         endpoint: Option<Id>,
     },
 }

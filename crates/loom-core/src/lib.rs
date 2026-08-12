@@ -20,6 +20,7 @@
 
 pub mod environment;
 pub mod id;
+pub mod lint;
 pub mod logical;
 pub mod pattern;
 pub mod slug;
