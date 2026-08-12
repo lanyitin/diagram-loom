@@ -1,0 +1,151 @@
+//! 邏輯層：母版，整個專案定義一次。
+//!
+//! 這一層只說「有哪些東西、誰要連誰」，不含任何 IP、port 或機器。
+//! 具體的落地在 [`crate::environment`]。
+//!
+//! 命名對齊 C4 Model：這裡的 `Container` 是**服務**（Redis、Consul、App），
+//! 不是機器。機器叫 `DeploymentNode`，在環境層。
+
+use crate::id::Id;
+
+/// Endpoint 的協定種類。
+///
+/// 「Port」這個詞不夠準確——Unix socket、JDBC URL 與檔案都不是 port，
+/// 它們的共通點是「服務對外的一個接點」，因此統一叫 Endpoint。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Protocol {
+    Tcp,
+    Udp,
+    UnixSocket,
+    Jdbc,
+    File,
+}
+
+/// 真人使用者。C4 的 `Person`，只出現在 Context 圖。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
+    pub id: Id,
+    pub slug: String,
+    pub name: String,
+}
+
+/// 軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftwareSystem {
+    pub id: Id,
+    pub slug: String,
+    pub name: String,
+    /// 外部系統不由我們部署，但仍需在每個環境指定它的落地位址
+    /// （例如測試環境用金流 sandbox）。
+    pub external: bool,
+}
+
+/// Endpoint 的定義：只有名字與協定，沒有位址。
+///
+/// 位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndpointDef {
+    pub id: Id,
+    pub slug: String,
+    pub protocol: Protocol,
+}
+
+/// 一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Container {
+    pub id: Id,
+    pub slug: String,
+    pub name: String,
+    pub system: Id,
+    pub endpoints: Vec<EndpointDef>,
+}
+
+impl Container {
+    pub fn endpoint(&self, id: &Id) -> Option<&EndpointDef> {
+        self.endpoints.iter().find(|e| &e.id == id)
+    }
+}
+
+/// 邏輯層的連線：「A 要連 B 的某個 endpoint」，並說明用途。
+///
+/// **這就是原本討論中的「連線契約」。** 我們刻意不另設 placeholder 概念——
+/// 邏輯層宣告了一條連線，每個環境就必須實現它，沒實現就是 lint 錯誤。
+///
+/// 一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
+/// dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relationship {
+    pub id: Id,
+    pub slug: String,
+    /// 用途說明。空白會觸發 L007。
+    pub purpose: String,
+    pub from: Id,
+    pub to: Id,
+    /// 連到目標 Container 的哪一個 [`EndpointDef`]。
+    pub to_endpoint: Id,
+}
+
+/// 邏輯層的全部內容。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Logical {
+    pub people: Vec<Person>,
+    pub systems: Vec<SoftwareSystem>,
+    pub containers: Vec<Container>,
+    pub relationships: Vec<Relationship>,
+}
+
+impl Logical {
+    pub fn container(&self, id: &Id) -> Option<&Container> {
+        self.containers.iter().find(|c| &c.id == id)
+    }
+
+    pub fn relationship(&self, id: &Id) -> Option<&Relationship> {
+        self.relationships.iter().find(|r| &r.id == id)
+    }
+
+    pub fn system(&self, id: &Id) -> Option<&SoftwareSystem> {
+        self.systems.iter().find(|s| &s.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn 範例服務() -> Container {
+        Container {
+            id: Id::new("c-redis"),
+            slug: "redis".into(),
+            name: "Redis 快取".into(),
+            system: Id::new("s-shop"),
+            endpoints: vec![EndpointDef {
+                id: Id::new("e-redis-client"),
+                slug: "client-port".into(),
+                protocol: Protocol::Tcp,
+            }],
+        }
+    }
+
+    #[test]
+    fn 可以用_id_找到服務的_endpoint() {
+        let redis = 範例服務();
+        let found = redis.endpoint(&Id::new("e-redis-client"));
+        assert_eq!(found.map(|e| e.slug.as_str()), Some("client-port"));
+    }
+
+    #[test]
+    fn 找不存在的_endpoint_得到_none() {
+        let redis = 範例服務();
+        assert!(redis.endpoint(&Id::new("e-不存在")).is_none());
+    }
+
+    #[test]
+    fn 邏輯層可以用_id_查詢各種元素() {
+        let logical = Logical {
+            containers: vec![範例服務()],
+            ..Default::default()
+        };
+        assert!(logical.container(&Id::new("c-redis")).is_some());
+        assert!(logical.container(&Id::new("c-consul")).is_none());
+    }
+}

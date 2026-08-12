@@ -1,0 +1,225 @@
+//! 環境層：邏輯層母版在某個環境的落地。
+//!
+//! prod / test / dev 各是一個 [`Environment`]，種類開放不限這三種。
+//! 同一個邏輯服務在不同環境的 IP、port、節點數都可以不同。
+
+use crate::id::Id;
+use crate::logical::Protocol;
+
+/// 運算載體的種類。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeKind {
+    Physical,
+    VirtualMachine,
+    LinuxContainer,
+}
+
+/// Endpoint 在某環境的實際樣貌：定義加上位址。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoint {
+    pub id: Id,
+    pub slug: String,
+    /// 對應邏輯層的 `EndpointDef`。
+    /// [`InfrastructureNode`] 的 endpoint 沒有邏輯層對應，此處為 `None`。
+    pub def: Option<Id>,
+    pub protocol: Protocol,
+    /// `10.0.1.11:6379` / JDBC URL / socket 路徑 / 檔案路徑。
+    /// 缺少會觸發 L006，所以必須允許 `None`。
+    pub address: Option<String>,
+}
+
+/// 邏輯 Container 在此環境的一份落地。C4 的 `Container Instance`。
+///
+/// 叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
+/// 就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerInstance {
+    pub id: Id,
+    pub slug: String,
+    pub container: Id,
+    pub endpoints: Vec<Endpoint>,
+    /// 標記「刻意獨立」，關閉 L008（沒被任何連線碰到）的警告。
+    /// 冷備機是合法情境，但預設應該要叫。
+    pub standalone: bool,
+}
+
+/// 機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentNode {
+    pub id: Id,
+    pub slug: String,
+    pub kind: NodeKind,
+    /// 巢狀：機房 → 機器 → 容器。
+    pub children: Vec<DeploymentNode>,
+    pub instances: Vec<ContainerInstance>,
+}
+
+impl DeploymentNode {
+    /// 走訪自己與所有子孫節點上的 Instance。
+    pub fn instances_recursive(&self) -> Vec<&ContainerInstance> {
+        let mut found: Vec<&ContainerInstance> = self.instances.iter().collect();
+        for child in &self.children {
+            found.extend(child.instances_recursive());
+        }
+        found
+    }
+}
+
+/// F5 等 VIP 設備。C4 的 `Infrastructure Node`。
+///
+/// 它**不含 Container**，但有自己的 endpoint（VIP 位址），
+/// 因此連線可以「經過」它——這也是為什麼經過 F5 的流量會拆成兩段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InfrastructureNode {
+    pub id: Id,
+    pub slug: String,
+    pub endpoints: Vec<Endpoint>,
+}
+
+/// 連線一端指向的 Instance：可以是一個，也可以是一整群。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstanceRef {
+    /// 指名一個 Instance。
+    One(Id),
+    /// 萬用字元，例如 `redis-*`。
+    ///
+    /// `expect` 是期望數量。**它必須是 `Option`**：萬用字元表示「現在有幾台就
+    /// 連幾台」，少建一台 VM 會看起來完全正常，正好吃掉本工具的核心價值。
+    /// 因此沒填 `expect` 要能被 lint 抓出來（L005），型別就不能強制它存在。
+    Pattern {
+        slug_pattern: String,
+        expect: Option<usize>,
+    },
+}
+
+/// 連線的一端。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Endpointing {
+    Instance {
+        instance: InstanceRef,
+        /// 來源端可為 `None`，表示由作業系統分配（ephemeral port）。
+        /// 目標端為 `None` 則是缺漏。
+        endpoint: Option<Id>,
+    },
+    Infra {
+        node: Id,
+        endpoint: Option<Id>,
+    },
+}
+
+/// 環境層的一條實際連線。
+///
+/// `serves` 指向它所服務的邏輯 [`Relationship`](crate::logical::Relationship)。
+/// Lint 把貼同一個 `serves` 的連線攤開成一張圖，檢查從來源走不走得到目標。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connection {
+    pub id: Id,
+    pub serves: Id,
+    /// 用途說明。空白會觸發 L007。
+    pub purpose: String,
+    pub from: Endpointing,
+    pub to: Endpointing,
+}
+
+/// 一個部署環境。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Environment {
+    pub id: Id,
+    pub slug: String,
+    pub name: String,
+    pub nodes: Vec<DeploymentNode>,
+    pub infra: Vec<InfrastructureNode>,
+    pub connections: Vec<Connection>,
+}
+
+impl Environment {
+    /// 這個環境裡所有的 Instance，含巢狀節點底下的。
+    pub fn instances(&self) -> Vec<&ContainerInstance> {
+        self.nodes
+            .iter()
+            .flat_map(|n| n.instances_recursive())
+            .collect()
+    }
+
+    pub fn instance(&self, id: &Id) -> Option<&ContainerInstance> {
+        self.instances().into_iter().find(|i| &i.id == id)
+    }
+
+    pub fn infra_node(&self, id: &Id) -> Option<&InfrastructureNode> {
+        self.infra.iter().find(|n| &n.id == id)
+    }
+
+    /// 符合萬用字元樣式的所有 Instance。
+    pub fn instances_matching(&self, pattern: &str) -> Vec<&ContainerInstance> {
+        self.instances()
+            .into_iter()
+            .filter(|i| crate::pattern::matches(pattern, &i.slug))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn 實例(slug: &str) -> ContainerInstance {
+        ContainerInstance {
+            id: Id::new(format!("i-{slug}")),
+            slug: slug.into(),
+            container: Id::new("c-redis"),
+            endpoints: vec![],
+            standalone: false,
+        }
+    }
+
+    fn 機器(slug: &str, instances: Vec<ContainerInstance>) -> DeploymentNode {
+        DeploymentNode {
+            id: Id::new(format!("n-{slug}")),
+            slug: slug.into(),
+            kind: NodeKind::VirtualMachine,
+            children: vec![],
+            instances,
+        }
+    }
+
+    fn 環境(nodes: Vec<DeploymentNode>) -> Environment {
+        Environment {
+            id: Id::new("env-prod"),
+            slug: "prod".into(),
+            name: "正式環境".into(),
+            nodes,
+            infra: vec![],
+            connections: vec![],
+        }
+    }
+
+    #[test]
+    fn 走訪巢狀節點底下的所有實例() {
+        let 內層 = 機器("docker-host", vec![實例("redis-01")]);
+        let mut 外層 = 機器("rack-a", vec![實例("consul-01")]);
+        外層.children.push(內層);
+
+        let env = 環境(vec![外層]);
+        let mut slugs: Vec<_> = env.instances().iter().map(|i| i.slug.clone()).collect();
+        slugs.sort();
+        assert_eq!(slugs, vec!["consul-01", "redis-01"]);
+    }
+
+    #[test]
+    fn 萬用字元選出整群實例() {
+        let env = 環境(vec![機器(
+            "vm",
+            vec![實例("redis-01"), 實例("redis-02"), 實例("consul-01")],
+        )]);
+        assert_eq!(env.instances_matching("redis-*").len(), 2);
+        assert_eq!(env.instances_matching("consul-*").len(), 1);
+        assert_eq!(env.instances_matching("oracle-*").len(), 0);
+    }
+
+    #[test]
+    fn 可以用_id_找到實例與設備() {
+        let env = 環境(vec![機器("vm", vec![實例("redis-01")])]);
+        assert!(env.instance(&Id::new("i-redis-01")).is_some());
+        assert!(env.instance(&Id::new("i-沒有這台")).is_none());
+    }
+}
