@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::Project;
 use crate::environment::{ContainerInstance, Endpointing, Environment, InstanceRef};
 use crate::id::Id;
+use crate::logical::RelationshipEnd;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
@@ -84,6 +85,7 @@ impl Finding {
 enum GraphNode {
     Instance(Id),
     Infra(Id),
+    System(Id),
 }
 
 /// 檢查整個專案，回傳排序後的發現清單。
@@ -116,26 +118,29 @@ pub fn lint(project: &Project) -> Vec<Finding> {
 fn lint_environment(project: &Project, env: &Environment, findings: &mut Vec<Finding>) {
     let instances = env.instances();
 
-    check_containers_realized(project, env, &instances, findings);
+    check_logical_realized(project, env, &instances, findings);
     check_connections(project, env, findings);
     check_endpoint_addresses(env, findings);
     check_relationships_reachable(project, env, &instances, findings);
     check_orphan_instances(env, &instances, findings);
 }
 
-/// L001：每個邏輯 Container 在每個環境都要至少有一個 Instance。
+/// L001：邏輯層的東西在每個環境都要落地。
+///
+/// - 每個 Container 至少要有一個 ContainerInstance
+/// - 每個**外部** SoftwareSystem 至少要有一個 SoftwareSystemInstance
+///   （自家系統靠自己的 Container 落地，不另外檢查）
 ///
 /// 判定是「至少一個」而非「數量相同」：prod 12 台、test 6 台本來就正常，
 /// 數量的把關交給 `expect`（L004）。
-fn check_containers_realized(
+fn check_logical_realized(
     project: &Project,
     env: &Environment,
     instances: &[&ContainerInstance],
     findings: &mut Vec<Finding>,
 ) {
     for container in &project.logical.containers {
-        let realized = instances.iter().any(|i| i.container == container.id);
-        if !realized {
+        if !instances.iter().any(|i| i.container == container.id) {
             findings.push(Finding {
                 rule: Rule::L001,
                 environment: Some(env.id.clone()),
@@ -143,6 +148,20 @@ fn check_containers_realized(
                 detail: format!(
                     "服務 {} 在環境 {} 沒有任何 Instance",
                     container.slug, env.slug
+                ),
+            });
+        }
+    }
+
+    for system in project.logical.external_systems() {
+        if !env.systems.iter().any(|s| s.system == system.id) {
+            findings.push(Finding {
+                rule: Rule::L001,
+                environment: Some(env.id.clone()),
+                subject: system.id.clone(),
+                detail: format!(
+                    "外部系統 {} 在環境 {} 沒有指定落地位址",
+                    system.slug, env.slug
                 ),
             });
         }
@@ -252,6 +271,29 @@ fn check_endpointing(
                 }
             }
         },
+        Endpointing::System { instance, endpoint } => match env.system_instance(instance) {
+            None => findings.push(Finding {
+                rule: Rule::L003,
+                environment: env_id,
+                subject: conn_id,
+                detail: format!("連線指向不存在的外部系統落地 {instance}"),
+            }),
+            Some(found) => {
+                if let Some(want) = endpoint
+                    && !found.endpoints.iter().any(|e| e.def.as_ref() == Some(want))
+                {
+                    findings.push(Finding {
+                        rule: Rule::L003,
+                        environment: env_id,
+                        subject: conn_id,
+                        detail: format!(
+                            "外部系統 {} 上沒有對應 EndpointDef {want} 的 Endpoint",
+                            found.slug
+                        ),
+                    });
+                }
+            }
+        },
     }
 }
 
@@ -311,6 +353,19 @@ fn check_endpoint_addresses(env: &Environment, findings: &mut Vec<Finding>) {
             }
         }
     }
+
+    for system in &env.systems {
+        for endpoint in &system.endpoints {
+            if endpoint.address.is_none() {
+                findings.push(Finding {
+                    rule: Rule::L006,
+                    environment: Some(env.id.clone()),
+                    subject: endpoint.id.clone(),
+                    detail: format!("{}／{} 缺少位址", system.slug, endpoint.slug),
+                });
+            }
+        }
+    }
 }
 
 /// L001 / L002：每條邏輯連線在每個環境都要有實現，而且要走得通。
@@ -341,16 +396,9 @@ fn check_relationships_reachable(
             continue;
         }
 
-        let starts: Vec<GraphNode> = instances
-            .iter()
-            .filter(|i| i.container == rel.from)
-            .map(|i| GraphNode::Instance(i.id.clone()))
-            .collect();
-        let goals: HashSet<GraphNode> = instances
-            .iter()
-            .filter(|i| i.container == rel.to)
-            .map(|i| GraphNode::Instance(i.id.clone()))
-            .collect();
+        let starts = ends_to_nodes(env, instances, &rel.from);
+        let goals: HashSet<GraphNode> =
+            ends_to_nodes(env, instances, &rel.to).into_iter().collect();
 
         // 兩端的服務本身就沒實現時，L001 已經報過了，不再重複報 L002。
         if starts.is_empty() || goals.is_empty() {
@@ -381,7 +429,28 @@ fn check_relationships_reachable(
     }
 }
 
-/// 把連線的一端展開成圖上的點。萬用字元會展開成多個點。
+/// 把**邏輯連線的一端**展開成圖上的點：該服務／外部系統在此環境的所有落地。
+fn ends_to_nodes(
+    env: &Environment,
+    instances: &[&ContainerInstance],
+    end: &RelationshipEnd,
+) -> Vec<GraphNode> {
+    match end {
+        RelationshipEnd::Container(cid) => instances
+            .iter()
+            .filter(|i| &i.container == cid)
+            .map(|i| GraphNode::Instance(i.id.clone()))
+            .collect(),
+        RelationshipEnd::System(sid) => env
+            .systems
+            .iter()
+            .filter(|s| &s.system == sid)
+            .map(|s| GraphNode::System(s.id.clone()))
+            .collect(),
+    }
+}
+
+/// 把**實際連線的一端**展開成圖上的點。萬用字元會展開成多個點。
 fn resolve(env: &Environment, side: &Endpointing) -> Vec<GraphNode> {
     match side {
         Endpointing::Instance { instance, .. } => match instance {
@@ -393,6 +462,7 @@ fn resolve(env: &Environment, side: &Endpointing) -> Vec<GraphNode> {
                 .collect(),
         },
         Endpointing::Infra { node, .. } => vec![GraphNode::Infra(node.clone())],
+        Endpointing::System { instance, .. } => vec![GraphNode::System(instance.clone())],
     }
 }
 
@@ -443,8 +513,11 @@ fn check_orphan_instances(
     for conn in &env.connections {
         for side in [&conn.from, &conn.to] {
             for node in resolve(env, side) {
-                if let GraphNode::Instance(id) = node {
-                    touched.insert(id);
+                match node {
+                    GraphNode::Instance(id) | GraphNode::System(id) => {
+                        touched.insert(id);
+                    }
+                    GraphNode::Infra(_) => {}
                 }
             }
         }
@@ -459,6 +532,18 @@ fn check_orphan_instances(
             environment: Some(env.id.clone()),
             subject: instance.id.clone(),
             detail: format!("Instance {} 沒有被任何連線碰到", instance.slug),
+        });
+    }
+
+    for system in &env.systems {
+        if system.standalone || touched.contains(&system.id) {
+            continue;
+        }
+        findings.push(Finding {
+            rule: Rule::L008,
+            environment: Some(env.id.clone()),
+            subject: system.id.clone(),
+            detail: format!("外部系統 {} 沒有被任何連線碰到", system.slug),
         });
     }
 }

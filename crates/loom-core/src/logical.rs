@@ -38,6 +38,18 @@ pub struct SoftwareSystem {
     /// 外部系統不由我們部署，但仍需在每個環境指定它的落地位址
     /// （例如測試環境用金流 sandbox）。
     pub external: bool,
+    /// 外部系統對外的接點定義。
+    ///
+    /// C4 不把外部系統拆成 Container——我們看不到人家內部長怎樣，
+    /// 只知道「有一個 API 可以打」。因此接點直接掛在系統上。
+    /// 自家系統留空，它的接點由各個 [`Container`] 自己定義。
+    pub endpoints: Vec<EndpointDef>,
+}
+
+impl SoftwareSystem {
+    pub fn endpoint(&self, id: &Id) -> Option<&EndpointDef> {
+        self.endpoints.iter().find(|e| &e.id == id)
+    }
 }
 
 /// Endpoint 的定義：只有名字與協定，沒有位址。
@@ -79,10 +91,20 @@ pub struct Relationship {
     pub slug: String,
     /// 用途說明。空白會觸發 L007。
     pub purpose: String,
-    pub from: Id,
-    pub to: Id,
-    /// 連到目標 Container 的哪一個 [`EndpointDef`]。
+    pub from: RelationshipEnd,
+    pub to: RelationshipEnd,
+    /// 連到目標的哪一個 [`EndpointDef`]。
+    /// 目標是 Container 就查它的 endpoints，是外部系統就查系統的 endpoints。
     pub to_endpoint: Id,
+}
+
+/// 邏輯連線的一端：自家的服務，或一整個外部系統。
+///
+/// 外部系統不拆成 Container，所以它整個就是一端。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipEnd {
+    Container(Id),
+    System(Id),
 }
 
 /// 邏輯層的全部內容。
@@ -105,6 +127,14 @@ impl Logical {
 
     pub fn system(&self, id: &Id) -> Option<&SoftwareSystem> {
         self.systems.iter().find(|s| &s.id == id)
+    }
+
+    /// 需要在每個環境落地的外部系統。
+    ///
+    /// 自家系統不列入：它是靠自己的 [`Container`] 落地的，
+    /// 沒有獨立的「系統實例」。
+    pub fn external_systems(&self) -> impl Iterator<Item = &SoftwareSystem> {
+        self.systems.iter().filter(|s| s.external)
     }
 }
 

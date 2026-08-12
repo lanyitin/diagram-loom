@@ -5,48 +5,68 @@
 //!
 //! # 假專案的形狀
 //!
-//! 一間網路商店，兩個服務：訂單 API 與 Redis 快取。
+//! 一間網路商店。自家有訂單 API 與 Redis 快取，外部有一個金流系統。
 //!
 //! | 環境 | 樣子 |
 //! | --- | --- |
-//! | `prod` | 訂單 API → **F5** → Redis 叢集 **3 台**（原案是 12 台，測試用 3 台就夠） |
-//! | `test` | 訂單 API → Redis 叢集 **2 台**，無 F5 |
-//! | `dev`  | 訂單 API → Redis **1 台**，直連 |
+//! | `prod` | 訂單 API → **F5** → Redis 叢集 **3 台**；金流走正式閘道 |
+//! | `test` | 訂單 API → Redis 叢集 **2 台**，無 F5；金流走 sandbox |
+//! | `dev`  | 訂單 API → Redis **1 台**，直連；金流走本機 mock |
 //!
-//! 涵蓋了設計上最容易出錯的三件事：經過設備的多段路徑、叢集扇出、
-//! 以及同一條邏輯連線在不同環境展開成不同數量。
+//! 涵蓋了設計上最容易出錯的幾件事：經過設備的多段路徑、叢集扇出、
+//! 同一條邏輯連線在不同環境展開成不同數量，以及外部系統在各環境的不同落地。
 
 use loom_core::Project;
 use loom_core::environment::{
     Connection, ContainerInstance, DeploymentNode, Endpoint, Endpointing, Environment,
-    InfrastructureNode, InstanceRef, NodeKind,
+    InfrastructureNode, InstanceRef, NodeKind, SoftwareSystemInstance,
 };
 use loom_core::id::Id;
-use loom_core::logical::{Container, EndpointDef, Logical, Protocol, Relationship, SoftwareSystem};
+use loom_core::logical::{
+    Container, EndpointDef, Logical, Protocol, Relationship, RelationshipEnd, SoftwareSystem,
+};
 
-pub const SYSTEM: &str = "s-shop";
+pub const SHOP: &str = "s-shop";
+pub const PAYMENT: &str = "s-payment";
 pub const API: &str = "c-order-api";
 pub const REDIS: &str = "c-redis";
 pub const API_EGRESS: &str = "e-api-egress";
 pub const REDIS_CLIENT: &str = "e-redis-client";
+pub const PAY_HTTPS: &str = "e-pay-https";
 pub const REL_CACHE: &str = "r-api-快取";
+pub const REL_PAY: &str = "r-api-金流";
 
-/// 邏輯層母版：兩個服務、一條連線。三個環境共用。
+/// 邏輯層母版：自家兩個服務、一個外部系統、兩條連線。三個環境共用。
 pub fn logical() -> Logical {
     Logical {
         people: vec![],
-        systems: vec![SoftwareSystem {
-            id: Id::new(SYSTEM),
-            slug: "shop".into(),
-            name: "網路商店".into(),
-            external: false,
-        }],
+        systems: vec![
+            SoftwareSystem {
+                id: Id::new(SHOP),
+                slug: "shop".into(),
+                name: "網路商店".into(),
+                external: false,
+                endpoints: vec![],
+            },
+            SoftwareSystem {
+                id: Id::new(PAYMENT),
+                slug: "payment".into(),
+                name: "金流系統".into(),
+                external: true,
+                // 外部系統不拆成 Container，接點直接掛在系統上。
+                endpoints: vec![EndpointDef {
+                    id: Id::new(PAY_HTTPS),
+                    slug: "https".into(),
+                    protocol: Protocol::Tcp,
+                }],
+            },
+        ],
         containers: vec![
             Container {
                 id: Id::new(API),
                 slug: "order-api".into(),
                 name: "訂單 API".into(),
-                system: Id::new(SYSTEM),
+                system: Id::new(SHOP),
                 endpoints: vec![EndpointDef {
                     id: Id::new(API_EGRESS),
                     slug: "egress".into(),
@@ -57,7 +77,7 @@ pub fn logical() -> Logical {
                 id: Id::new(REDIS),
                 slug: "redis".into(),
                 name: "Redis 快取".into(),
-                system: Id::new(SYSTEM),
+                system: Id::new(SHOP),
                 endpoints: vec![EndpointDef {
                     id: Id::new(REDIS_CLIENT),
                     slug: "client-port".into(),
@@ -65,14 +85,24 @@ pub fn logical() -> Logical {
                 }],
             },
         ],
-        relationships: vec![Relationship {
-            id: Id::new(REL_CACHE),
-            slug: "api-連-redis".into(),
-            purpose: "訂單服務讀寫快取".into(),
-            from: Id::new(API),
-            to: Id::new(REDIS),
-            to_endpoint: Id::new(REDIS_CLIENT),
-        }],
+        relationships: vec![
+            Relationship {
+                id: Id::new(REL_CACHE),
+                slug: "api-連-redis".into(),
+                purpose: "訂單服務讀寫快取".into(),
+                from: RelationshipEnd::Container(Id::new(API)),
+                to: RelationshipEnd::Container(Id::new(REDIS)),
+                to_endpoint: Id::new(REDIS_CLIENT),
+            },
+            Relationship {
+                id: Id::new(REL_PAY),
+                slug: "api-連-金流".into(),
+                purpose: "送出付款請求".into(),
+                from: RelationshipEnd::Container(Id::new(API)),
+                to: RelationshipEnd::System(Id::new(PAYMENT)),
+                to_endpoint: Id::new(PAY_HTTPS),
+            },
+        ],
     }
 }
 
@@ -109,6 +139,22 @@ pub fn instance(
     }
 }
 
+/// 金流系統在某環境的落地。
+pub fn payment(env: &str, slug: &str, address: &str) -> SoftwareSystemInstance {
+    SoftwareSystemInstance {
+        id: Id::new(format!("sys-{env}-payment")),
+        slug: slug.into(),
+        system: Id::new(PAYMENT),
+        endpoints: vec![endpoint(
+            &format!("ep-{env}-payment"),
+            "https",
+            PAY_HTTPS,
+            address,
+        )],
+        standalone: false,
+    }
+}
+
 /// 把一批 Instance 各自放進自己的 VM。
 pub fn vms(env: &str, instances: Vec<ContainerInstance>) -> Vec<DeploymentNode> {
     instances
@@ -132,13 +178,13 @@ pub fn from_instance(id: &str) -> Endpointing {
 }
 
 /// 目標端：一整群 Instance，附期望數量。
-pub fn to_cluster(pattern: &str, expect: Option<usize>, endpoint_id: &str) -> Endpointing {
+pub fn to_cluster(pattern: &str, expect: Option<usize>, endpoint_def: &str) -> Endpointing {
     Endpointing::Instance {
         instance: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
             expect,
         },
-        endpoint: Some(Id::new(endpoint_id)),
+        endpoint: Some(Id::new(endpoint_def)),
     }
 }
 
@@ -149,14 +195,38 @@ pub fn via_infra(node: &str, endpoint_id: &str) -> Endpointing {
     }
 }
 
-pub fn connection(id: &str, purpose: &str, from: Endpointing, to: Endpointing) -> Connection {
+pub fn to_system(instance: &str, endpoint_def: &str) -> Endpointing {
+    Endpointing::System {
+        instance: Id::new(instance),
+        endpoint: Some(Id::new(endpoint_def)),
+    }
+}
+
+pub fn connection(
+    id: &str,
+    serves: &str,
+    purpose: &str,
+    from: Endpointing,
+    to: Endpointing,
+) -> Connection {
     Connection {
         id: Id::new(id),
-        serves: Id::new(REL_CACHE),
+        serves: Id::new(serves),
         purpose: purpose.into(),
         from,
         to,
     }
+}
+
+/// 每個環境都有的金流連線。
+fn pay_connection(env: &str) -> Connection {
+    connection(
+        &format!("conn-{env}-pay"),
+        REL_PAY,
+        "送出付款請求",
+        from_instance(&format!("i-{env}-api-01")),
+        to_system(&format!("sys-{env}-payment"), PAY_HTTPS),
+    )
 }
 
 /// prod：訂單 API → F5 → Redis 叢集 3 台。連線因此拆成兩段。
@@ -196,24 +266,32 @@ pub fn prod() -> Environment {
                 address: Some("10.0.0.100:6379".into()),
             }],
         }],
+        systems: vec![payment(
+            "prod",
+            "payment-gateway",
+            "https://pay.example.com",
+        )],
         connections: vec![
             connection(
                 "conn-prod-1",
+                REL_CACHE,
                 "訂單服務讀寫快取（第一段：到 F5）",
                 from_instance("i-prod-api-01"),
                 via_infra("f5-prod", "ep-f5-redis"),
             ),
             connection(
                 "conn-prod-2",
+                REL_CACHE,
                 "訂單服務讀寫快取（第二段：F5 到後端）",
                 via_infra("f5-prod", "ep-f5-redis"),
                 to_cluster("redis-*", Some(3), REDIS_CLIENT),
             ),
+            pay_connection("prod"),
         ],
     }
 }
 
-/// test：規模較小，2 台 Redis，沒有 F5，直連。
+/// test：規模較小，2 台 Redis，沒有 F5，直連；金流走 sandbox。
 pub fn test_env() -> Environment {
     let mut nodes = vms(
         "test",
@@ -240,16 +318,25 @@ pub fn test_env() -> Environment {
         name: "測試環境".into(),
         nodes,
         infra: vec![],
-        connections: vec![connection(
-            "conn-test-1",
-            "訂單服務讀寫快取",
-            from_instance("i-test-api-01"),
-            to_cluster("redis-*", Some(2), REDIS_CLIENT),
+        systems: vec![payment(
+            "test",
+            "payment-sandbox",
+            "https://sandbox.pay.example.com",
         )],
+        connections: vec![
+            connection(
+                "conn-test-1",
+                REL_CACHE,
+                "訂單服務讀寫快取",
+                from_instance("i-test-api-01"),
+                to_cluster("redis-*", Some(2), REDIS_CLIENT),
+            ),
+            pay_connection("test"),
+        ],
     }
 }
 
-/// dev：最小規模，1 台 Redis，直連。
+/// dev：最小規模，1 台 Redis，直連；金流走本機 mock。
 pub fn dev() -> Environment {
     let mut nodes = vms(
         "dev",
@@ -272,15 +359,20 @@ pub fn dev() -> Environment {
         name: "開發環境".into(),
         nodes,
         infra: vec![],
-        connections: vec![connection(
-            "conn-dev-1",
-            "訂單服務讀寫快取",
-            from_instance("i-dev-api-01"),
-            Endpointing::Instance {
-                instance: InstanceRef::One(Id::new("i-dev-redis-01")),
-                endpoint: Some(Id::new(REDIS_CLIENT)),
-            },
-        )],
+        systems: vec![payment("dev", "payment-mock", "http://localhost:9000")],
+        connections: vec![
+            connection(
+                "conn-dev-1",
+                REL_CACHE,
+                "訂單服務讀寫快取",
+                from_instance("i-dev-api-01"),
+                Endpointing::Instance {
+                    instance: InstanceRef::One(Id::new("i-dev-redis-01")),
+                    endpoint: Some(Id::new(REDIS_CLIENT)),
+                },
+            ),
+            pay_connection("dev"),
+        ],
     }
 }
 

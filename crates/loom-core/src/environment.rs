@@ -65,6 +65,20 @@ impl DeploymentNode {
     }
 }
 
+/// 外部系統在此環境的落地。C4 的 `Software System Instance`。
+///
+/// 例如金流系統：prod 用正式閘道，test 用 sandbox。
+/// 它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftwareSystemInstance {
+    pub id: Id,
+    pub slug: String,
+    pub system: Id,
+    pub endpoints: Vec<Endpoint>,
+    /// 同 [`ContainerInstance::standalone`]，關閉 L008 警告。
+    pub standalone: bool,
+}
+
 /// F5 等 VIP 設備。C4 的 `Infrastructure Node`。
 ///
 /// 它**不含 Container**，但有自己的 endpoint（VIP 位址），
@@ -115,6 +129,13 @@ pub enum Endpointing {
         /// 它的 endpoint（VIP 位址）沒有 `EndpointDef` 可以指。
         endpoint: Option<Id>,
     },
+    /// 外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。
+    System {
+        instance: Id,
+        /// 同 Instance 端，指向邏輯層的 `EndpointDef`（掛在
+        /// [`SoftwareSystem`](crate::logical::SoftwareSystem) 上）。
+        endpoint: Option<Id>,
+    },
 }
 
 /// 環境層的一條實際連線。
@@ -139,6 +160,8 @@ pub struct Environment {
     pub name: String,
     pub nodes: Vec<DeploymentNode>,
     pub infra: Vec<InfrastructureNode>,
+    /// 外部系統在此環境的落地。不在 `nodes` 底下，因為那些機器不是我們的。
+    pub systems: Vec<SoftwareSystemInstance>,
     pub connections: Vec<Connection>,
 }
 
@@ -157,6 +180,10 @@ impl Environment {
 
     pub fn infra_node(&self, id: &Id) -> Option<&InfrastructureNode> {
         self.infra.iter().find(|n| &n.id == id)
+    }
+
+    pub fn system_instance(&self, id: &Id) -> Option<&SoftwareSystemInstance> {
+        self.systems.iter().find(|s| &s.id == id)
     }
 
     /// 符合萬用字元樣式的所有 Instance。
@@ -199,6 +226,7 @@ mod tests {
             name: "正式環境".into(),
             nodes,
             infra: vec![],
+            systems: vec![],
             connections: vec![],
         }
     }

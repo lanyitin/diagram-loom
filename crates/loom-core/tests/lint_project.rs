@@ -96,15 +96,17 @@ fn 整個環境忘了實現邏輯連線() {
     prod.connections.clear();
 
     let found = summarize(&project);
-    // 邏輯連線沒實現（L001），且三台 Redis 與一台 API 都沒被碰到（L008）。
+    // 兩條邏輯連線都沒實現（L001），且所有落地都沒被碰到（L008）。
     assert_eq!(
         found,
         vec![
             "L001 env-prod r-api-快取",
+            "L001 env-prod r-api-金流",
             "L008 env-prod i-prod-api-01",
             "L008 env-prod i-prod-redis-01",
             "L008 env-prod i-prod-redis-02",
             "L008 env-prod i-prod-redis-03",
+            "L008 env-prod sys-prod-payment",
         ]
     );
 }
@@ -123,7 +125,9 @@ fn 服務在某個環境完全沒部署() {
         vec![
             "L001 env-dev c-redis",
             "L001 env-dev r-api-快取",
+            "L001 env-dev r-api-金流",
             "L008 env-dev i-dev-api-01",
+            "L008 env-dev sys-dev-payment",
         ]
     );
 }
@@ -150,8 +154,9 @@ fn 連線指向不存在的機器() {
 
     let found = summarize(&project);
     assert!(found.contains(&"L003 env-dev conn-dev-1".to_string()));
-    // 順帶：原本的 API 現在沒被任何連線碰到了。
-    assert!(found.contains(&"L008 env-dev i-dev-api-01".to_string()));
+    // API 仍被金流那條連線碰到，所以不該報 L008——L008 看的是「有沒有人碰」，
+    // 不是「該有的連線在不在」，那是 L001／L002 的職責。
+    assert!(!found.contains(&"L008 env-dev i-dev-api-01".to_string()));
 }
 
 #[test]
@@ -189,12 +194,65 @@ fn 連線沒填用途只是警告() {
 
 #[test]
 fn 同一條邏輯連線在三個環境展開成不同數量都算健康() {
-    // prod 兩段（走 F5）＋ 3 台叢集；test 一段 ＋ 2 台；dev 一段 ＋ 1 台。
+    // 快取那條：prod 兩段（走 F5）＋ 3 台叢集；test 一段 ＋ 2 台；dev 一段 ＋ 1 台。
     // 數量不同是正常的，不該報錯——這是設計上刻意的決定。
     let project = healthy_project();
 
-    assert_eq!(project.environments[0].connections.len(), 2);
-    assert_eq!(project.environments[1].connections.len(), 1);
-    assert_eq!(project.environments[2].connections.len(), 1);
+    assert_eq!(project.environments[0].connections.len(), 3);
+    assert_eq!(project.environments[1].connections.len(), 2);
+    assert_eq!(project.environments[2].connections.len(), 2);
     assert_eq!(summarize(&project), Vec::<String>::new());
+}
+
+#[test]
+fn 外部系統在每個環境的落地位址可以不同() {
+    // prod 打正式閘道、test 打 sandbox、dev 打本機 mock。
+    // 位址不同是正常的，重點是「每個環境都有指定」。
+    let project = healthy_project();
+
+    let addresses: Vec<&str> = project
+        .environments
+        .iter()
+        .flat_map(|e| &e.systems)
+        .flat_map(|s| &s.endpoints)
+        .filter_map(|e| e.address.as_deref())
+        .collect();
+
+    assert_eq!(
+        addresses,
+        vec![
+            "https://pay.example.com",
+            "https://sandbox.pay.example.com",
+            "http://localhost:9000",
+        ]
+    );
+    assert_eq!(summarize(&project), Vec::<String>::new());
+}
+
+#[test]
+fn 外部系統忘了在某環境指定落地() {
+    let mut project = healthy_project();
+
+    // test 環境忘了填金流 sandbox 的位址。
+    project.environments[1].systems.clear();
+
+    let found = summarize(&project);
+    assert_eq!(
+        found,
+        vec![
+            // 外部系統本身沒落地
+            "L001 env-test s-payment",
+            // 連帶那條邏輯連線也沒東西可指
+            "L003 env-test conn-test-pay",
+        ]
+    );
+}
+
+#[test]
+fn 外部系統的endpoint忘了填位址() {
+    let mut project = healthy_project();
+
+    project.environments[1].systems[0].endpoints[0].address = None;
+
+    assert_eq!(summarize(&project), vec!["L006 env-test ep-test-payment"]);
 }
