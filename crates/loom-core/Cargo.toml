@@ -1,0 +1,10 @@
+[package]
+name = "loom-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "diagram-loom 的領域模型、驗證與 lint。不得相依 tauri。"
+
+# ⚠️ 紀律：這個 crate 不准出現 tauri 相依。
+# 領域邏輯必須能用 cargo test 驗證，不需要開視窗。
+[dependencies]
