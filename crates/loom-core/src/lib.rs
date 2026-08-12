@@ -18,6 +18,7 @@
 //! 所以缺漏必須是可以表示的：`Endpoint::address` 是 `Option`、萬用字元的
 //! `expect` 是 `Option`。型別若強制它們存在，對應的 lint 規則就永遠不會觸發。
 
+pub mod batch;
 pub mod environment;
 pub mod id;
 pub mod lint;
