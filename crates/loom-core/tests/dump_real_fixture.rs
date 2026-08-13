@@ -5,21 +5,21 @@
 
 mod common;
 
-use common::real::專案;
+use common::real::project;
 
 #[test]
 #[ignore = "產生器，不是測試。用 mise run fixture:real 執行"]
-fn 產生真實架構樣本() {
-    let project = 專案();
+fn dump_real_fixture() {
+    let project = project();
 
-    let 目的地 =
+    let destination =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/通路系統.loom");
-    if 目的地.exists() {
-        std::fs::remove_dir_all(&目的地).expect("清掉舊的");
+    if destination.exists() {
+        std::fs::remove_dir_all(&destination).expect("清掉舊的");
     }
-    loom_core::repository::save_to_dir(&project, &目的地).expect("寫出樣本");
+    loom_core::repository::save_to_dir(&project, &destination).expect("寫出樣本");
 
-    let 落地數: usize = project
+    let instance_count: usize = project
         .environments
         .iter()
         .map(|e| {
@@ -29,19 +29,19 @@ fn 產生真實架構樣本() {
                 .sum::<usize>()
         })
         .sum();
-    let 連線數: usize = project
+    let connection_count: usize = project
         .environments
         .iter()
         .map(|e| e.connections.len())
         .sum();
 
-    println!("\n已寫出 {}", 目的地.display());
+    println!("\n已寫出 {}", destination.display());
     println!(
         "{} 個服務／{} 條契約／{} 個落地／{} 條連線",
         project.logical.containers.len(),
         project.logical.relationships.len(),
-        落地數,
-        連線數
+        instance_count,
+        connection_count
     );
 
     println!("\nlint：");

@@ -250,8 +250,8 @@ impl Resource {
     ///
     /// 回傳 `&'static str` 是因為復原歷史存的是靜態字串——
     /// 只有這十種乘上三個動詞，列舉得完。
-    pub(crate) fn kind_name_label(&self, 動作: &str) -> &'static str {
-        match (動作, self) {
+    pub(crate) fn kind_name_label(&self, verb: &str) -> &'static str {
+        match (verb, self) {
             ("新增", Resource::Person(_)) => "新增人",
             ("新增", Resource::System(_)) => "新增系統",
             ("新增", Resource::Container(_)) => "新增服務",
@@ -293,13 +293,16 @@ impl Resource {
 /// slug 是**人看的識別**，而萬用字元（`redis-*`）比對的就是它。
 /// 兩個同名的東西會讓 `expect` 數錯，而使用者以為那是兩個不同的東西——
 /// 正好是這個工具要防的誤會。id 是 UUID 不會撞，但 slug 會。
-fn 撞名(existing: impl IntoIterator<Item = (Id, String)>, r: &Resource) -> Result<(), EditError> {
+fn check_slug_unique(
+    existing: impl IntoIterator<Item = (Id, String)>,
+    r: &Resource,
+) -> Result<(), EditError> {
     let slug = r.slug().trim();
     if slug.is_empty() {
         return Err(EditError::EmptySlug(r.kind_name()));
     }
-    for (id, 有的) in existing {
-        if 有的 == slug && &id != r.id() {
+    for (id, taken) in existing {
+        if taken == slug && &id != r.id() {
             return Err(EditError::SlugTaken {
                 kind: r.kind_name(),
                 slug: slug.to_string(),
@@ -310,21 +313,21 @@ fn 撞名(existing: impl IntoIterator<Item = (Id, String)>, r: &Resource) -> Res
 }
 
 pub(crate) fn add(project: &mut Project, r: &Resource) -> Result<(), EditError> {
-    if 找得到(project, r) {
+    if exists(project, r) {
         return Err(EditError::AlreadyExists(r.id().clone()));
     }
-    寫進去(project, r, true)
+    write_into(project, r, true)
 }
 
 pub(crate) fn update(project: &mut Project, r: &Resource) -> Result<(), EditError> {
-    if !找得到(project, r) {
+    if !exists(project, r) {
         return Err(EditError::NoSuchSubject(r.id().clone()));
     }
-    寫進去(project, r, false)
+    write_into(project, r, false)
 }
 
 pub(crate) fn delete(project: &mut Project, r: &Resource) -> Result<(), EditError> {
-    if !找得到(project, r) {
+    if !exists(project, r) {
         return Err(EditError::NoSuchSubject(r.id().clone()));
     }
     let id = r.id().clone();
@@ -348,32 +351,34 @@ pub(crate) fn delete(project: &mut Project, r: &Resource) -> Result<(), EditErro
         }
         Resource::Environment(_) => project.environments.retain(|e| e.id != id),
         Resource::Node { environment, .. } => {
-            let env = 找環境(project, environment)?;
-            移除節點(&mut env.nodes, &id);
+            let env = find_env(project, environment)?;
+            remove_node(&mut env.nodes, &id);
         }
         Resource::Infra { environment, .. } => {
-            找環境(project, environment)?.infra.retain(|n| n.id != id);
+            find_env(project, environment)?.infra.retain(|n| n.id != id);
         }
         Resource::InfraEndpoint {
             environment, node, ..
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             if let Some(n) = env.infra.iter_mut().find(|n| &n.id == node) {
                 n.endpoints.retain(|e| e.id != id);
             }
         }
         Resource::SystemInstance { environment, .. } => {
-            找環境(project, environment)?.systems.retain(|s| s.id != id);
+            find_env(project, environment)?
+                .systems
+                .retain(|s| s.id != id);
         }
     }
     Ok(())
 }
 
 /// 新增與修改共用。`新的` 為 true 時 push，否則就地換掉。
-fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), EditError> {
+fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), EditError> {
     match r {
         Resource::Person(p) => {
-            撞名(
+            check_slug_unique(
                 project
                     .logical
                     .people
@@ -381,10 +386,10 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
                     .map(|x| (x.id.clone(), x.slug.clone())),
                 r,
             )?;
-            換或推(&mut project.logical.people, p.clone(), 新的, |x| &x.id);
+            replace_or_push(&mut project.logical.people, p.clone(), is_new, |x| &x.id);
         }
         Resource::System(s) => {
-            撞名(
+            check_slug_unique(
                 project
                     .logical
                     .systems
@@ -392,10 +397,10 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
                     .map(|x| (x.id.clone(), x.slug.clone())),
                 r,
             )?;
-            換或推(&mut project.logical.systems, s.clone(), 新的, |x| &x.id);
+            replace_or_push(&mut project.logical.systems, s.clone(), is_new, |x| &x.id);
         }
         Resource::Container(c) => {
-            撞名(
+            check_slug_unique(
                 project
                     .logical
                     .containers
@@ -403,12 +408,12 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
                     .map(|x| (x.id.clone(), x.slug.clone())),
                 r,
             )?;
-            換或推(&mut project.logical.containers, c.clone(), 新的, |x| {
+            replace_or_push(&mut project.logical.containers, c.clone(), is_new, |x| {
                 &x.id
             });
         }
         Resource::Relationship(rel) => {
-            撞名(
+            check_slug_unique(
                 project
                     .logical
                     .relationships
@@ -416,10 +421,10 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
                     .map(|x| (x.id.clone(), x.slug.clone())),
                 r,
             )?;
-            換或推(
+            replace_or_push(
                 &mut project.logical.relationships,
                 rel.clone(),
-                新的,
+                is_new,
                 |x| &x.id,
             );
         }
@@ -431,25 +436,25 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
                 .iter_mut()
                 .find(|c| &c.id == owner)
             {
-                撞名(
+                check_slug_unique(
                     c.endpoints.iter().map(|e| (e.id.clone(), e.slug.clone())),
                     r,
                 )?;
-                換或推(&mut c.endpoints, def.clone(), 新的, |x| &x.id);
+                replace_or_push(&mut c.endpoints, def.clone(), is_new, |x| &x.id);
                 return Ok(());
             }
             if let Some(s) = project.logical.systems.iter_mut().find(|s| &s.id == owner) {
-                撞名(
+                check_slug_unique(
                     s.endpoints.iter().map(|e| (e.id.clone(), e.slug.clone())),
                     r,
                 )?;
-                換或推(&mut s.endpoints, def.clone(), 新的, |x| &x.id);
+                replace_or_push(&mut s.endpoints, def.clone(), is_new, |x| &x.id);
                 return Ok(());
             }
             return Err(EditError::NoSuchSubject(owner.clone()));
         }
         Resource::Environment(e) => {
-            撞名(
+            check_slug_unique(
                 project
                     .environments
                     .iter()
@@ -459,9 +464,9 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
             // 環境是整份換掉的，而它裡面裝著機器與連線。修改時只動名字那幾欄，
             // 否則使用者改個名字就會把整個環境的內容清空。
             match project.environments.iter_mut().find(|x| x.id == e.id) {
-                Some(舊的) => {
-                    舊的.slug = e.slug.clone();
-                    舊的.name = e.name.clone();
+                Some(existing) => {
+                    existing.slug = e.slug.clone();
+                    existing.name = e.name.clone();
                 }
                 None => project.environments.push(e.clone()),
             }
@@ -471,30 +476,30 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
             within,
             node,
         } => {
-            let env = 找環境(project, environment)?;
-            撞名(所有節點(&env.nodes), r)?;
+            let env = find_env(project, environment)?;
+            check_slug_unique(all_nodes(&env.nodes), r)?;
             // 改的時候只動這個節點自己的欄位，不要連子節點與落地一起換掉。
-            if let Some(舊的) = 找節點(&mut env.nodes, &node.id) {
-                舊的.slug = node.slug.clone();
-                舊的.kind = node.kind;
+            if let Some(existing) = find_node(&mut env.nodes, &node.id) {
+                existing.slug = node.slug.clone();
+                existing.kind = node.kind;
                 return Ok(());
             }
-            let 放進去 = match within {
+            let parent_children = match within {
                 None => &mut env.nodes,
                 Some(parent) => {
-                    &mut 找節點(&mut env.nodes, parent)
+                    &mut find_node(&mut env.nodes, parent)
                         .ok_or_else(|| EditError::NoSuchSubject(parent.clone()))?
                         .children
                 }
             };
-            放進去.push(node.clone());
+            parent_children.push(node.clone());
         }
         Resource::Infra { environment, node } => {
-            let env = 找環境(project, environment)?;
-            撞名(env.infra.iter().map(|n| (n.id.clone(), n.slug.clone())), r)?;
+            let env = find_env(project, environment)?;
+            check_slug_unique(env.infra.iter().map(|n| (n.id.clone(), n.slug.clone())), r)?;
             match env.infra.iter_mut().find(|n| n.id == node.id) {
                 // 同理：改名不該把它身上的 VIP 清掉。
-                Some(舊的) => 舊的.slug = node.slug.clone(),
+                Some(existing) => existing.slug = node.slug.clone(),
                 None => env.infra.push(node.clone()),
             }
         }
@@ -503,32 +508,32 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
             node,
             endpoint,
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             let n = env
                 .infra
                 .iter_mut()
                 .find(|n| &n.id == node)
                 .ok_or_else(|| EditError::NoSuchSubject(node.clone()))?;
-            撞名(
+            check_slug_unique(
                 n.endpoints.iter().map(|e| (e.id.clone(), e.slug.clone())),
                 r,
             )?;
-            換或推(&mut n.endpoints, endpoint.clone(), 新的, |x| &x.id);
+            replace_or_push(&mut n.endpoints, endpoint.clone(), is_new, |x| &x.id);
         }
         Resource::SystemInstance {
             environment,
             instance,
         } => {
-            let env = 找環境(project, environment)?;
-            撞名(
+            let env = find_env(project, environment)?;
+            check_slug_unique(
                 env.systems.iter().map(|s| (s.id.clone(), s.slug.clone())),
                 r,
             )?;
             match env.systems.iter_mut().find(|s| s.id == instance.id) {
-                Some(舊的) => {
-                    舊的.slug = instance.slug.clone();
-                    舊的.system = instance.system.clone();
-                    舊的.standalone = instance.standalone;
+                Some(existing) => {
+                    existing.slug = instance.slug.clone();
+                    existing.system = instance.system.clone();
+                    existing.standalone = instance.standalone;
                 }
                 None => env.systems.push(instance.clone()),
             }
@@ -537,18 +542,18 @@ fn 寫進去(project: &mut Project, r: &Resource, 新的: bool) -> Result<(), Ed
     Ok(())
 }
 
-fn 換或推<T: Clone>(v: &mut Vec<T>, 新值: T, 是新的: bool, id: impl Fn(&T) -> &Id) {
-    if 是新的 {
-        v.push(新值);
+fn replace_or_push<T: Clone>(v: &mut Vec<T>, value: T, is_new: bool, id: impl Fn(&T) -> &Id) {
+    if is_new {
+        v.push(value);
         return;
     }
-    let 目標 = id(&新值).clone();
-    if let Some(slot) = v.iter_mut().find(|x| id(x) == &目標) {
-        *slot = 新值;
+    let target = id(&value).clone();
+    if let Some(slot) = v.iter_mut().find(|x| id(x) == &target) {
+        *slot = value;
     }
 }
 
-fn 找得到(project: &Project, r: &Resource) -> bool {
+fn exists(project: &Project, r: &Resource) -> bool {
     let id = r.id();
     match r {
         Resource::Person(_) => project.logical.people.iter().any(|x| &x.id == id),
@@ -556,24 +561,24 @@ fn 找得到(project: &Project, r: &Resource) -> bool {
         Resource::Container(_) => project.logical.containers.iter().any(|x| &x.id == id),
         Resource::Relationship(_) => project.logical.relationships.iter().any(|x| &x.id == id),
         Resource::EndpointDef { owner, .. } => {
-            let 在服務上 = project
+            let on_container = project
                 .logical
                 .containers
                 .iter()
                 .filter(|c| &c.id == owner)
                 .any(|c| c.endpoints.iter().any(|e| &e.id == id));
-            let 在系統上 = project
+            let on_system = project
                 .logical
                 .systems
                 .iter()
                 .filter(|s| &s.id == owner)
                 .any(|s| s.endpoints.iter().any(|e| &e.id == id));
-            在服務上 || 在系統上
+            on_container || on_system
         }
         Resource::Environment(_) => project.environments.iter().any(|e| &e.id == id),
         Resource::Node { environment, .. } => project
             .environment(environment)
-            .is_some_and(|env| 所有節點(&env.nodes).into_iter().any(|(i, _)| &i == id)),
+            .is_some_and(|env| all_nodes(&env.nodes).into_iter().any(|(i, _)| &i == id)),
         Resource::Infra { environment, .. } => project
             .environment(environment)
             .is_some_and(|env| env.infra.iter().any(|n| &n.id == id)),
@@ -591,21 +596,21 @@ fn 找得到(project: &Project, r: &Resource) -> bool {
     }
 }
 
-fn 所有節點(nodes: &[DeploymentNode]) -> Vec<(Id, String)> {
+fn all_nodes(nodes: &[DeploymentNode]) -> Vec<(Id, String)> {
     let mut out = Vec::new();
     for n in nodes {
         out.push((n.id.clone(), n.slug.clone()));
-        out.extend(所有節點(&n.children));
+        out.extend(all_nodes(&n.children));
     }
     out
 }
 
-fn 找節點<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
+fn find_node<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
     for node in nodes {
         if &node.id == id {
             return Some(node);
         }
-        if let Some(found) = 找節點(&mut node.children, id) {
+        if let Some(found) = find_node(&mut node.children, id) {
             return Some(found);
         }
     }
@@ -613,14 +618,14 @@ fn 找節點<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut Dep
 }
 
 /// 刪節點連子孫一起走——它們本來就住在裡面，不是「參照」。
-fn 移除節點(nodes: &mut Vec<DeploymentNode>, id: &Id) {
+fn remove_node(nodes: &mut Vec<DeploymentNode>, id: &Id) {
     nodes.retain(|n| &n.id != id);
     for n in nodes {
-        移除節點(&mut n.children, id);
+        remove_node(&mut n.children, id);
     }
 }
 
-fn 找環境<'a>(project: &'a mut Project, id: &Id) -> Result<&'a mut Environment, EditError> {
+fn find_env<'a>(project: &'a mut Project, id: &Id) -> Result<&'a mut Environment, EditError> {
     project
         .environments
         .iter_mut()

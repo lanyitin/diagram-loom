@@ -25,148 +25,148 @@ import type { BatchPlan, BatchSpec, DeploymentNode, Id, NodeKind } from '../lib/
 
 const store = useProject()
 
-const 數量 = ref(3)
-const 名稱樣板 = ref('')
-const 機器樣板 = ref('')
-const 起始 = ref(1)
-const 補零 = ref(2)
-const 位址樣板 = ref('')
-const 位址起始 = ref(11)
-const 機器種類 = ref<NodeKind>('virtual-machine')
-const 接點 = ref<Id | null>(null)
-const 放在 = ref<Id | null>(null)
+const count = ref(3)
+const nameTemplate = ref('')
+const nodeTemplate = ref('')
+const start = ref(1)
+const pad = ref(2)
+const addressTemplate = ref('')
+const ipStart = ref(11)
+const nodeKind = ref<NodeKind>('virtual-machine')
+const endpointDef = ref<Id | null>(null)
+const within = ref<Id | null>(null)
 
 const plan = ref<BatchPlan | null>(null)
-const 擋下來的 = ref<string | null>(null)
+const blocked = ref<string | null>(null)
 
 /** 那個服務的接點定義。挑哪一個是使用者的事，但清單來自模型。 */
-const 接點們 = computed(() => {
-  const c = store.新增機器中?.container
+const endpointDefs = computed(() => {
+  const c = store.addingInstances?.container
   return store.snapshot?.project.logical.containers.find((x) => x.id === c)?.endpoints ?? []
 })
 
 /** 可以掛在底下的既有節點（通常是站點）。攤平成一層，縮排表示層級。 */
-const 可放的節點 = computed(() => {
-  const env = store.環境.find((e) => e.id === store.新增機器中?.environment)
+const placeableNodes = computed(() => {
+  const env = store.environments.find((e) => e.id === store.addingInstances?.environment)
   const out: { id: Id; label: string }[] = []
-  const 走 = (nodes: DeploymentNode[], 深: number) => {
+  const walk = (nodes: DeploymentNode[], depth: number) => {
     for (const n of nodes) {
-      out.push({ id: n.id, label: `${'　'.repeat(深)}${n.slug}` })
-      走(n.children ?? [], 深 + 1)
+      out.push({ id: n.id, label: `${'　'.repeat(depth)}${n.slug}` })
+      walk(n.children ?? [], depth + 1)
     }
   }
-  走(env?.nodes ?? [], 0)
+  walk(env?.nodes ?? [], 0)
   return out
 })
 
 watch(
-  () => store.新增機器中,
-  (要建的) => {
+  () => store.addingInstances,
+  (pending) => {
     plan.value = null
-    擋下來的.value = null
-    if (!要建的) return
+    blocked.value = null
+    if (!pending) return
 
     const slug = store.snapshot?.project.logical.containers
-      .find((c) => c.id === 要建的.container)?.slug ?? 'node'
-    數量.value = 3
-    名稱樣板.value = `${slug}-{n}`
-    機器樣板.value = `vm-${slug}-{n}`
-    起始.value = 1
-    補零.value = 2
-    位址樣板.value = '10.0.0.{ip}:0'
-    位址起始.value = 11
-    機器種類.value = 'virtual-machine'
-    接點.value = 接點們.value[0]?.id ?? null
-    放在.value = null
+      .find((c) => c.id === pending.container)?.slug ?? 'node'
+    count.value = 3
+    nameTemplate.value = `${slug}-{n}`
+    nodeTemplate.value = `vm-${slug}-{n}`
+    start.value = 1
+    pad.value = 2
+    addressTemplate.value = '10.0.0.{ip}:0'
+    ipStart.value = 11
+    nodeKind.value = 'virtual-machine'
+    endpointDef.value = endpointDefs.value[0]?.id ?? null
+    within.value = null
     // 開起來就先算一次。下面那個 watch 只看得到欄位「變動」，
     // 而剛填好預設值的這一刻它還沒被建立。
-    void 重算()
+    void recompute()
   },
   { immediate: true },
 )
 
 /** 每次改動都重算。判斷全在 Rust——撞名、接點對不對，都不是這裡說了算。 */
-async function 重算() {
-  const 要建的 = store.新增機器中
-  const def = 接點.value
-  if (!要建的 || !def) return
+async function recompute() {
+  const pending = store.addingInstances
+  const def = endpointDef.value
+  if (!pending || !def) return
 
-  const spec = 規格(def)
-  const 回應 = await commands.previewBatch(要建的.environment, spec)
-  if (回應.status === 'ok') {
-    plan.value = 回應.data
-    擋下來的.value = null
+  const spec = buildSpec(def)
+  const res = await commands.previewBatch(pending.environment, spec)
+  if (res.status === 'ok') {
+    plan.value = res.data
+    blocked.value = null
   } else {
     plan.value = null
-    擋下來的.value = (回應.error as { message?: string })?.message ?? String(回應.error)
+    blocked.value = (res.error as { message?: string })?.message ?? String(res.error)
   }
 }
 
-function 規格(def: Id): BatchSpec {
-  const ep = 接點們.value.find((e) => e.id === def)
+function buildSpec(def: Id): BatchSpec {
+  const ep = endpointDefs.value.find((e) => e.id === def)
   return {
-    count: 數量.value,
-    nameTemplate: 名稱樣板.value,
-    nodeTemplate: 機器樣板.value,
-    start: 起始.value,
-    pad: 補零.value,
-    addressTemplate: 位址樣板.value,
-    ipStart: 位址起始.value,
-    nodeKind: 機器種類.value,
-    container: store.新增機器中!.container,
+    count: count.value,
+    nameTemplate: nameTemplate.value,
+    nodeTemplate: nodeTemplate.value,
+    start: start.value,
+    pad: pad.value,
+    addressTemplate: addressTemplate.value,
+    ipStart: ipStart.value,
+    nodeKind: nodeKind.value,
+    container: store.addingInstances!.container,
     endpoint: { def, slug: ep?.slug ?? 'port', protocol: ep?.protocol ?? 'tcp' },
   }
 }
 
 watch(
-  [數量, 名稱樣板, 機器樣板, 起始, 補零, 位址樣板, 位址起始, 機器種類, 接點],
-  () => void 重算(),
+  [count, nameTemplate, nodeTemplate, start, pad, addressTemplate, ipStart, nodeKind, endpointDef],
+  () => void recompute(),
 )
 
-async function 建立() {
-  const 要建的 = store.新增機器中
-  if (!要建的 || !plan.value) return
+async function create() {
+  const pending = store.addingInstances
+  if (!pending || !plan.value) return
   const nodes = plan.value.nodes
-  store.新增機器中 = null
-  await store.套用編輯({
-    addInstances: { environment: 要建的.environment, within: 放在.value, nodes },
+  store.addingInstances = null
+  await store.applyEdit({
+    addInstances: { environment: pending.environment, within: within.value, nodes },
   })
 }
 </script>
 
 <template>
-  <div v-if="store.新增機器中" class="scrim" @click.self="store.新增機器中 = null">
+  <div v-if="store.addingInstances" class="scrim" @click.self="store.addingInstances = null">
     <section class="box" role="dialog" aria-modal="true">
       <h2>批次建立機器</h2>
       <p class="muted sub">
-        <span class="mono">{{ store.新增機器中.label }}</span>
-        ・{{ store.環境名(store.新增機器中.environment) }}
+        <span class="mono">{{ store.addingInstances.label }}</span>
+        ・{{ store.envName(store.addingInstances.environment) }}
       </p>
 
       <div class="grid">
-        <label>數量<input v-model.number="數量" type="number" min="1"></label>
-        <label>起始序號<input v-model.number="起始" type="number" min="0"></label>
-        <label>補零位數<input v-model.number="補零" type="number" min="0"></label>
-        <label class="wide">服務名稱樣板<input v-model="名稱樣板" type="text" class="mono"></label>
-        <label class="wide">機器名稱樣板<input v-model="機器樣板" type="text" class="mono"></label>
-        <label class="wide">位址樣板<input v-model="位址樣板" type="text" class="mono"></label>
-        <label>位址起始<input v-model.number="位址起始" type="number" min="0"></label>
+        <label>數量<input v-model.number="count" type="number" min="1"></label>
+        <label>起始序號<input v-model.number="start" type="number" min="0"></label>
+        <label>補零位數<input v-model.number="pad" type="number" min="0"></label>
+        <label class="wide">服務名稱樣板<input v-model="nameTemplate" type="text" class="mono"></label>
+        <label class="wide">機器名稱樣板<input v-model="nodeTemplate" type="text" class="mono"></label>
+        <label class="wide">位址樣板<input v-model="addressTemplate" type="text" class="mono"></label>
+        <label>位址起始<input v-model.number="ipStart" type="number" min="0"></label>
         <label>機器種類
-          <select v-model="機器種類">
+          <select v-model="nodeKind">
             <option value="virtual-machine">虛擬機</option>
             <option value="physical">實體機</option>
             <option value="linux-container">Linux 容器</option>
           </select>
         </label>
         <label>接點
-          <select v-model="接點">
-            <option v-for="e in 接點們" :key="e.id" :value="e.id">{{ e.slug }}</option>
+          <select v-model="endpointDef">
+            <option v-for="e in endpointDefs" :key="e.id" :value="e.id">{{ e.slug }}</option>
           </select>
         </label>
         <label class="wide">放在哪個節點底下
-          <select v-model="放在">
+          <select v-model="within">
             <option :value="null">（環境最上層）</option>
-            <option v-for="n in 可放的節點" :key="n.id" :value="n.id">{{ n.label }}</option>
+            <option v-for="n in placeableNodes" :key="n.id" :value="n.id">{{ n.label }}</option>
           </select>
         </label>
       </div>
@@ -178,7 +178,7 @@ async function 建立() {
       </p>
 
       <!-- 一次建六台是會後悔的操作，按下去之前就要看到那六行。 -->
-      <p v-if="擋下來的" class="blocked">{{ 擋下來的 }}</p>
+      <p v-if="blocked" class="blocked">{{ blocked }}</p>
       <ul v-else-if="plan" class="preview">
         <li v-for="(line, i) in plan.preview" :key="i" class="mono">{{ line }}</li>
       </ul>
@@ -186,8 +186,8 @@ async function 建立() {
       <footer>
         <span class="muted hint">建錯了可以按 ⌘Z 整批復原</span>
         <span class="grow" />
-        <button @click="store.新增機器中 = null">取消</button>
-        <button class="primary" :disabled="!plan" @click="建立()">
+        <button @click="store.addingInstances = null">取消</button>
+        <button class="primary" :disabled="!plan" @click="create()">
           建立 {{ plan?.nodes.length ?? 0 }} 台
         </button>
       </footer>

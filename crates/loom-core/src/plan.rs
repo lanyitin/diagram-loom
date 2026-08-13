@@ -80,17 +80,17 @@ pub struct Plan {
 /// 回傳計畫**與套用後的專案**。前端按下套用時直接用後者，
 /// 不必再跑一次——再跑一次就有可能得到不一樣的結果（例如新產生的 UUID）。
 pub fn plan(project: &Project, sheet: &Sheet) -> Result<(Plan, Project), ImportError> {
-    let 之前 = 清單(project);
+    let before = inventory_of(project);
 
-    let mut 之後專案 = project.clone();
-    let report = import(&mut 之後專案, sheet)?;
-    let 之後 = 清單(&之後專案);
+    let mut after_project = project.clone();
+    let report = import(&mut after_project, sheet)?;
+    let after = inventory_of(&after_project);
 
     let mut changes = Vec::new();
     let mut unchanged = 0u32;
 
-    for (key, (element, label, after)) in &之後 {
-        match 之前.get(key) {
+    for (key, (element, label, after)) in &after {
+        match before.get(key) {
             None => changes.push(Change {
                 kind: ChangeKind::Added,
                 element: *element,
@@ -117,32 +117,32 @@ pub fn plan(project: &Project, sheet: &Sheet) -> Result<(Plan, Project), ImportE
             changes,
             unchanged,
             warnings: report.warnings.iter().map(|w| w.to_string()).collect(),
-            environments: 動到的環境(sheet),
+            environments: touched_environments(sheet),
         },
-        之後專案,
+        after_project,
     ))
 }
 
 /// 這張表提到哪些環境。讓使用者在套用前就知道範圍。
-fn 動到的環境(sheet: &Sheet) -> Vec<String> {
-    let mut 見過: Vec<String> = Vec::new();
+fn touched_environments(sheet: &Sheet) -> Vec<String> {
+    let mut seen: Vec<String> = Vec::new();
     for row in 0..sheet.row_count() {
         let v = sheet.value(row, "environment").trim();
-        if !v.is_empty() && !見過.iter().any(|s| s == v) {
-            見過.push(v.to_string());
+        if !v.is_empty() && !seen.iter().any(|s| s == v) {
+            seen.push(v.to_string());
         }
     }
-    見過
+    seen
 }
 
 /// 把整個專案攤成「路徑 → (種類, 顯示名, 值)」。
 ///
 /// 鍵用 slug 組成而不是 UUID——UUID 每次匯入都會不一樣，用它比對的話
 /// 什麼都會變成「新增」。slug 才是使用者心中的身分。
-type 清單型 = BTreeMap<String, (Element, String, String)>;
+type Inventory = BTreeMap<String, (Element, String, String)>;
 
-fn 清單(p: &Project) -> 清單型 {
-    let mut out: 清單型 = BTreeMap::new();
+fn inventory_of(p: &Project) -> Inventory {
+    let mut out: Inventory = BTreeMap::new();
 
     for c in &p.logical.containers {
         out.insert(
@@ -176,7 +176,7 @@ fn 清單(p: &Project) -> 清單型 {
         );
 
         for node in &env.nodes {
-            節點清單(&mut out, e, node);
+            node_list(&mut out, e, node);
         }
 
         for infra in &env.infra {
@@ -214,19 +214,19 @@ fn 清單(p: &Project) -> 清單型 {
         for conn in &env.connections {
             // 連線沒有名字，身分是「服務哪條契約 + 兩端接到哪」——
             // 跟 importer 判斷 upsert 的依據必須一致，否則預覽會跟實際對不上。
-            let 契約 = p
+            let relationship_id = p
                 .logical
                 .relationships
                 .iter()
                 .find(|r| r.id == conn.serves)
                 .map(|r| r.slug.clone())
                 .unwrap_or_else(|| conn.serves.to_string());
-            let 身分 = format!("{契約}|{:?}|{:?}", conn.from, conn.to);
+            let identity = format!("{relationship_id}|{:?}|{:?}", conn.from, conn.to);
             out.insert(
-                format!("環境/{e}/連線/{身分}"),
+                format!("環境/{e}/連線/{identity}"),
                 (
                     Element::Connection,
-                    format!("{e}／{契約}"),
+                    format!("{e}／{relationship_id}"),
                     conn.purpose.clone(),
                 ),
             );
@@ -236,7 +236,7 @@ fn 清單(p: &Project) -> 清單型 {
     out
 }
 
-fn 節點清單(out: &mut 清單型, env: &str, node: &crate::environment::DeploymentNode) {
+fn node_list(out: &mut Inventory, env: &str, node: &crate::environment::DeploymentNode) {
     out.insert(
         format!("環境/{env}/機器/{}", node.slug),
         (
@@ -268,6 +268,6 @@ fn 節點清單(out: &mut 清單型, env: &str, node: &crate::environment::Deplo
     }
 
     for child in &node.children {
-        節點清單(out, env, child);
+        node_list(out, env, child);
     }
 }

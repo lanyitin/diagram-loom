@@ -87,8 +87,8 @@ pub fn propose(project: &Project, env: &Environment, relationship: &Id) -> Optio
         .find(|r| &r.id == relationship)?;
 
     let mut notes = Vec::new();
-    let from = 一端(project, env, &rel.from, None, &mut notes, "來源");
-    let to = 一端(
+    let from = resolve_end(project, env, &rel.from, None, &mut notes, "來源");
+    let to = resolve_end(
         project,
         env,
         &rel.to,
@@ -104,7 +104,7 @@ pub fn propose(project: &Project, env: &Environment, relationship: &Id) -> Optio
     Some(Proposal {
         id: Id::generate(),
         serves: rel.id.clone(),
-        purpose: 用途(rel),
+        purpose: purpose_of(rel),
         from,
         to,
         notes,
@@ -113,17 +113,17 @@ pub fn propose(project: &Project, env: &Environment, relationship: &Id) -> Optio
 
 /// 環境層的連線需要自己的用途說明；契約的用途是最好的起點，
 /// 直接沿用比留白好——留白只會換來一個 L007。
-fn 用途(rel: &Relationship) -> String {
+fn purpose_of(rel: &Relationship) -> String {
     rel.purpose.trim().to_string()
 }
 
-fn 一端(
+fn resolve_end(
     project: &Project,
     env: &Environment,
     end: &RelationshipEnd,
     endpoint: Option<&Id>,
     notes: &mut Vec<String>,
-    哪端: &str,
+    which_end: &str,
 ) -> Option<Endpointing> {
     match end {
         RelationshipEnd::Person(person) => Some(Endpointing::Person {
@@ -131,12 +131,12 @@ fn 一端(
         }),
 
         RelationshipEnd::System(system) => {
-            let 落地: Vec<&SoftwareSystemInstance> =
+            let instance_of: Vec<&SoftwareSystemInstance> =
                 env.systems.iter().filter(|s| &s.system == system).collect();
-            match 落地.as_slice() {
+            match instance_of.as_slice() {
                 [] => {
                     notes.push(format!(
-                        "{哪端}的外部系統在 {} 沒有指定落地位址，要先補上。",
+                        "{which_end}的外部系統在 {} 沒有指定落地位址，要先補上。",
                         env.slug
                     ));
                     None
@@ -148,7 +148,7 @@ fn 一端(
                 many => {
                     // 一個外部系統在一個環境就是一個落地，多個代表資料有問題。
                     notes.push(format!(
-                        "{哪端}的外部系統在 {} 有 {} 個落地，先挑了第一個。",
+                        "{which_end}的外部系統在 {} 有 {} 個落地，先挑了第一個。",
                         env.slug,
                         many.len()
                     ));
@@ -161,13 +161,13 @@ fn 一端(
         }
 
         RelationshipEnd::Container(container) => {
-            let 落地: Vec<&ContainerInstance> = env
+            let instance_of: Vec<&ContainerInstance> = env
                 .instances()
                 .into_iter()
                 .filter(|i| &i.container == container)
                 .collect();
 
-            match 落地.as_slice() {
+            match instance_of.as_slice() {
                 [] => {
                     let slug = project
                         .logical
@@ -175,7 +175,7 @@ fn 一端(
                         .map(|c| c.slug.clone())
                         .unwrap_or_else(|| container.to_string());
                     notes.push(format!(
-                        "{哪端}的服務 {slug} 在 {} 一台都還沒建，要先建機器。",
+                        "{which_end}的服務 {slug} 在 {} 一台都還沒建，要先建機器。",
                         env.slug
                     ));
                     None
@@ -185,7 +185,7 @@ fn 一端(
                     endpoint: endpoint.cloned(),
                 }),
                 many => Some(Endpointing::Instance {
-                    target: 一整群(project, env, container, many, notes, 哪端),
+                    target: as_pattern(project, env, container, many, notes, which_end),
                     endpoint: endpoint.cloned(),
                 }),
             }
@@ -197,53 +197,62 @@ fn 一端(
 ///
 /// 列出每一台會產生 N 條連線，之後每加一台機器都要記得補一條——
 /// 那正是「怕漏」要防的事。萬用字元加 `expect` 才會在少一台時叫。
-fn 一整群(
+fn as_pattern(
     project: &Project,
     env: &Environment,
     container: &Id,
-    落地: &[&ContainerInstance],
+    instance_of: &[&ContainerInstance],
     notes: &mut Vec<String>,
-    哪端: &str,
+    which_end: &str,
 ) -> InstanceRef {
-    let slug_pattern = 樣式(project, container, 落地);
-    let 實際抓到 = env.instances_matching(&slug_pattern).len();
+    let slug_pattern = pattern_for(project, container, instance_of);
+    let actually_matched = env.instances_matching(&slug_pattern).len();
 
     // 樣式抓到的若不是這群，就會安靜地把別的機器也算進去。講出來，
     // 而且 `expect` 仍然寫使用者要的數量——讓 lint 去叫，不要自己吞掉。
-    if 實際抓到 != 落地.len() {
+    if actually_matched != instance_of.len() {
         notes.push(format!(
-            "{哪端}的樣式 {slug_pattern} 在 {} 會抓到 {實際抓到} 台，但這個服務只有 {} 台。請改寫樣式。",
+            "{which_end}的樣式 {slug_pattern} 在 {} 會抓到 {actually_matched} 台，但這個服務只有 {} 台。請改寫樣式。",
             env.slug,
-            落地.len()
+            instance_of.len()
         ));
     }
 
     InstanceRef::Pattern {
         slug_pattern,
         within: None,
-        expect: Some(落地.len() as u32),
+        expect: Some(instance_of.len() as u32),
     }
 }
 
 /// 先試「服務名 + `-*`」，抓不準就退回這幾台 slug 的共同前綴。
-fn 樣式(project: &Project, container: &Id, 落地: &[&ContainerInstance]) -> String {
+fn pattern_for(project: &Project, container: &Id, instance_of: &[&ContainerInstance]) -> String {
     if let Some(c) = project.logical.container(container) {
-        let 候選 = format!("{}-*", c.slug);
-        if 落地.iter().all(|i| crate::pattern::matches(&候選, &i.slug)) {
-            return 候選;
+        let candidate = format!("{}-*", c.slug);
+        if instance_of
+            .iter()
+            .all(|i| crate::pattern::matches(&candidate, &i.slug))
+        {
+            return candidate;
         }
     }
-    format!("{}*", 共同前綴(落地))
+    format!("{}*", common_prefix(instance_of))
 }
 
-fn 共同前綴(落地: &[&ContainerInstance]) -> String {
-    let mut prefix: Vec<char> = 落地
+fn common_prefix(instance_of: &[&ContainerInstance]) -> String {
+    let mut prefix: Vec<char> = instance_of
         .first()
         .map(|i| i.slug.chars().collect())
         .unwrap_or_default();
-    for i in 落地.iter().skip(1) {
-        let 這台: Vec<char> = i.slug.chars().collect();
-        prefix.truncate(prefix.iter().zip(&這台).take_while(|(a, b)| a == b).count());
+    for i in instance_of.iter().skip(1) {
+        let this_one: Vec<char> = i.slug.chars().collect();
+        prefix.truncate(
+            prefix
+                .iter()
+                .zip(&this_one)
+                .take_while(|(a, b)| a == b)
+                .count(),
+        );
     }
     prefix.into_iter().collect()
 }
@@ -261,13 +270,13 @@ pub fn choices(
     end: crate::environment::ConnectionEnd,
 ) -> Vec<Choice> {
     use crate::environment::ConnectionEnd;
-    let 來源 = end == ConnectionEnd::From;
+    let source = end == ConnectionEnd::From;
     let mut out = Vec::new();
 
     for instance in env.instances() {
-        let 服務 = project.logical.container(&instance.container);
+        let container_of = project.logical.container(&instance.container);
 
-        if 來源 {
+        if source {
             out.push(Choice {
                 kind: SideKind::Instance,
                 label: format!("{}（不指定接點）", instance.slug),
@@ -281,7 +290,10 @@ pub fn choices(
 
         // 接點列的是**邏輯層的定義**，不是這一台的具體 endpoint——
         // 萬用字元會展開成多台，只有定義才是它們共通的東西。
-        for def in 服務.map(|c| c.endpoints.as_slice()).unwrap_or_default() {
+        for def in container_of
+            .map(|c| c.endpoints.as_slice())
+            .unwrap_or_default()
+        {
             out.push(Choice {
                 kind: SideKind::Instance,
                 label: format!("{} : {}", instance.slug, def.slug),
@@ -296,16 +308,16 @@ pub fn choices(
 
     // 整群：同一個服務有多台時才有意義。
     for container in &project.logical.containers {
-        let 落地: Vec<&ContainerInstance> = env
+        let instance_of: Vec<&ContainerInstance> = env
             .instances()
             .into_iter()
             .filter(|i| i.container == container.id)
             .collect();
-        if 落地.len() < 2 {
+        if instance_of.len() < 2 {
             continue;
         }
         let mut notes = Vec::new();
-        let target = 一整群(project, env, &container.id, &落地, &mut notes, "");
+        let target = as_pattern(project, env, &container.id, &instance_of, &mut notes, "");
         let InstanceRef::Pattern { slug_pattern, .. } = &target else {
             continue;
         };
@@ -313,7 +325,7 @@ pub fn choices(
         for def in &container.endpoints {
             out.push(Choice {
                 kind: SideKind::Instance,
-                label: format!("{slug_pattern} : {}（{} 台）", def.slug, 落地.len()),
+                label: format!("{slug_pattern} : {}（{} 台）", def.slug, instance_of.len()),
                 group: "服務（整群）".into(),
                 endpointing: Endpointing::Instance {
                     target: target.clone(),
@@ -361,7 +373,7 @@ pub fn choices(
     }
 
     // 人只會是流量的起點，所以目標端不列。
-    if 來源 {
+    if source {
         for person in &project.logical.people {
             out.push(Choice {
                 kind: SideKind::Person,

@@ -13,7 +13,7 @@ use loom_core::id::Id;
 use loom_core::lint::{Severity, lint};
 
 #[test]
-fn 健康的專案整張矩陣都是綠的() {
+fn a_healthy_project_has_an_all_green_matrix() {
     let project = healthy_project();
     let m = coverage(&project);
 
@@ -21,16 +21,19 @@ fn 健康的專案整張矩陣都是綠的() {
     assert_eq!(m.environments.len(), 3);
     assert_eq!(m.cells.len(), 6, "矩陣應該是 2 條契約 × 3 個環境");
 
-    let 不綠的: Vec<_> = m
+    let not_green: Vec<_> = m
         .cells
         .iter()
         .filter(|c| c.status != Status::Realized)
         .collect();
-    assert!(不綠的.is_empty(), "健康的專案卻有格子不是綠的：{不綠的:?}");
+    assert!(
+        not_green.is_empty(),
+        "健康的專案卻有格子不是綠的：{not_green:?}"
+    );
 }
 
 #[test]
-fn 同一條契約在不同環境的段數與台數會不一樣() {
+fn one_contract_has_different_hops_and_counts_per_environment() {
     let project = healthy_project();
     let m = coverage(&project);
 
@@ -44,7 +47,7 @@ fn 同一條契約在不同環境的段數與台數會不一樣() {
 }
 
 #[test]
-fn 走f5時台數看的是最後一段不是第一段() {
+fn through_an_f5_the_count_comes_from_the_last_hop() {
     // 第一段的目標是 F5 設備，數量沒有意義；真正抵達的是最後一段。
     let project = healthy_project();
     let m = coverage(&project);
@@ -55,7 +58,7 @@ fn 走f5時台數看的是最後一段不是第一段() {
 }
 
 #[test]
-fn 整個環境沒實現的契約會是_missing_不是_broken() {
+fn an_unrealised_contract_is_missing_not_broken() {
     // 這是使用者最怕的那一格，必須跟「有畫但畫錯」分得開。
     let mut project = healthy_project();
     project.environments[2]
@@ -69,12 +72,12 @@ fn 整個環境沒實現的契約會是_missing_不是_broken() {
     assert_eq!(dev.segments, 0);
     assert_eq!(dev.targets, 0);
 
-    let 缺的: Vec<_> = m.missing().collect();
-    assert_eq!(缺的.len(), 1, "只有這一格該是缺的：{缺的:?}");
+    let missing: Vec<_> = m.missing().collect();
+    assert_eq!(missing.len(), 1, "只有這一格該是缺的：{missing:?}");
 }
 
 #[test]
-fn 少建一台機器會讓那一格變成_broken() {
+fn one_missing_node_turns_the_cell_broken() {
     let mut project = healthy_project();
     project.environments[0]
         .nodes
@@ -89,7 +92,7 @@ fn 少建一台機器會讓那一格變成_broken() {
 }
 
 #[test]
-fn 只是警告的話不會被當成錯誤() {
+fn a_warning_is_not_treated_as_an_error() {
     let mut project = healthy_project();
     let prod = &mut project.environments[0];
     if let Endpointing::Instance { target, .. } = &mut prod.connections[1].to
@@ -104,7 +107,7 @@ fn 只是警告的話不會被當成錯誤() {
 }
 
 #[test]
-fn 矩陣的狀態不會跟_lint_面板互相矛盾() {
+fn the_matrix_never_contradicts_the_lint_panel() {
     // 這是整份測試最重要的一條。
     //
     // 矩陣與 lint 面板是同一份資料的兩種排法。如果它們對「這個環境有沒有問題」
@@ -123,7 +126,7 @@ fn 矩陣的狀態不會跟_lint_面板互相矛盾() {
 
     for cell in &m.cells {
         // lint 認為這條契約在這個環境有沒有錯？
-        let 這格的連線: Vec<&Id> = project
+        let cell_connections: Vec<&Id> = project
             .environments
             .iter()
             .find(|e| e.id == cell.environment)
@@ -134,30 +137,30 @@ fn 矩陣的狀態不會跟_lint_面板互相矛盾() {
             .map(|c| &c.id)
             .collect();
 
-        let lint_有話說 = findings.iter().any(|f| {
+        let lint_has_something_to_say = findings.iter().any(|f| {
             f.environment.as_ref() == Some(&cell.environment)
-                && (f.subject == cell.relationship || 這格的連線.contains(&&f.subject))
+                && (f.subject == cell.relationship || cell_connections.contains(&&f.subject))
         });
-        let lint_有錯 = findings.iter().any(|f| {
+        let lint_errors = findings.iter().any(|f| {
             f.environment.as_ref() == Some(&cell.environment)
                 && f.severity() == Severity::Error
-                && (f.subject == cell.relationship || 這格的連線.contains(&&f.subject))
+                && (f.subject == cell.relationship || cell_connections.contains(&&f.subject))
         });
 
         match cell.status {
             Status::Realized => assert!(
-                !lint_有話說,
+                !lint_has_something_to_say,
                 "矩陣說 {:?} / {:?} 沒事，lint 卻有話說",
                 cell.relationship, cell.environment
             ),
             Status::Warning => assert!(
-                lint_有話說 && !lint_有錯,
+                lint_has_something_to_say && !lint_errors,
                 "矩陣說 {:?} / {:?} 只是警告，但 lint 說的不是這樣",
                 cell.relationship,
                 cell.environment
             ),
             Status::Broken | Status::Missing => assert!(
-                lint_有錯,
+                lint_errors,
                 "矩陣說 {:?} / {:?} 有錯，lint 卻沒報錯",
                 cell.relationship, cell.environment
             ),
@@ -166,7 +169,7 @@ fn 矩陣的狀態不會跟_lint_面板互相矛盾() {
 }
 
 #[test]
-fn 不屬於任何契約的問題不會混進矩陣() {
+fn findings_outside_any_contract_stay_out_of_the_matrix() {
     // 「某台機器忘了填位址」是 L006，它屬於那台機器，不屬於任何一條契約。
     // 這種東西只該出現在 lint 面板；混進矩陣會讓格子紅得莫名其妙。
     let mut project = healthy_project();
@@ -185,24 +188,24 @@ fn 不屬於任何契約的問題不會混進矩陣() {
     );
 
     let m = coverage(&project);
-    let dev_格: Vec<_> = m
+    let dev_cell: Vec<_> = m
         .cells
         .iter()
         .filter(|c| c.environment == Id::new("env-dev"))
         .collect();
     assert!(
-        dev_格.iter().all(|c| c.status == Status::Realized),
-        "機器層級的問題不該讓契約的格子變色：{dev_格:?}"
+        dev_cell.iter().all(|c| c.status == Status::Realized),
+        "機器層級的問題不該讓契約的格子變色：{dev_cell:?}"
     );
 }
 
 #[test]
-fn 格子的排列順序是先列後欄() {
+fn cells_are_ordered_row_first_then_column() {
     // 前端直接照順序畫，不必再排一次。
     let project = healthy_project();
     let m = coverage(&project);
 
-    let 順序: Vec<(usize, usize)> = m
+    let order: Vec<(usize, usize)> = m
         .cells
         .iter()
         .map(|c| {
@@ -219,7 +222,7 @@ fn 格子的排列順序是先列後欄() {
         })
         .collect();
 
-    let mut 應該的順序 = 順序.clone();
-    應該的順序.sort();
-    assert_eq!(順序, 應該的順序);
+    let mut expected_order = order.clone();
+    expected_order.sort();
+    assert_eq!(order, expected_order);
 }

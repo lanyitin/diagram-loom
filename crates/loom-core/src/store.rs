@@ -154,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 記憶體版本寫了再讀得回來() {
+    fn memory_store_round_trips() {
         let mut store = MemoryStore::new();
         store
             .write("logical/containers.yaml", "containers: []")
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn 讀不存在的檔案會附上路徑並標記為找不到() {
+    fn reading_a_missing_file_reports_the_path_and_not_found() {
         let store = MemoryStore::new();
         let err = store.read("project.yaml").unwrap_err();
         assert_eq!(err.path, "project.yaml");
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn 路徑順序穩定() {
+    fn paths_come_back_in_a_stable_order() {
         let mut store = MemoryStore::new();
         store.write("environments/prod.yaml", "").unwrap();
         store.write("project.yaml", "").unwrap();
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn 重寫同一個路徑會覆蓋() {
+    fn rewriting_the_same_path_overwrites() {
         let mut store = MemoryStore::new();
         store.write("a.yaml", "舊的").unwrap();
         store.write("a.yaml", "新的").unwrap();

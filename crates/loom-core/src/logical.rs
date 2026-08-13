@@ -176,7 +176,7 @@ impl Logical {
 mod tests {
     use super::*;
 
-    fn 範例服務() -> Container {
+    fn sample_container() -> Container {
         Container {
             id: Id::new("c-redis"),
             slug: "redis".into(),
@@ -191,22 +191,22 @@ mod tests {
     }
 
     #[test]
-    fn 可以用_id_找到服務的_endpoint() {
-        let redis = 範例服務();
+    fn finds_container_endpoints_by_id() {
+        let redis = sample_container();
         let found = redis.endpoint(&Id::new("e-redis-client"));
         assert_eq!(found.map(|e| e.slug.as_str()), Some("client-port"));
     }
 
     #[test]
-    fn 找不存在的_endpoint_得到_none() {
-        let redis = 範例服務();
+    fn missing_endpoint_returns_none() {
+        let redis = sample_container();
         assert!(redis.endpoint(&Id::new("e-不存在")).is_none());
     }
 
     #[test]
-    fn 邏輯層可以用_id_查詢各種元素() {
+    fn logical_layer_looks_elements_up_by_id() {
         let logical = Logical {
-            containers: vec![範例服務()],
+            containers: vec![sample_container()],
             ..Default::default()
         };
         assert!(logical.container(&Id::new("c-redis")).is_some());

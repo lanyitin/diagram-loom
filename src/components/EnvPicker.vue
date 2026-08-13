@@ -12,36 +12,36 @@ import type { Id } from '../lib/model'
 
 const store = useProject()
 
-function 切換(id: Id) {
+function toggle(id: Id) {
   // 空陣列的意思是「全部」，所以第一次點某個環境時，
   // 要先把其他環境展開成明確的清單，否則會變成「只剩沒點的那些」。
-  if (store.比對中的環境.length === 0) {
-    store.比對中的環境 = store.環境.map((e) => e.id).filter((e) => e !== id)
+  if (store.selectedEnvironments.length === 0) {
+    store.selectedEnvironments = store.environments.map((e) => e.id).filter((e) => e !== id)
     return
   }
-  const 已選 = new Set(store.比對中的環境)
-  if (已選.has(id)) {
-    已選.delete(id)
+  const selected = new Set(store.selectedEnvironments)
+  if (selected.has(id)) {
+    selected.delete(id)
   } else {
-    已選.add(id)
+    selected.add(id)
   }
   // 全部都勾＝沒有在篩選，回到空陣列這個表示法。
-  store.比對中的環境 = 已選.size === store.環境.length ? [] : [...已選]
+  store.selectedEnvironments = selected.size === store.environments.length ? [] : [...selected]
 }
 
-function 有勾(id: Id) {
-  return store.比對中的環境.length === 0 || store.比對中的環境.includes(id)
+function anySelected(id: Id) {
+  return store.selectedEnvironments.length === 0 || store.selectedEnvironments.includes(id)
 }
 </script>
 
 <template>
-  <div v-if="store.環境.length >= 2" class="picker">
+  <div v-if="store.environments.length >= 2" class="picker">
     <span class="muted label">比對</span>
-    <label v-for="env in store.環境" :key="env.id" class="chip" :class="{ on: 有勾(env.id) }">
-      <input type="checkbox" :checked="有勾(env.id)" @change="切換(env.id)">
+    <label v-for="env in store.environments" :key="env.id" class="chip" :class="{ on: anySelected(env.id) }">
+      <input type="checkbox" :checked="anySelected(env.id)" @change="toggle(env.id)">
       {{ env.slug }}
     </label>
-    <button v-if="store.比對中的環境.length" class="reset" @click="store.比對中的環境 = []">
+    <button v-if="store.selectedEnvironments.length" class="reset" @click="store.selectedEnvironments = []">
       全選
     </button>
   </div>

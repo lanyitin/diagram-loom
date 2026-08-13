@@ -21,25 +21,25 @@ import type { Row, Side } from '../lib/model'
 const store = useProject()
 
 /** 位址可能有十幾個，表格裡只放第一個加一個數量。 */
-function 位址(side: Side): string {
+function addressOf(side: Side): string {
   if (side.addresses.length === 0) return ''
   if (side.addresses.length === 1) return side.addresses[0]!
   return `${side.addresses[0]} +${side.addresses.length - 1}`
 }
 
 /** 端點的顯示：名字加接點。 */
-function 端(side: Side): string {
+function side(side: Side): string {
   return side.endpoint ? `${side.label} : ${side.endpoint}` : side.label
 }
 
-const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expect !== null))
+const anyRowHasExpect = computed(() => store.visibleRows.some((r) => r.to.expect !== null))
 
 /** 只是打開確認框。真正刪掉在使用者看過影響之後。 */
-function 想刪(row: Row) {
-  store.刪除中 = {
+function askDelete(row: Row) {
+  store.deleting = {
     edit: { deleteConnection: { environment: row.environment, connection: row.id } },
     kind: '連線',
-    label: `${row.servesSlug ?? row.serves}：${端(row.from)} → ${端(row.to)}`,
+    label: `${row.servesSlug ?? row.serves}：${side(row.from)} → ${side(row.to)}`,
   }
 }
 </script>
@@ -55,13 +55,13 @@ function 想刪(row: Row) {
           <th>來源</th>
           <th>目標</th>
           <th>目標位址</th>
-          <th v-if="有數量的列" class="right">實際／期望</th>
+          <th v-if="anyRowHasExpect" class="right">實際／期望</th>
           <th>用途</th>
           <th class="act" />
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in store.顯示的列" :key="row.id" :class="{ fallback: row.kind === 'fallback' }" :title="row.rules.join('、')">
+        <tr v-for="row in store.visibleRows" :key="row.id" :class="{ fallback: row.kind === 'fallback' }" :title="row.rules.join('、')">
           <td class="sev">
             <span v-if="row.severity" :class="['dot', row.severity]" />
           </td>
@@ -71,12 +71,12 @@ function 想刪(row: Row) {
             <span v-if="row.kind === 'fallback'" class="fb" title="備援路徑：只在故障時走">備援</span>
           </td>
           <td class="mono">{{ row.servesSlug ?? row.serves }}</td>
-          <td class="mono">{{ 端(row.from) }}</td>
-          <td class="mono">{{ 端(row.to) }}</td>
-          <td class="mono muted">{{ 位址(row.to) }}</td>
-          <td v-if="有數量的列" class="right mono num">
+          <td class="mono">{{ side(row.from) }}</td>
+          <td class="mono">{{ side(row.to) }}</td>
+          <td class="mono muted">{{ addressOf(row.to) }}</td>
+          <td v-if="anyRowHasExpect" class="right mono num">
             <template v-if="row.to.expect !== null">
-              <span :class="{ 對不上: row.to.matched !== row.to.expect }">
+              <span :class="{ mismatch: row.to.matched !== row.to.expect }">
                 {{ row.to.matched }}／{{ row.to.expect }}
               </span>
             </template>
@@ -85,12 +85,12 @@ function 想刪(row: Row) {
           <!-- 刪除只在滑到那一列時才出現。它是這張表上唯一會弄丟資料的動作，
                不該跟其他欄位一樣一直亮著等人誤觸。 -->
           <td class="act">
-            <button class="del" :disabled="store.忙碌中" title="刪除這條連線" @click="想刪(row)">
+            <button class="del" :disabled="store.busy" title="刪除這條連線" @click="askDelete(row)">
               ✕
             </button>
           </td>
         </tr>
-        <tr v-if="store.顯示的列.length === 0">
+        <tr v-if="store.visibleRows.length === 0">
           <td :colspan="9" class="empty muted">沒有符合條件的連線。</td>
         </tr>
       </tbody>
@@ -158,5 +158,5 @@ tbody tr:hover .del { opacity: 1; }
 .dot.warning { background: var(--warn); }
 
 /* 數量對不上時把數字本身標起來——這是萬用字元最容易漏的地方。 */
-.對不上 { color: var(--broken); font-weight: 600; }
+.mismatch { color: var(--broken); font-weight: 600; }
 </style>

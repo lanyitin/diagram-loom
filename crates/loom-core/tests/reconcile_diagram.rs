@@ -14,7 +14,7 @@ use loom_core::reconcile::{
 use loom_core::store::{FileStore, MemoryStore};
 
 /// 把模型元素原封不動當成圖上的形狀——代表「圖畫得跟模型一模一樣」。
-fn 照著模型畫(env: &loom_core::environment::Environment) -> Vec<DiagramElement> {
+fn drawn_from_the_model(env: &loom_core::environment::Environment) -> Vec<DiagramElement> {
     model_elements(env)
         .into_iter()
         .map(|m| DiagramElement {
@@ -25,7 +25,7 @@ fn 照著模型畫(env: &loom_core::environment::Environment) -> Vec<DiagramElem
 }
 
 #[test]
-fn 模型的所有可畫元素都會被列出來() {
+fn every_drawable_model_element_is_listed() {
     let project = healthy_project();
     let prod = &project.environments[0];
     let elements = model_elements(prod);
@@ -51,7 +51,7 @@ fn 模型的所有可畫元素都會被列出來() {
 }
 
 #[test]
-fn 第一次對帳時圖是空的所有東西都是模型新增() {
+fn the_first_reconcile_sees_an_empty_diagram_so_everything_is_a_model_addition() {
     let project = healthy_project();
     let prod = &project.environments[0];
 
@@ -72,57 +72,57 @@ fn 第一次對帳時圖是空的所有東西都是模型新增() {
 }
 
 #[test]
-fn 畫得跟模型一樣時對帳是乾淨的() {
+fn a_diagram_matching_the_model_reconciles_clean() {
     let project = healthy_project();
     let prod = &project.environments[0];
 
     let model = model_elements(prod);
-    let diagram = 照著模型畫(prod);
+    let diagram = drawn_from_the_model(prod);
     let base = settled_snapshot(&model, &diagram);
 
     assert!(reconcile(&model, &diagram, &base).is_empty());
 }
 
 #[test]
-fn 從圖上刪掉一台機器會被指出來而且模型新增不會被誤判() {
+fn a_node_deleted_on_the_diagram_is_reported_without_confusing_model_additions() {
     let project = healthy_project();
     let prod = &project.environments[0];
 
     let model = model_elements(prod);
-    let mut diagram = 照著模型畫(prod);
+    let mut diagram = drawn_from_the_model(prod);
     let base = settled_snapshot(&model, &diagram);
 
     // 使用者從圖上刪掉一個 Redis 落地
-    let 被刪的 = model
+    let deleted = model
         .iter()
         .find(|m| m.label == "redis-01")
         .expect("假專案應該有 redis-01")
         .id
         .clone();
-    diagram.retain(|d| d.id != 被刪的);
+    diagram.retain(|d| d.id != deleted);
 
     let diffs = reconcile(&model, &diagram, &base);
     assert_eq!(diffs.len(), 1);
-    assert_eq!(diffs[0].id, 被刪的);
+    assert_eq!(diffs[0].id, deleted);
     assert_eq!(diffs[0].kind, DifferenceKind::RemovedFromDiagram);
 
     // 這正是 base 存在的意義：沒有 base 的話，同樣的輸入會被判成「模型新增」。
-    let 沒有base = reconcile(&model, &diagram, &Default::default());
+    let no_base = reconcile(&model, &diagram, &Default::default());
     assert!(
-        沒有base
+        no_base
             .iter()
-            .any(|d| d.id == 被刪的 && matches!(d.kind, DifferenceKind::AddedToModel { .. })),
+            .any(|d| d.id == deleted && matches!(d.kind, DifferenceKind::AddedToModel { .. })),
         "沒有 base 時會誤判成模型新增——這就是三方比對的理由"
     );
 }
 
 #[test]
-fn 刪除跟改名同時發生時各自被正確分類() {
+fn a_deletion_and_a_rename_at_once_are_classified_separately() {
     let project = healthy_project();
     let prod = &project.environments[0];
 
     let model = model_elements(prod);
-    let mut diagram = 照著模型畫(prod);
+    let mut diagram = drawn_from_the_model(prod);
     let base = settled_snapshot(&model, &diagram);
 
     let redis01 = model
@@ -144,12 +144,12 @@ fn 刪除跟改名同時發生時各自被正確分類() {
     let diffs = reconcile(&model, &diagram, &base);
     assert_eq!(diffs.len(), 2);
 
-    let 刪除 = diffs.iter().find(|d| d.id == redis01).unwrap();
-    assert_eq!(刪除.kind, DifferenceKind::RemovedFromDiagram);
+    let deleted = diffs.iter().find(|d| d.id == redis01).unwrap();
+    assert_eq!(deleted.kind, DifferenceKind::RemovedFromDiagram);
 
-    let 改名 = diffs.iter().find(|d| d.id == redis02).unwrap();
+    let renamed = diffs.iter().find(|d| d.id == redis02).unwrap();
     assert_eq!(
-        改名.kind,
+        renamed.kind,
         DifferenceKind::RenamedInDiagram {
             from: "redis-02".into(),
             to: "快取節點二".into(),
@@ -158,7 +158,7 @@ fn 刪除跟改名同時發生時各自被正確分類() {
 }
 
 #[test]
-fn 解決之後存下base再對帳一次就乾淨了() {
+fn saving_the_base_after_resolving_makes_the_next_reconcile_clean() {
     let project = healthy_project();
     let prod = &project.environments[0];
     let model = model_elements(prod);
@@ -167,16 +167,16 @@ fn 解決之後存下base再對帳一次就乾淨了() {
 
     // 第一輪：圖是空的，全部都是「要加到圖上」
     let mut state = SyncState::load(&store).unwrap();
-    let 第一輪 = reconcile(&model, &[], &state.snapshot("prod/main.drawio"));
-    assert!(!第一輪.is_empty());
+    let first_round = reconcile(&model, &[], &state.snapshot("prod/main.drawio"));
+    assert!(!first_round.is_empty());
     assert!(
-        第一輪
+        first_round
             .iter()
             .all(|d| d.resolutions().contains(&Resolution::AddToDiagram))
     );
 
     // 使用者全選「加到圖上」，JS 照做，圖變成跟模型一樣
-    let diagram = 照著模型畫(prod);
+    let diagram = drawn_from_the_model(prod);
 
     // 對帳完成 → 更新 base 並存檔
     state.diagrams.insert(
@@ -186,20 +186,23 @@ fn 解決之後存下base再對帳一次就乾淨了() {
     state.save(&mut store).unwrap();
 
     // 第二輪：重新讀檔，應該完全乾淨
-    let 重讀 = SyncState::load(&store).unwrap();
-    let 第二輪 = reconcile(&model, &diagram, &重讀.snapshot("prod/main.drawio"));
-    assert!(第二輪.is_empty(), "解決後再對帳仍有差異：{第二輪:?}");
+    let reloaded = SyncState::load(&store).unwrap();
+    let second_round = reconcile(&model, &diagram, &reloaded.snapshot("prod/main.drawio"));
+    assert!(
+        second_round.is_empty(),
+        "解決後再對帳仍有差異：{second_round:?}"
+    );
 }
 
 #[test]
-fn base快照存在約定的位置() {
+fn base_snapshot_lives_at_the_agreed_path() {
     let mut store = MemoryStore::new();
     SyncState::default().save(&mut store).unwrap();
     assert_eq!(store.paths(), vec![SYNC_STATE_PATH]);
 }
 
 #[test]
-fn 還沒對帳過時讀取不算錯誤() {
+fn reading_before_the_first_reconcile_is_not_an_error() {
     // 第一次使用專案時本來就沒有這個檔。
     let store = MemoryStore::new();
     let state = SyncState::load(&store).unwrap();
@@ -207,11 +210,11 @@ fn 還沒對帳過時讀取不算錯誤() {
 }
 
 #[test]
-fn 每張圖各有自己的base() {
+fn each_diagram_has_its_own_base() {
     let project = healthy_project();
     let prod = &project.environments[0];
     let model = model_elements(prod);
-    let diagram = 照著模型畫(prod);
+    let diagram = drawn_from_the_model(prod);
 
     let mut state = SyncState::default();
     state.diagrams.insert(
@@ -225,7 +228,7 @@ fn 每張圖各有自己的base() {
 }
 
 #[test]
-fn base檔壞掉時會回報而不是當成空的() {
+fn a_corrupt_base_file_is_reported_not_treated_as_empty() {
     // 空的 base 代表「還沒對帳過」，會讓所有東西看起來像新增的。
     // 檔案壞掉卻被當成空的，使用者會以為圖被清空了。
     let mut store = MemoryStore::new();
@@ -235,12 +238,12 @@ fn base檔壞掉時會回報而不是當成空的() {
 }
 
 #[test]
-fn 圖上有模型查無的形狀時提供建立或移除兩條路() {
+fn an_unknown_shape_offers_both_create_and_remove() {
     let project = healthy_project();
     let prod = &project.environments[0];
     let model = model_elements(prod);
 
-    let mut diagram = 照著模型畫(prod);
+    let mut diagram = drawn_from_the_model(prod);
     let base = settled_snapshot(&model, &diagram);
     diagram.push(DiagramElement {
         id: Id::new("來路不明"),

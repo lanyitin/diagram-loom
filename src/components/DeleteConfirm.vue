@@ -22,28 +22,28 @@ import type { Impact } from '../lib/model'
 
 const store = useProject()
 const impact = ref<Impact | null>(null)
-const 算著 = ref(false)
+const computing = ref(false)
 
 watch(
-  () => store.刪除中,
-  async (目標) => {
+  () => store.deleting,
+  async (target) => {
     impact.value = null
-    if (!目標) return
-    算著.value = true
-    impact.value = await store.預覽編輯(目標.edit)
-    算著.value = false
+    if (!target) return
+    computing.value = true
+    impact.value = await store.previewEdit(target.edit)
+    computing.value = false
   },
   { immediate: true },
 )
 </script>
 
 <template>
-  <div v-if="store.刪除中" class="scrim" @click.self="store.刪除中 = null">
+  <div v-if="store.deleting" class="scrim" @click.self="store.deleting = null">
     <section class="box" role="dialog" aria-modal="true">
-      <h2>刪除這個{{ store.刪除中.kind }}？</h2>
-      <p class="mono target">{{ store.刪除中.label }}</p>
+      <h2>刪除這個{{ store.deleting.kind }}？</h2>
+      <p class="mono target">{{ store.deleting.label }}</p>
 
-      <p v-if="算著" class="muted">正在算會影響什麼…</p>
+      <p v-if="computing" class="muted">正在算會影響什麼…</p>
 
       <template v-else-if="impact">
         <div v-if="impact.introduced.length" class="danger">
@@ -66,8 +66,8 @@ watch(
       <footer>
         <span class="muted hint">刪錯了可以按 ⌘Z 復原</span>
         <span class="grow" />
-        <button @click="store.刪除中 = null">取消</button>
-        <button class="danger-btn" :disabled="算著" @click="store.確認刪除()">刪除</button>
+        <button @click="store.deleting = null">取消</button>
+        <button class="danger-btn" :disabled="computing" @click="store.confirmDelete()">刪除</button>
       </footer>
     </section>
   </div>

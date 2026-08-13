@@ -94,26 +94,26 @@ pub fn coverage(project: &Project) -> Matrix {
         let index = EnvIndex::build(project, env);
         // 這個環境裡，每條實際連線是為了服務哪條契約——用來把
         // 「某條連線的錯」歸到「某條契約的那一格」。
-        let 連線歸屬: HashMap<&Id, &Id> =
+        let connection_owner: HashMap<&Id, &Id> =
             env.connections.iter().map(|c| (&c.id, &c.serves)).collect();
 
-        let 這格的規則 = 依格子分組(&findings, env, &連線歸屬);
+        let cell_rules = group_by_cell(&findings, env, &connection_owner);
 
         for rel in &project.logical.relationships {
             let serving = index.serving(&rel.id);
-            let rules = 這格的規則.get(&rel.id).cloned().unwrap_or_default();
+            let rules = cell_rules.get(&rel.id).cloned().unwrap_or_default();
 
             // 目標端的規模看最後一段——那才是真正抵達的地方。
             // 走 F5 時第一段的目標是設備，數量沒有意義。
             let (targets, expect) = serving
                 .last()
-                .map(|conn| 目標規模(&index, &conn.to))
+                .map(|conn| target_scale(&index, &conn.to))
                 .unwrap_or((0, None));
 
             cells.push(Cell {
                 relationship: rel.id.clone(),
                 environment: env.id.clone(),
-                status: 判定(serving.is_empty(), &rules),
+                status: verdict(serving.is_empty(), &rules),
                 segments: serving.len() as u32,
                 targets,
                 expect,
@@ -124,20 +124,20 @@ pub fn coverage(project: &Project) -> Matrix {
 
     // 依「先列後欄」排好，前端不必再排一次。
     cells.sort_by(|a, b| {
-        let 列 = |c: &Cell| {
+        let row = |c: &Cell| {
             project
                 .logical
                 .relationships
                 .iter()
                 .position(|r| r.id == c.relationship)
         };
-        let 欄 = |c: &Cell| {
+        let column = |c: &Cell| {
             project
                 .environments
                 .iter()
                 .position(|e| e.id == c.environment)
         };
-        (列(a), 欄(a)).cmp(&(列(b), 欄(b)))
+        (row(a), column(a)).cmp(&(row(b), column(b)))
     });
 
     Matrix {
@@ -153,8 +153,8 @@ pub fn coverage(project: &Project) -> Matrix {
 }
 
 /// 狀態一律由 lint 的結果決定，這裡不做第二套判斷。
-fn 判定(沒有連線: bool, rules: &[Rule]) -> Status {
-    if 沒有連線 {
+fn verdict(no_connections: bool, rules: &[Rule]) -> Status {
+    if no_connections {
         return Status::Missing;
     }
     match rules.iter().map(|r| r.severity()).max() {
@@ -170,10 +170,10 @@ fn 判定(沒有連線: bool, rules: &[Rule]) -> Status {
 /// （L003、L004、L005、L007）——後者要透過 `serves` 繞回去。
 /// 不屬於任何契約的（例如某台機器忘了填位址）不會進矩陣，
 /// 它們只出現在 lint 面板。
-fn 依格子分組<'a>(
+fn group_by_cell<'a>(
     findings: &'a [Finding],
     env: &Environment,
-    連線歸屬: &HashMap<&Id, &'a Id>,
+    connection_owner: &HashMap<&Id, &'a Id>,
 ) -> HashMap<Id, Vec<Rule>> {
     let mut grouped: HashMap<Id, Vec<Rule>> = HashMap::new();
 
@@ -181,11 +181,11 @@ fn 依格子分組<'a>(
         if f.environment.as_ref() != Some(&env.id) {
             continue;
         }
-        let 契約 = match 連線歸屬.get(&f.subject) {
+        let relationship_id = match connection_owner.get(&f.subject) {
             Some(serves) => (*serves).clone(),
             None => f.subject.clone(),
         };
-        let bucket = grouped.entry(契約).or_default();
+        let bucket = grouped.entry(relationship_id).or_default();
         if !bucket.contains(&f.rule) {
             bucket.push(f.rule);
         }
@@ -198,7 +198,7 @@ fn 依格子分組<'a>(
 }
 
 /// 這一段連線的目標端展開成幾個，以及註明的期望數量。
-fn 目標規模(index: &EnvIndex<'_>, to: &Endpointing) -> (u32, Option<u32>) {
+fn target_scale(index: &EnvIndex<'_>, to: &Endpointing) -> (u32, Option<u32>) {
     match to {
         Endpointing::Instance { target, .. } => match target {
             InstanceRef::One(_) => (1, None),

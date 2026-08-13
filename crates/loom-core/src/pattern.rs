@@ -56,7 +56,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 尾端萬用字元() {
+    fn trailing_wildcard() {
         assert!(matches("redis-*", "redis-01"));
         assert!(matches("redis-*", "redis-"));
         assert!(!matches("redis-*", "redis"));
@@ -64,40 +64,40 @@ mod tests {
     }
 
     #[test]
-    fn 沒有萬用字元時要完全相同() {
+    fn without_a_wildcard_it_must_match_exactly() {
         assert!(matches("redis-01", "redis-01"));
         assert!(!matches("redis-01", "redis-02"));
         assert!(!matches("redis", "redis-01"));
     }
 
     #[test]
-    fn 開頭萬用字元() {
+    fn leading_wildcard() {
         assert!(matches("*-01", "redis-01"));
         assert!(!matches("*-01", "redis-02"));
     }
 
     #[test]
-    fn 中間萬用字元() {
+    fn wildcard_in_the_middle() {
         assert!(matches("redis-*-01", "redis-prod-01"));
         assert!(matches("redis-*-01", "redis--01"));
         assert!(!matches("redis-*-01", "redis-prod-02"));
     }
 
     #[test]
-    fn 只有一個星號時比對任何字串() {
+    fn lone_star_matches_anything() {
         assert!(matches("*", "redis-01"));
         assert!(matches("*", ""));
     }
 
     #[test]
-    fn 前後綴不可搶用同一批字元() {
+    fn prefix_and_suffix_do_not_share_characters() {
         // "ab" 不該同時當開頭又當結尾去滿足 "ab*ab"
         assert!(!matches("ab*ab", "ab"));
         assert!(matches("ab*ab", "abab"));
     }
 
     #[test]
-    fn 空字串樣式只符合空字串() {
+    fn empty_pattern_matches_only_empty() {
         assert!(matches("", ""));
         assert!(!matches("", "redis"));
     }

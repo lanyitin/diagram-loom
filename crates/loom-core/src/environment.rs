@@ -344,7 +344,7 @@ fn is_false(value: &bool) -> bool {
 mod tests {
     use super::*;
 
-    fn 實例(slug: &str) -> ContainerInstance {
+    fn instance_of(slug: &str) -> ContainerInstance {
         ContainerInstance {
             id: Id::new(format!("i-{slug}")),
             slug: slug.into(),
@@ -354,7 +354,7 @@ mod tests {
         }
     }
 
-    fn 機器(slug: &str, instances: Vec<ContainerInstance>) -> DeploymentNode {
+    fn machine(slug: &str, instances: Vec<ContainerInstance>) -> DeploymentNode {
         DeploymentNode {
             id: Id::new(format!("n-{slug}")),
             slug: slug.into(),
@@ -364,7 +364,7 @@ mod tests {
         }
     }
 
-    fn 環境(nodes: Vec<DeploymentNode>) -> Environment {
+    fn env_of(nodes: Vec<DeploymentNode>) -> Environment {
         Environment {
             id: Id::new("env-prod"),
             slug: "prod".into(),
@@ -377,22 +377,26 @@ mod tests {
     }
 
     #[test]
-    fn 走訪巢狀節點底下的所有實例() {
-        let 內層 = 機器("docker-host", vec![實例("redis-01")]);
-        let mut 外層 = 機器("rack-a", vec![實例("consul-01")]);
-        外層.children.push(內層);
+    fn visits_instances_under_nested_nodes() {
+        let inner = machine("docker-host", vec![instance_of("redis-01")]);
+        let mut outer = machine("rack-a", vec![instance_of("consul-01")]);
+        outer.children.push(inner);
 
-        let env = 環境(vec![外層]);
+        let env = env_of(vec![outer]);
         let mut slugs: Vec<_> = env.instances().iter().map(|i| i.slug.clone()).collect();
         slugs.sort();
         assert_eq!(slugs, vec!["consul-01", "redis-01"]);
     }
 
     #[test]
-    fn 萬用字元選出整群實例() {
-        let env = 環境(vec![機器(
+    fn a_wildcard_selects_the_whole_group() {
+        let env = env_of(vec![machine(
             "vm",
-            vec![實例("redis-01"), 實例("redis-02"), 實例("consul-01")],
+            vec![
+                instance_of("redis-01"),
+                instance_of("redis-02"),
+                instance_of("consul-01"),
+            ],
         )]);
         assert_eq!(env.instances_matching("redis-*").len(), 2);
         assert_eq!(env.instances_matching("consul-*").len(), 1);
@@ -400,8 +404,8 @@ mod tests {
     }
 
     #[test]
-    fn 可以用_id_找到實例與設備() {
-        let env = 環境(vec![機器("vm", vec![實例("redis-01")])]);
+    fn finds_instances_and_infra_by_id() {
+        let env = env_of(vec![machine("vm", vec![instance_of("redis-01")])]);
         assert!(env.instance(&Id::new("i-redis-01")).is_some());
         assert!(env.instance(&Id::new("i-沒有這台")).is_none());
     }

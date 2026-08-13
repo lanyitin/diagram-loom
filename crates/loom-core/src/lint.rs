@@ -192,20 +192,20 @@ fn check_logical_references(project: &Project, findings: &mut Vec<Finding>) {
             (&rel.from, ConnectionEnd::From),
             (&rel.to, ConnectionEnd::To),
         ] {
-            if let Some(缺的) = 契約端不存在(logical, end) {
+            if let Some(missing) = missing_relationship_end(logical, end) {
                 findings.push(Finding {
                     rule: Rule::L012,
                     environment: None,
                     subject: rel.id.clone(),
                     end: Some(which),
-                    detail: format!("契約 {} 的{which}端指向不存在的{缺的}", rel.slug),
+                    detail: format!("契約 {} 的{which}端指向不存在的{missing}", rel.slug),
                 });
             }
         }
 
         // `to_endpoint` 必須是**目標那一端身上**的接點定義。指到別人身上的
         // 一樣算壞掉——連線展開時會找不到對應的實際 endpoint。
-        if !目標身上有這個接點(logical, rel) {
+        if !target_has_endpoint(logical, rel) {
             findings.push(Finding {
                 rule: Rule::L012,
                 environment: None,
@@ -220,7 +220,10 @@ fn check_logical_references(project: &Project, findings: &mut Vec<Finding>) {
     }
 }
 
-fn 契約端不存在(logical: &crate::logical::Logical, end: &RelationshipEnd) -> Option<String> {
+fn missing_relationship_end(
+    logical: &crate::logical::Logical,
+    end: &RelationshipEnd,
+) -> Option<String> {
     match end {
         RelationshipEnd::Container(id) => {
             (!logical.containers.iter().any(|c| &c.id == id)).then(|| format!("服務 {id}"))
@@ -234,7 +237,7 @@ fn 契約端不存在(logical: &crate::logical::Logical, end: &RelationshipEnd) 
     }
 }
 
-fn 目標身上有這個接點(
+fn target_has_endpoint(
     logical: &crate::logical::Logical,
     rel: &crate::logical::Relationship,
 ) -> bool {
@@ -260,8 +263,8 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
     let logical = &project.logical;
 
     for instance in env.instances() {
-        let 服務 = logical.container(&instance.container);
-        if 服務.is_none() {
+        let container_of = logical.container(&instance.container);
+        if container_of.is_none() {
             findings.push(Finding {
                 rule: Rule::L012,
                 environment: Some(env.id.clone()),
@@ -274,9 +277,9 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
             });
         }
         for ep in &instance.endpoints {
-            檢查接點定義(
+            check_endpoint_def(
                 ep,
-                服務.map(|c| c.endpoints.as_slice()),
+                container_of.map(|c| c.endpoints.as_slice()),
                 &instance.slug,
                 env,
                 findings,
@@ -285,8 +288,8 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
     }
 
     for si in &env.systems {
-        let 系統 = logical.systems.iter().find(|s| s.id == si.system);
-        if 系統.is_none() {
+        let system_of = logical.systems.iter().find(|s| s.id == si.system);
+        if system_of.is_none() {
             findings.push(Finding {
                 rule: Rule::L012,
                 environment: Some(env.id.clone()),
@@ -296,9 +299,9 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
             });
         }
         for ep in &si.endpoints {
-            檢查接點定義(
+            check_endpoint_def(
                 ep,
-                系統.map(|s| s.endpoints.as_slice()),
+                system_of.map(|s| s.endpoints.as_slice()),
                 &si.slug,
                 env,
                 findings,
@@ -308,10 +311,10 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
 }
 
 /// 設備的 endpoint 沒有 `def`（設備不對應任何邏輯層元素），所以只查有填的。
-fn 檢查接點定義(
+fn check_endpoint_def(
     ep: &crate::environment::Endpoint,
     defs: Option<&[crate::logical::EndpointDef]>,
-    擁有者: &str,
+    owner: &str,
     env: &Environment,
     findings: &mut Vec<Finding>,
 ) {
@@ -325,7 +328,7 @@ fn 檢查接點定義(
             environment: Some(env.id.clone()),
             subject: ep.id.clone(),
             end: None,
-            detail: format!("{擁有者}／{} 指向不存在的接點定義 {def}", ep.slug),
+            detail: format!("{owner}／{} 指向不存在的接點定義 {def}", ep.slug),
         });
     }
 }

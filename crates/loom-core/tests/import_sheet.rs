@@ -14,7 +14,7 @@ use loom_core::importer::{
 use loom_core::lint::{Rule, lint};
 use loom_core::logical::Logical;
 
-fn 空專案() -> Project {
+fn empty_project() -> Project {
     Project {
         id: Id::generate(),
         slug: "shop".into(),
@@ -24,27 +24,27 @@ fn 空專案() -> Project {
     }
 }
 
-fn 表(rows: Vec<Vec<String>>) -> Sheet {
+fn sheet(rows: Vec<Vec<String>>) -> Sheet {
     Sheet::new(template_headers(), rows)
 }
 
-fn 一列(pairs: &[(&str, &str)]) -> Vec<String> {
+fn row(pairs: &[(&str, &str)]) -> Vec<String> {
     row_from_pairs(pairs)
 }
 
 /// 改某一欄的值。**依欄位名稱找位置**——寫死索引的話，
 /// 樣板多一欄就整批測試錯位，而且錯得很難看懂。
-fn 改欄(row: &mut [String], 欄位: &str, 值: &str) {
+fn set_cell(row: &mut [String], column: &str, value: &str) {
     let i = template_headers()
         .iter()
-        .position(|h| h == 欄位)
-        .unwrap_or_else(|| panic!("樣板沒有 {欄位} 這一欄"));
-    row[i] = 值.into();
+        .position(|h| h == column)
+        .unwrap_or_else(|| panic!("樣板沒有 {column} 這一欄"));
+    row[i] = value.into();
 }
 
 /// 最單純的一列：dev 環境，API 直連 Redis。
-fn 直連那列() -> Vec<String> {
-    一列(&[
+fn direct_row() -> Vec<String> {
+    row(&[
         ("environment", "dev"),
         ("purpose", "訂單服務讀寫快取"),
         ("from_node", "app-vm-01"),
@@ -58,9 +58,9 @@ fn 直連那列() -> Vec<String> {
 }
 
 #[test]
-fn 一列就建出環境機器服務與連線() {
-    let mut project = 空專案();
-    let report = import(&mut project, &表(vec![直連那列()])).unwrap();
+fn one_row_creates_environment_node_container_and_connection() {
+    let mut project = empty_project();
+    let report = import(&mut project, &sheet(vec![direct_row()])).unwrap();
 
     assert_eq!(report.connections, 1);
     assert_eq!(report.environments_created, 1);
@@ -73,10 +73,10 @@ fn 一列就建出環境機器服務與連線() {
 }
 
 #[test]
-fn 實例名稱是機器加服務() {
+fn instance_slug_combines_node_and_container() {
     // 一台機器可能跑多個服務，光用機器名會撞在一起。
-    let mut project = 空專案();
-    import(&mut project, &表(vec![直連那列()])).unwrap();
+    let mut project = empty_project();
+    import(&mut project, &sheet(vec![direct_row()])).unwrap();
 
     let mut slugs: Vec<String> = project.environments[0]
         .instances()
@@ -88,9 +88,9 @@ fn 實例名稱是機器加服務() {
 }
 
 #[test]
-fn 同一台機器跑兩個服務不會撞名() {
-    let mut project = 空專案();
-    let 第二列 = 一列(&[
+fn two_containers_on_one_node_do_not_collide() {
+    let mut project = empty_project();
+    let second_cell = row(&[
         ("environment", "dev"),
         ("purpose", "查詢設定"),
         ("from_node", "app-vm-01"),
@@ -102,7 +102,7 @@ fn 同一台機器跑兩個服務不會撞名() {
         ("protocol", "TCP"),
     ]);
 
-    import(&mut project, &表(vec![直連那列(), 第二列])).unwrap();
+    import(&mut project, &sheet(vec![direct_row(), second_cell])).unwrap();
 
     let node = project.environments[0]
         .nodes
@@ -115,23 +115,23 @@ fn 同一台機器跑兩個服務不會撞名() {
 }
 
 #[test]
-fn 重複匯入不會產生重複的東西() {
+fn reimporting_creates_no_duplicates() {
     // 使用者更新試算表後重跑，既有資料應該原地更新而不是複製一份。
-    let mut project = 空專案();
-    import(&mut project, &表(vec![直連那列()])).unwrap();
-    let 第一次 = project.environments[0].instances().len();
+    let mut project = empty_project();
+    import(&mut project, &sheet(vec![direct_row()])).unwrap();
+    let first = project.environments[0].instances().len();
 
-    import(&mut project, &表(vec![直連那列()])).unwrap();
+    import(&mut project, &sheet(vec![direct_row()])).unwrap();
 
-    assert_eq!(project.environments[0].instances().len(), 第一次);
+    assert_eq!(project.environments[0].instances().len(), first);
     assert_eq!(project.logical.containers.len(), 2);
     assert_eq!(project.environments.len(), 1);
 }
 
 #[test]
-fn 匯入結果可以直接跑lint() {
-    let mut project = 空專案();
-    import(&mut project, &表(vec![直連那列()])).unwrap();
+fn the_imported_project_lints_straight_away() {
+    let mut project = empty_project();
+    import(&mut project, &sheet(vec![direct_row()])).unwrap();
 
     let findings = lint(&project);
     // 來源端沒填 endpoint（OS 分配）是正常的；不該有任何 Error。
@@ -143,9 +143,9 @@ fn 匯入結果可以直接跑lint() {
 }
 
 #[test]
-fn 經過設備會拆成兩段而且共用同一條邏輯連線() {
-    let mut project = 空專案();
-    let 第一段 = 一列(&[
+fn a_hop_through_infra_splits_into_two_segments_sharing_one_contract() {
+    let mut project = empty_project();
+    let first_hop = row(&[
         ("environment", "prod"),
         ("purpose", "第一段：到 F5"),
         ("serves", "api-連-redis"),
@@ -156,7 +156,7 @@ fn 經過設備會拆成兩段而且共用同一條邏輯連線() {
         ("to_address", "10.0.0.100:6379"),
         ("protocol", "TCP"),
     ]);
-    let 第二段 = 一列(&[
+    let second_hop = row(&[
         ("environment", "prod"),
         ("purpose", "第二段：F5 到後端"),
         ("serves", "api-連-redis"),
@@ -168,7 +168,7 @@ fn 經過設備會拆成兩段而且共用同一條邏輯連線() {
         ("protocol", "TCP"),
     ]);
 
-    import(&mut project, &表(vec![第一段, 第二段])).unwrap();
+    import(&mut project, &sheet(vec![first_hop, second_hop])).unwrap();
 
     let prod = &project.environments[0];
     assert_eq!(prod.connections.len(), 2);
@@ -181,9 +181,9 @@ fn 經過設備會拆成兩段而且共用同一條邏輯連線() {
 }
 
 #[test]
-fn 目標是設備又沒填serves會被擋下() {
-    let mut project = 空專案();
-    let row = 一列(&[
+fn an_infra_target_without_serves_is_rejected() {
+    let mut project = empty_project();
+    let row = row(&[
         ("environment", "prod"),
         ("purpose", "到 F5"),
         ("from_node", "app-vm-01"),
@@ -195,19 +195,19 @@ fn 目標是設備又沒填serves會被擋下() {
     ]);
 
     assert_eq!(
-        import(&mut project, &表(vec![row])),
+        import(&mut project, &sheet(vec![row])),
         Err(ImportError::InfraRowNeedsServes { row: 2 })
     );
 }
 
 #[test]
-fn 萬用字元那列不會建出新機器() {
+fn a_wildcard_row_creates_no_new_nodes() {
     // 萬用字元是在指涉既有的一群機器，不是在定義新機器。
-    let mut project = 空專案();
+    let mut project = empty_project();
     let rows = vec![
-        直連那列(),
+        direct_row(),
         // 萬用字元的列不必填 to_address：位址由各機器自己的定義提供。
-        一列(&[
+        row(&[
             ("environment", "dev"),
             ("purpose", "叢集讀寫"),
             ("serves", "api-連-叢集"),
@@ -221,13 +221,13 @@ fn 萬用字元那列不會建出新機器() {
         ]),
     ];
 
-    import(&mut project, &表(rows)).unwrap();
+    import(&mut project, &sheet(rows)).unwrap();
 
     // 仍然只有直連那列建出的兩台
     assert_eq!(project.environments[0].instances().len(), 2);
 
-    let 萬用那條 = &project.environments[0].connections[1];
-    let Endpointing::Instance { target, .. } = &萬用那條.to else {
+    let wildcard_row = &project.environments[0].connections[1];
+    let Endpointing::Instance { target, .. } = &wildcard_row.to else {
         panic!("目標應該是一群 Instance");
     };
     assert_eq!(
@@ -241,12 +241,12 @@ fn 萬用字元那列不會建出新機器() {
 }
 
 #[test]
-fn 同一個endpoint位址不一致時保留先出現的並提醒() {
-    let mut project = 空專案();
-    let mut 打錯的 = 直連那列();
-    改欄(&mut 打錯的, "to_address", "10.0.1.99:6379");
+fn conflicting_addresses_keep_the_first_and_warn() {
+    let mut project = empty_project();
+    let mut typo = direct_row();
+    set_cell(&mut typo, "to_address", "10.0.1.99:6379");
 
-    let report = import(&mut project, &表(vec![直連那列(), 打錯的])).unwrap();
+    let report = import(&mut project, &sheet(vec![direct_row(), typo])).unwrap();
 
     assert_eq!(
         report.warnings,
@@ -260,8 +260,8 @@ fn 同一個endpoint位址不一致時保留先出現的並提醒() {
 }
 
 #[test]
-fn 缺必填欄位時一次列出全部() {
-    let mut project = 空專案();
+fn missing_required_columns_are_all_listed_at_once() {
+    let mut project = empty_project();
     let sheet = Sheet::new(
         vec!["environment".into(), "purpose".into()],
         vec![vec!["dev".into(), "隨便".into()]],
@@ -284,22 +284,22 @@ fn 缺必填欄位時一次列出全部() {
 }
 
 #[test]
-fn 認不得的協定會指出可用選項() {
-    let mut project = 空專案();
-    let mut row = 直連那列();
-    改欄(&mut row, "protocol", "SMTP");
+fn an_unknown_protocol_lists_the_valid_options() {
+    let mut project = empty_project();
+    let mut row = direct_row();
+    set_cell(&mut row, "protocol", "SMTP");
 
-    let err = import(&mut project, &表(vec![row])).unwrap_err();
+    let err = import(&mut project, &sheet(vec![row])).unwrap_err();
     assert!(err.to_string().contains("TCP"), "沒列出可用選項：{err}");
 }
 
 #[test]
-fn 名稱不是正規寫法時給建議() {
-    let mut project = 空專案();
-    let mut row = 直連那列();
-    改欄(&mut row, "from_node", "App VM 01");
+fn an_unnormalised_name_comes_with_a_suggestion() {
+    let mut project = empty_project();
+    let mut row = direct_row();
+    set_cell(&mut row, "from_node", "App VM 01");
 
-    let err = import(&mut project, &表(vec![row])).unwrap_err();
+    let err = import(&mut project, &sheet(vec![row])).unwrap_err();
     assert!(
         err.to_string().contains("app-vm-01"),
         "沒給出建議寫法：{err}"
@@ -307,11 +307,11 @@ fn 名稱不是正規寫法時給建議() {
 }
 
 #[test]
-fn 認不得的欄位只是警告不中斷() {
-    let mut project = 空專案();
+fn an_unknown_column_warns_without_stopping() {
+    let mut project = empty_project();
     let mut headers = template_headers();
     headers.push("負責人".into());
-    let mut row = 直連那列();
+    let mut row = direct_row();
     row.push("小明".into());
 
     let report = import(&mut project, &Sheet::new(headers, vec![row])).unwrap();
@@ -324,15 +324,15 @@ fn 認不得的欄位只是警告不中斷() {
 }
 
 #[test]
-fn 讀得懂給使用者填的那份樣板() {
+fn the_shipped_template_parses() {
     // 樣板若跟程式對不上，使用者第一次用就會撞牆。
-    let 樣板 = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let template = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/excel/connection-import-template.csv");
 
-    let sheet = read_csv(&樣板).expect("讀不到樣板檔");
+    let sheet = read_csv(&template).expect("讀不到樣板檔");
     assert!(sheet.row_count() >= 8, "樣板應該有多列範例");
 
-    let mut project = 空專案();
+    let mut project = empty_project();
     let report = import(&mut project, &sheet).expect("樣板無法匯入");
 
     assert_eq!(report.connections, sheet.row_count());
@@ -340,12 +340,12 @@ fn 讀得懂給使用者填的那份樣板() {
 }
 
 #[test]
-fn 樣板的prod環境匯入後是乾淨的() {
-    let 樣板 = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+fn the_templates_prod_environment_imports_clean() {
+    let template = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/excel/connection-import-template.csv");
-    let sheet = read_csv(&樣板).unwrap();
+    let sheet = read_csv(&template).unwrap();
 
-    let mut project = 空專案();
+    let mut project = empty_project();
     import(&mut project, &sheet).unwrap();
 
     let prod = project
@@ -365,14 +365,14 @@ fn 樣板的prod環境匯入後是乾淨的() {
 }
 
 #[test]
-fn 樣板的test環境只有一列所以lint會指出缺漏() {
+fn the_templates_test_environment_has_one_row_so_lint_reports_gaps() {
     // 樣板的 test 環境只放一列示範萬用字元寫法，其餘服務都沒部署。
     // lint 抓到這件事正是它該做的——這個測試同時驗證匯入與 lint 接得起來。
-    let 樣板 = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let template = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/excel/connection-import-template.csv");
-    let sheet = read_csv(&樣板).unwrap();
+    let sheet = read_csv(&template).unwrap();
 
-    let mut project = 空專案();
+    let mut project = empty_project();
     import(&mut project, &sheet).unwrap();
 
     let test_env = project
@@ -381,7 +381,7 @@ fn 樣板的test環境只有一列所以lint會指出缺漏() {
         .find(|e| e.slug == "test")
         .expect("樣板應該建出 test");
 
-    let 缺漏: Vec<&str> = lint(&project)
+    let gap: Vec<&str> = lint(&project)
         .iter()
         .filter(|f| f.environment.as_ref() == Some(&test_env.id))
         .filter(|f| f.rule == Rule::L001)
@@ -389,14 +389,14 @@ fn 樣板的test環境只有一列所以lint會指出缺漏() {
         .collect();
 
     assert!(
-        !缺漏.is_empty(),
+        !gap.is_empty(),
         "test 環境明顯不完整，lint 卻沒指出任何缺漏"
     );
 }
 
 // ── 站點與備援（限制 D）────────────────────────────────
 
-fn 帶站點的一列(site: &str, node: &str, service: &str, address: &str) -> Vec<String> {
+fn row_with_site(site: &str, node: &str, service: &str, address: &str) -> Vec<String> {
     row_from_pairs(&[
         ("environment", "prod"),
         ("purpose", "測試"),
@@ -414,11 +414,11 @@ fn 帶站點的一列(site: &str, node: &str, service: &str, address: &str) -> V
 }
 
 #[test]
-fn 填了站點的機器會被放進站點底下() {
-    let mut project = 空專案();
+fn a_node_with_a_site_lands_under_that_site() {
+    let mut project = empty_project();
     let sheet = Sheet::new(
         template_headers(),
-        vec![帶站點的一列(
+        vec![row_with_site(
             "dc-主中心",
             "redis-vm-01",
             "redis",
@@ -428,17 +428,17 @@ fn 填了站點的機器會被放進站點底下() {
     import(&mut project, &sheet).unwrap();
 
     let env = &project.environments[0];
-    let 站點: Vec<_> = env
+    let site: Vec<_> = env
         .nodes
         .iter()
         .filter(|n| n.kind == NodeKind::Site)
         .collect();
-    assert_eq!(站點.len(), 1);
-    assert_eq!(站點[0].slug, "dc-主中心");
-    assert!(站點[0].instances.is_empty(), "站點本身不跑東西");
+    assert_eq!(site.len(), 1);
+    assert_eq!(site[0].slug, "dc-主中心");
+    assert!(site[0].instances.is_empty(), "站點本身不跑東西");
 
-    let 機器: Vec<&str> = 站點[0].children.iter().map(|n| n.slug.as_str()).collect();
-    assert_eq!(機器, vec!["app-vm-01", "redis-vm-01"]);
+    let node: Vec<&str> = site[0].children.iter().map(|n| n.slug.as_str()).collect();
+    assert_eq!(node, vec!["app-vm-01", "redis-vm-01"]);
     assert!(
         env.nodes.iter().all(|n| n.kind == NodeKind::Site),
         "最外層只該有站點，機器要在站點底下"
@@ -446,10 +446,10 @@ fn 填了站點的機器會被放進站點底下() {
 }
 
 #[test]
-fn 沒填站點時維持原本的扁平結構() {
+fn without_a_site_the_structure_stays_flat() {
     // 既有的試算表沒有這兩欄，匯進來的結果必須跟以前一模一樣。
-    let mut project = 空專案();
-    let sheet = Sheet::new(template_headers(), vec![直連那列()]);
+    let mut project = empty_project();
+    let sheet = Sheet::new(template_headers(), vec![direct_row()]);
     import(&mut project, &sheet).unwrap();
 
     let env = &project.environments[0];
@@ -458,11 +458,11 @@ fn 沒填站點時維持原本的扁平結構() {
 }
 
 #[test]
-fn 補上站點欄位重新匯入機器會自己歸位() {
+fn adding_site_columns_and_reimporting_relocates_existing_nodes() {
     // 真實流程：先匯了一份沒有站點的表，後來補上欄位再匯一次。
     // 機器應該被搬進站點，而不是變成兩台同名的。
-    let mut project = 空專案();
-    let 沒站點 = Sheet::new(
+    let mut project = empty_project();
+    let without_site = Sheet::new(
         template_headers(),
         vec![row_from_pairs(&[
             ("environment", "prod"),
@@ -477,18 +477,18 @@ fn 補上站點欄位重新匯入機器會自己歸位() {
             ("protocol", "TCP"),
         ])],
     );
-    import(&mut project, &沒站點).unwrap();
+    import(&mut project, &without_site).unwrap();
 
-    let 有站點 = Sheet::new(
+    let with_site = Sheet::new(
         template_headers(),
-        vec![帶站點的一列(
+        vec![row_with_site(
             "dc-主中心",
             "redis-vm-01",
             "redis",
             "10.1.0.11:6379",
         )],
     );
-    import(&mut project, &有站點).unwrap();
+    import(&mut project, &with_site).unwrap();
 
     let env = &project.environments[0];
     assert_eq!(env.nodes.len(), 1, "最外層只該剩下站點：{:?}", env.nodes);
@@ -497,15 +497,15 @@ fn 補上站點欄位重新匯入機器會自己歸位() {
 }
 
 #[test]
-fn 萬用字元加站點會限定範圍() {
+fn a_wildcard_plus_a_site_narrows_the_scope() {
     // 這是站點欄位真正的價值：讓匯進來的資料也享受得到 within，
     // 否則 expect 還是在數總量，機器搬家抓不到（見 L-C）。
-    let mut project = 空專案();
+    let mut project = empty_project();
     let sheet = Sheet::new(
         template_headers(),
         vec![
-            帶站點的一列("dc-主中心", "redis-vm-01", "redis", "10.1.0.11:6379"),
-            帶站點的一列("dc-主中心", "redis-vm-02", "redis", "10.1.0.12:6379"),
+            row_with_site("dc-主中心", "redis-vm-01", "redis", "10.1.0.11:6379"),
+            row_with_site("dc-主中心", "redis-vm-02", "redis", "10.1.0.12:6379"),
             row_from_pairs(&[
                 ("environment", "prod"),
                 ("purpose", "測試"),
@@ -524,7 +524,7 @@ fn 萬用字元加站點會限定範圍() {
     );
     import(&mut project, &sheet).unwrap();
 
-    let 站點 = project.environments[0]
+    let site = project.environments[0]
         .nodes
         .iter()
         .find(|n| n.slug == "dc-主中心")
@@ -532,7 +532,7 @@ fn 萬用字元加站點會限定範圍() {
         .id
         .clone();
 
-    let 萬用那條 = project.environments[0]
+    let wildcard_row = project.environments[0]
         .connections
         .iter()
         .find(|c| {
@@ -549,11 +549,11 @@ fn 萬用字元加站點會限定範圍() {
     let Endpointing::Instance {
         target: InstanceRef::Pattern { within, expect, .. },
         ..
-    } = &萬用那條.to
+    } = &wildcard_row.to
     else {
         unreachable!()
     };
-    assert_eq!(within.as_ref(), Some(&站點));
+    assert_eq!(within.as_ref(), Some(&site));
     assert_eq!(*expect, Some(2));
 
     assert!(
@@ -564,12 +564,12 @@ fn 萬用字元加站點會限定範圍() {
 }
 
 #[test]
-fn 可以標成備援路徑() {
-    let mut project = 空專案();
-    let mut 那列 = 帶站點的一列("dc-異地", "redis-vm-09", "redis", "10.2.0.11:6379");
-    改欄(&mut 那列, "kind", "fallback");
+fn can_be_marked_as_a_fallback_path() {
+    let mut project = empty_project();
+    let mut that_row = row_with_site("dc-異地", "redis-vm-09", "redis", "10.2.0.11:6379");
+    set_cell(&mut that_row, "kind", "fallback");
 
-    let sheet = Sheet::new(template_headers(), vec![那列]);
+    let sheet = Sheet::new(template_headers(), vec![that_row]);
     import(&mut project, &sheet).unwrap();
 
     assert_eq!(
@@ -579,12 +579,16 @@ fn 可以標成備援路徑() {
 }
 
 #[test]
-fn 認不得的種類會整份拒絕() {
-    let mut project = 空專案();
-    let mut 那列 = 直連那列();
-    改欄(&mut 那列, "kind", "備用");
+fn an_unknown_kind_rejects_the_whole_sheet() {
+    let mut project = empty_project();
+    let mut that_row = direct_row();
+    set_cell(&mut that_row, "kind", "備用");
 
-    let err = import(&mut project, &Sheet::new(template_headers(), vec![那列])).unwrap_err();
+    let err = import(
+        &mut project,
+        &Sheet::new(template_headers(), vec![that_row]),
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         loom_core::importer::ImportError::UnknownKind { .. }
@@ -592,12 +596,12 @@ fn 認不得的種類會整份拒絕() {
 }
 
 #[test]
-fn 用_serves_命名的契約會帶上用途() {
+fn a_contract_named_via_serves_carries_the_purpose() {
     // 這條原本是壞的：`ensure_relationship_by_slug` 傳空字串當用途，
     // 所以用 serves 命名的契約永遠帶著一個 L007 警告，
     // 而且從試算表修不掉——出貨的樣板本來就會產生六個。
-    let mut project = 空專案();
-    import(&mut project, &表(vec![直連那列()])).unwrap();
+    let mut project = empty_project();
+    import(&mut project, &sheet(vec![direct_row()])).unwrap();
 
     assert!(
         project
@@ -615,7 +619,7 @@ fn 用_serves_命名的契約會帶上用途() {
 }
 
 #[test]
-fn 樣板匯進來不會有沒填用途的警告() {
+fn the_shipped_template_imports_without_purpose_warnings() {
     // 直接拿出貨的樣板驗。使用者第一次用就看到六個修不掉的警告，
     // 會直接學會忽略 lint——那這個工具就廢了。
     let path =
@@ -628,12 +632,12 @@ fn 樣板匯進來不會有沒填用途的警告() {
     };
     let sheet = read_csv(&path).expect("讀得到樣板");
 
-    let mut project = 空專案();
+    let mut project = empty_project();
     import(&mut project, &sheet).unwrap();
 
-    let 沒填用途: Vec<_> = lint(&project)
+    let missing_purpose: Vec<_> = lint(&project)
         .into_iter()
         .filter(|f| f.rule == Rule::L007)
         .collect();
-    assert!(沒填用途.is_empty(), "{沒填用途:?}");
+    assert!(missing_purpose.is_empty(), "{missing_purpose:?}");
 }

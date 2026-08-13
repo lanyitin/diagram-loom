@@ -219,9 +219,9 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             endpoint,
             address,
         } => {
-            let env = 找環境(project, environment)?;
-            let target =
-                找端點(env, endpoint).ok_or_else(|| EditError::NoSuchEndpoint(endpoint.clone()))?;
+            let env = find_env(project, environment)?;
+            let target = find_endpoint(env, endpoint)
+                .ok_or_else(|| EditError::NoSuchEndpoint(endpoint.clone()))?;
             // 空字串等同沒填。否則使用者按了空白鍵存檔，L006 就被騙過去了。
             target.address = address
                 .as_deref()
@@ -251,7 +251,7 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             subject,
             purpose,
         } => {
-            let env = 找環境(project, env_id)?;
+            let env = find_env(project, env_id)?;
             let conn = env
                 .connections
                 .iter_mut()
@@ -267,17 +267,17 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             side,
             expect,
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             let conn = env
                 .connections
                 .iter_mut()
                 .find(|c| &c.id == connection)
                 .ok_or_else(|| EditError::NoSuchConnection(connection.clone()))?;
-            let 那一端 = match side {
+            let side_slot = match side {
                 ConnectionEnd::From => &mut conn.from,
                 ConnectionEnd::To => &mut conn.to,
             };
-            match 那一端 {
+            match side_slot {
                 Endpointing::Instance {
                     target: InstanceRef::Pattern { expect: slot, .. },
                     ..
@@ -297,8 +297,8 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             subject,
             standalone,
         } => {
-            let env = 找環境(project, environment)?;
-            if let Some(instance) = 找實例(&mut env.nodes, subject) {
+            let env = find_env(project, environment)?;
+            if let Some(instance) = find_instance(&mut env.nodes, subject) {
                 instance.standalone = *standalone;
                 return Ok(());
             }
@@ -314,7 +314,7 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             connection,
             kind,
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             let conn = env
                 .connections
                 .iter_mut()
@@ -333,7 +333,7 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             from,
             to,
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             // 同一個 id 不能加兩次。會走到這裡多半是重播（復原後又重做），
             // 安靜地加第二條就會變成兩條一模一樣的連線。
             if env.connections.iter().any(|c| &c.id == id) {
@@ -355,23 +355,24 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             within,
             nodes,
         } => {
-            let env = 找環境(project, environment)?;
+            let env = find_env(project, environment)?;
             // 撞名的已經在 `batch::plan` 擋掉了，這裡只擋「同一批加兩次」，
             // 也就是復原之後又重播的情況。
-            let 既有: std::collections::HashSet<Id> = 所有節點id(&env.nodes).into_iter().collect();
-            if let Some(撞到的) = nodes.iter().find(|n| 既有.contains(&n.id)) {
-                return Err(EditError::AlreadyExists(撞到的.id.clone()));
+            let existing: std::collections::HashSet<Id> =
+                all_node_ids(&env.nodes).into_iter().collect();
+            if let Some(clash) = nodes.iter().find(|n| existing.contains(&n.id)) {
+                return Err(EditError::AlreadyExists(clash.id.clone()));
             }
 
-            let 放進去 = match within {
+            let parent_children = match within {
                 None => &mut env.nodes,
                 Some(node) => {
-                    &mut 找節點(&mut env.nodes, node)
+                    &mut find_node(&mut env.nodes, node)
                         .ok_or_else(|| EditError::NoSuchSubject(node.clone()))?
                         .children
                 }
             };
-            放進去.extend(nodes.iter().cloned());
+            parent_children.extend(nodes.iter().cloned());
             Ok(())
         }
 
@@ -383,10 +384,10 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             environment,
             connection,
         } => {
-            let env = 找環境(project, environment)?;
-            let 原本 = env.connections.len();
+            let env = find_env(project, environment)?;
+            let original = env.connections.len();
             env.connections.retain(|c| &c.id != connection);
-            if env.connections.len() == 原本 {
+            if env.connections.len() == original {
                 return Err(EditError::NoSuchConnection(connection.clone()));
             }
             Ok(())
@@ -405,15 +406,23 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
 /// 作法跟匯入預覽一模一樣：把真的 [`apply`] 跑在複本上，再比對前後的發現。
 /// 代價是複製一份專案，幾千個元素是毫秒級。
 pub fn preview(project: &Project, edit: &Edit) -> Result<Impact, EditError> {
-    let 之前 = lint::lint(project);
+    let before = lint::lint(project);
 
-    let mut 之後專案 = project.clone();
-    apply(&mut 之後專案, edit)?;
-    let 之後 = lint::lint(&之後專案);
+    let mut after_project = project.clone();
+    apply(&mut after_project, edit)?;
+    let after = lint::lint(&after_project);
 
     Ok(Impact {
-        introduced: 之後.iter().filter(|f| !之前.contains(f)).cloned().collect(),
-        resolved: 之前.iter().filter(|f| !之後.contains(f)).cloned().collect(),
+        introduced: after
+            .iter()
+            .filter(|f| !before.contains(f))
+            .cloned()
+            .collect(),
+        resolved: before
+            .iter()
+            .filter(|f| !after.contains(f))
+            .cloned()
+            .collect(),
     })
 }
 
@@ -483,7 +492,7 @@ pub enum FixValue {
 ///
 /// 所以前端全程不需要知道 [`Edit`] 有哪些變體。
 pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> {
-    let 環境 = || {
+    let env_of = || {
         finding
             .environment
             .clone()
@@ -492,7 +501,7 @@ pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> 
 
     match (finding.rule, value) {
         (Rule::L006, FixValue::Text(text)) => Ok(Edit::SetAddress {
-            environment: 環境()?,
+            environment: env_of()?,
             endpoint: finding.subject.clone(),
             address: Some(text.clone()),
         }),
@@ -503,7 +512,7 @@ pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> 
             purpose: text.clone(),
         }),
         (Rule::L004 | Rule::L005, FixValue::Count(count)) => Ok(Edit::SetExpect {
-            environment: 環境()?,
+            environment: env_of()?,
             connection: finding.subject.clone(),
             // 用發現自己說的那一端，**不猜**。
             // 兩端都可能是萬用字元（`apigw-* → common-*`），猜「第一個」
@@ -513,7 +522,7 @@ pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> 
             expect: *count,
         }),
         (Rule::L008, FixValue::Toggle(on)) => Ok(Edit::SetStandalone {
-            environment: 環境()?,
+            environment: env_of()?,
             subject: finding.subject.clone(),
             standalone: *on,
         }),
@@ -528,8 +537,8 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
     match finding.rule {
         Rule::L006 => Some(Fix::Text {
             hint: "10.0.1.11:6379".into(),
-            current: 環境的(project, finding)
-                .and_then(|env| 看端點(env, &finding.subject))
+            current: env_of(project, finding)
+                .and_then(|env| endpoint_of(env, &finding.subject))
                 .and_then(|e| e.address.clone()),
         }),
         Rule::L007 => Some(Fix::Text {
@@ -537,7 +546,7 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
             current: None,
         }),
         Rule::L004 | Rule::L005 => Some(Fix::Count {
-            suggestion: 實際數量(project, finding),
+            suggestion: matched_count(project, finding),
         }),
         Rule::L008 => Some(Fix::Toggle {
             label: "刻意獨立（冷備機等）".into(),
@@ -546,7 +555,7 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
         // 不是畫面，所以在這裡做完。
         //
         // 契約沒實現／走不通 → 補一條連線。
-        Rule::L001 | Rule::L002 if 是契約嗎(project, &finding.subject) => {
+        Rule::L001 | Rule::L002 if is_relationship(project, &finding.subject) => {
             Some(Fix::AddConnection {
                 relationship: finding.subject.clone(),
             })
@@ -567,7 +576,7 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
 
 /// L001 也會報在 Container 與外部系統上（「這個服務在 prod 一台都沒建」），
 /// 那種要建機器，不是補連線。
-fn 是契約嗎(project: &Project, subject: &Id) -> bool {
+fn is_relationship(project: &Project, subject: &Id) -> bool {
     project
         .logical
         .relationships
@@ -577,8 +586,8 @@ fn 是契約嗎(project: &Project, subject: &Id) -> bool {
 
 /// L004 的 detail 裡已經有「實際符合 N 個」，但那是給人看的字串。
 /// 這裡重新算一次給輸入框當預設值——解析字串來取數字太脆弱了。
-fn 實際數量(project: &Project, finding: &Finding) -> Option<u32> {
-    let env = 環境的(project, finding)?;
+fn matched_count(project: &Project, finding: &Finding) -> Option<u32> {
+    let env = env_of(project, finding)?;
     let conn = env.connections.iter().find(|c| c.id == finding.subject)?;
     // 看發現指名的那一端。兩端都是萬用字元時（`apigw-* → common-*`），
     // 「第一個」會給出另一端的數字，使用者照著填反而製造出一個新的 L004。
@@ -602,11 +611,11 @@ fn 實際數量(project: &Project, finding: &Finding) -> Option<u32> {
     Some(index.matching_within(slug_pattern, within.as_ref()).len() as u32)
 }
 
-fn 環境的<'a>(project: &'a Project, finding: &Finding) -> Option<&'a Environment> {
+fn env_of<'a>(project: &'a Project, finding: &Finding) -> Option<&'a Environment> {
     project.environment(finding.environment.as_ref()?)
 }
 
-fn 找環境<'a>(project: &'a mut Project, id: &Id) -> Result<&'a mut Environment, EditError> {
+fn find_env<'a>(project: &'a mut Project, id: &Id) -> Result<&'a mut Environment, EditError> {
     project
         .environments
         .iter_mut()
@@ -615,22 +624,22 @@ fn 找環境<'a>(project: &'a mut Project, id: &Id) -> Result<&'a mut Environmen
 }
 
 /// Endpoint 可能掛在三種地方，這裡一次找完。
-fn 找端點<'a>(env: &'a mut Environment, id: &Id) -> Option<&'a mut Endpoint> {
-    fn 走節點<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut Endpoint> {
+fn find_endpoint<'a>(env: &'a mut Environment, id: &Id) -> Option<&'a mut Endpoint> {
+    fn walk_nodes<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut Endpoint> {
         for node in nodes {
             for instance in &mut node.instances {
                 if let Some(found) = instance.endpoints.iter_mut().find(|e| &e.id == id) {
                     return Some(found);
                 }
             }
-            if let Some(found) = 走節點(&mut node.children, id) {
+            if let Some(found) = walk_nodes(&mut node.children, id) {
                 return Some(found);
             }
         }
         None
     }
 
-    if let Some(found) = 走節點(&mut env.nodes, id) {
+    if let Some(found) = walk_nodes(&mut env.nodes, id) {
         return Some(found);
     }
     for node in &mut env.infra {
@@ -647,7 +656,7 @@ fn 找端點<'a>(env: &'a mut Environment, id: &Id) -> Option<&'a mut Endpoint> 
 }
 
 /// [`找端點`] 的唯讀版。
-fn 看端點<'a>(env: &'a Environment, id: &Id) -> Option<&'a Endpoint> {
+fn endpoint_of<'a>(env: &'a Environment, id: &Id) -> Option<&'a Endpoint> {
     env.instances()
         .into_iter()
         .flat_map(|i| &i.endpoints)
@@ -656,28 +665,28 @@ fn 看端點<'a>(env: &'a Environment, id: &Id) -> Option<&'a Endpoint> {
         .find(|e| &e.id == id)
 }
 
-fn 所有節點id(nodes: &[DeploymentNode]) -> Vec<Id> {
+fn all_node_ids(nodes: &[DeploymentNode]) -> Vec<Id> {
     let mut out = Vec::new();
     for n in nodes {
         out.push(n.id.clone());
-        out.extend(所有節點id(&n.children));
+        out.extend(all_node_ids(&n.children));
     }
     out
 }
 
-fn 找節點<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
+fn find_node<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
     for node in nodes {
         if &node.id == id {
             return Some(node);
         }
-        if let Some(found) = 找節點(&mut node.children, id) {
+        if let Some(found) = find_node(&mut node.children, id) {
             return Some(found);
         }
     }
     None
 }
 
-fn 找實例<'a>(
+fn find_instance<'a>(
     nodes: &'a mut [DeploymentNode],
     id: &Id,
 ) -> Option<&'a mut crate::environment::ContainerInstance> {
@@ -685,7 +694,7 @@ fn 找實例<'a>(
         if let Some(found) = node.instances.iter_mut().find(|i| &i.id == id) {
             return Some(found);
         }
-        if let Some(found) = 找實例(&mut node.children, id) {
+        if let Some(found) = find_instance(&mut node.children, id) {
             return Some(found);
         }
     }

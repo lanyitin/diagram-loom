@@ -15,7 +15,7 @@ import type { Snapshot } from '../lib/model'
 
 vi.mock('../lib/bindings', () => ({ commands: { previewBatch: vi.fn() } }))
 
-const 三台 = {
+const threeNodes = {
   nodes: [{ id: 'n1' }, { id: 'n2' }, { id: 'n3' }],
   preview: [
     'vm-redis-01 / redis-01 @ 10.0.0.11:6379',
@@ -24,7 +24,7 @@ const 三台 = {
   ],
 }
 
-function 假快照(): Snapshot {
+function fakeSnapshot(): Snapshot {
   return {
     root: '/x', findings: [], rows: [], dirty: false, undoLabel: null, redoLabel: null,
     matrix: { relationships: [], environments: [], cells: [] },
@@ -51,12 +51,12 @@ describe('批次建立機器', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useProject()
-    store.snapshot = 假快照()
-    vi.mocked(commands.previewBatch).mockResolvedValue({ status: 'ok', data: 三台 } as never)
+    store.snapshot = fakeSnapshot()
+    vi.mocked(commands.previewBatch).mockResolvedValue({ status: 'ok', data: threeNodes } as never)
   })
 
-  async function 開起來() {
-    store.新增機器中 = { environment: 'env-dev', container: 'c-redis', label: 'redis 一台都沒建' }
+  async function openIt() {
+    store.addingInstances = { environment: 'env-dev', container: 'c-redis', label: 'redis 一台都沒建' }
     const w = mount(AddInstances)
     await flushPromises()
     return w
@@ -68,21 +68,21 @@ describe('批次建立機器', () => {
 
   it('樣板依服務名稱預先填好', async () => {
     // 每次都從空白開始打 redis-{n}，六台建三次就會有人偷懶不補零。
-    const w = await 開起來()
-    const 值 = w.findAll('input[type="text"]').map((i) => (i.element as HTMLInputElement).value)
-    expect(值).toContain('redis-{n}')
-    expect(值).toContain('vm-redis-{n}')
+    const w = await openIt()
+    const values = w.findAll('input[type="text"]').map((i) => (i.element as HTMLInputElement).value)
+    expect(values).toContain('redis-{n}')
+    expect(values).toContain('vm-redis-{n}')
   })
 
   it('按下去之前就列出每一台', async () => {
-    const w = await 開起來()
+    const w = await openIt()
     expect(w.findAll('.preview li')).toHaveLength(3)
     expect(w.find('.preview').text()).toContain('10.0.0.13:6379')
     expect(w.find('.primary').text()).toContain('3 台')
   })
 
   it('改了樣板就重算', async () => {
-    const w = await 開起來()
+    const w = await openIt()
     vi.mocked(commands.previewBatch).mockClear()
 
     await w.findAll('input[type="number"]')[0]!.setValue(6)
@@ -97,7 +97,7 @@ describe('批次建立機器', () => {
     vi.mocked(commands.previewBatch).mockResolvedValue({
       status: 'error', error: { message: 'redis-01 在這個環境已經有了' },
     } as never)
-    const w = await 開起來()
+    const w = await openIt()
 
     expect(w.find('.blocked').text()).toContain('已經有了')
     expect(w.find('.preview').exists()).toBe(false)
@@ -106,40 +106,40 @@ describe('批次建立機器', () => {
 
   it('送出的是預覽算好的那批節點，不是重算一次', async () => {
     // 重算會產生新的 UUID，使用者拿到的就不是他剛剛看過的東西。
-    const w = await 開起來()
-    const 套用 = vi.spyOn(store, '套用編輯').mockResolvedValue(undefined)
+    const w = await openIt()
+    const apply = vi.spyOn(store, 'applyEdit').mockResolvedValue(undefined)
 
     await w.find('.primary').trigger('click')
-    expect(套用).toHaveBeenCalledWith({
-      addInstances: { environment: 'env-dev', within: null, nodes: 三台.nodes },
+    expect(apply).toHaveBeenCalledWith({
+      addInstances: { environment: 'env-dev', within: null, nodes: threeNodes.nodes },
     })
   })
 
   it('可以挑站點放進去', async () => {
-    const w = await 開起來()
-    const 套用 = vi.spyOn(store, '套用編輯').mockResolvedValue(undefined)
+    const w = await openIt()
+    const apply = vi.spyOn(store, 'applyEdit').mockResolvedValue(undefined)
 
-    const 放在 = w.findAll('select').at(-1)!
-    await 放在.setValue('n-site')
+    const within = w.findAll('select').at(-1)!
+    await within.setValue('n-site')
     await w.find('.primary').trigger('click')
 
-    expect(套用).toHaveBeenCalledWith(
+    expect(apply).toHaveBeenCalledWith(
       expect.objectContaining({ addInstances: expect.objectContaining({ within: 'n-site' }) }),
     )
   })
 
   it('接點選單來自那個服務的定義', async () => {
-    const w = await 開起來()
-    const 選項 = w.findAll('select')[1]!.findAll('option').map((o) => o.text())
-    expect(選項).toEqual(['client-port'])
+    const w = await openIt()
+    const options = w.findAll('select')[1]!.findAll('option').map((o) => o.text())
+    expect(options).toEqual(['client-port'])
   })
 
   it('取消不會動到任何東西', async () => {
-    const w = await 開起來()
-    const 套用 = vi.spyOn(store, '套用編輯').mockResolvedValue(undefined)
+    const w = await openIt()
+    const apply = vi.spyOn(store, 'applyEdit').mockResolvedValue(undefined)
 
     await w.findAll('footer button')[0]!.trigger('click')
-    expect(store.新增機器中).toBeNull()
-    expect(套用).not.toHaveBeenCalled()
+    expect(store.addingInstances).toBeNull()
+    expect(apply).not.toHaveBeenCalled()
   })
 })

@@ -18,7 +18,7 @@ vi.mock('../lib/bindings', () => ({
   commands: { resourceTables: vi.fn(), blankResource: vi.fn() },
 }))
 
-const 服務表: Table = {
+const containerTable: Table = {
   kind: 'container',
   title: '服務',
   columns: ['名稱', '顯示名', '所屬系統', 'prod'],
@@ -42,7 +42,7 @@ const 服務表: Table = {
   ],
 } as unknown as Table
 
-const 機器表: Table = {
+const nodeTable: Table = {
   kind: 'node',
   title: '機器',
   columns: ['名稱', '種類', '上面跑的服務'],
@@ -54,7 +54,7 @@ const 機器表: Table = {
   ],
 } as unknown as Table
 
-function 假快照(): Snapshot {
+function fakeSnapshot(): Snapshot {
   return {
     root: '/x', findings: [], rows: [], dirty: false, undoLabel: null, redoLabel: null,
     matrix: { relationships: [], environments: [], cells: [] },
@@ -72,55 +72,55 @@ describe('資源檢視', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useProject()
-    store.snapshot = 假快照()
+    store.snapshot = fakeSnapshot()
     vi.mocked(commands.resourceTables).mockResolvedValue({
-      status: 'ok', data: [服務表, 機器表],
+      status: 'ok', data: [containerTable, nodeTable],
     } as never)
   })
 
-  async function 開起來() {
+  async function openIt() {
     const w = mount(ResourceView)
     await flushPromises()
     return w
   }
 
   it('照 Rust 給的欄位畫，前端不認得那些欄位', async () => {
-    const w = await 開起來()
-    const 表頭 = w.findAll('thead th').map((t) => t.text()).filter(Boolean)
-    expect(表頭).toEqual(['名稱', '顯示名', '所屬系統', 'prod'])
+    const w = await openIt()
+    const headers = w.findAll('thead th').map((t) => t.text()).filter(Boolean)
+    expect(headers).toEqual(['名稱', '顯示名', '所屬系統', 'prod'])
     expect(w.findAll('tbody tr')).toHaveLength(2)
     expect(w.findAll('tbody tr')[0]!.text()).toContain('6 台')
   })
 
   it('分頁上帶著每種資源的數量', async () => {
-    const w = await 開起來()
-    const 分頁 = w.findAll('.tabs > button').map((b) => b.text())
-    expect(分頁[0]).toContain('服務')
-    expect(分頁[0]).toContain('2')
-    expect(分頁[1]).toContain('機器')
+    const w = await openIt()
+    const tabs = w.findAll('.tabs > button').map((b) => b.text())
+    expect(tabs[0]).toContain('服務')
+    expect(tabs[0]).toContain('2')
+    expect(tabs[1]).toContain('機器')
   })
 
   it('有 lint 問題的列標出來', async () => {
-    const w = await 開起來()
+    const w = await openIt()
     expect(w.findAll('.dot.error')).toHaveLength(1)
   })
 
   it('巢狀的機器用縮排表示層級', async () => {
     // 表格畫不出樹，但縮排看得出「這台在那個站點底下」。
-    const w = await 開起來()
+    const w = await openIt()
     await w.findAll('.tabs > button')[1]!.trigger('click')
 
-    const 第二列 = w.findAll('tbody tr')[1]!.findAll('td')[1]!
-    expect(第二列.attributes('style')).toContain('padding-left')
+    const secondRow = w.findAll('tbody tr')[1]!.findAll('td')[1]!
+    expect(secondRow.attributes('style')).toContain('padding-left')
   })
 
   it('空表說一句話，不是留一片白', async () => {
     // 第一次用的人正是從空表開始。留白的話他不知道下一步是什麼。
     vi.mocked(commands.resourceTables).mockResolvedValue({
       status: 'ok',
-      data: [{ ...服務表, rows: [] }],
+      data: [{ ...containerTable, rows: [] }],
     } as never)
-    const w = await 開起來()
+    const w = await openIt()
 
     expect(w.find('table').exists()).toBe(false)
     expect(w.find('.empty').text()).toContain('Redis、Consul')
@@ -131,41 +131,41 @@ describe('資源檢視', () => {
     vi.mocked(commands.blankResource).mockResolvedValue({
       status: 'ok', data: { container: { id: '新的', slug: '' } },
     } as never)
-    const w = await 開起來()
+    const w = await openIt()
 
     await w.find('.add').trigger('click')
     await flushPromises()
 
     expect(commands.blankResource).toHaveBeenCalledWith('container', null, null)
-    expect(store.編輯資源中?.新的).toBe(true)
-    expect(store.編輯資源中?.kind).toBe('服務')
+    expect(store.editingResource?.isNew).toBe(true)
+    expect(store.editingResource?.kind).toBe('服務')
   })
 
   it('編輯直接拿那一列帶著的 resource 當起點', async () => {
     // 讓前端從 project 裡自己撈的話，要知道每種資源住在哪一層——那是模型知識。
-    const w = await 開起來()
+    const w = await openIt()
     await w.findAll('tbody .icon')[0]!.trigger('click')
 
-    expect(store.編輯資源中?.新的).toBe(false)
-    expect(store.編輯資源中?.resource).toEqual(服務表.rows[0]!.resource)
+    expect(store.editingResource?.isNew).toBe(false)
+    expect(store.editingResource?.resource).toEqual(containerTable.rows[0]!.resource)
   })
 
   it('刪除走的是同一個確認框，會先算影響', async () => {
-    const w = await 開起來()
+    const w = await openIt()
     await w.findAll('tbody .icon.del')[0]!.trigger('click')
 
-    expect(store.刪除中).toEqual({
-      edit: { deleteResource: 服務表.rows[0]!.resource },
+    expect(store.deleting).toEqual({
+      edit: { deleteResource: containerTable.rows[0]!.resource },
       kind: '服務',
       label: 'redis',
     })
   })
 
   it('專案一改就重新取，表格不會跟 lint 說不一樣的話', async () => {
-    await 開起來()
+    await openIt()
     vi.mocked(commands.resourceTables).mockClear()
 
-    store.snapshot = 假快照()
+    store.snapshot = fakeSnapshot()
     await flushPromises()
 
     expect(commands.resourceTables).toHaveBeenCalled()

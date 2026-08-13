@@ -26,139 +26,139 @@ import type { Choice, Endpointing, Proposal } from '../lib/model'
 
 const store = useProject()
 
-const 提案 = ref<Proposal | null>(null)
-const 來源選項 = ref<Choice[]>([])
-const 目標選項 = ref<Choice[]>([])
-const 來源 = ref<Endpointing | null>(null)
-const 目標 = ref<Endpointing | null>(null)
-const 用途 = ref('')
-const 備援 = ref(false)
-const 算著 = ref(false)
+const proposal = ref<Proposal | null>(null)
+const fromChoiceList = ref<Choice[]>([])
+const toChoiceList = ref<Choice[]>([])
+const fromChoices = ref<Endpointing | null>(null)
+const target = ref<Endpointing | null>(null)
+const purpose = ref('')
+const isFallback = ref(false)
+const computing = ref(false)
 
 /** 下拉選單依 group 分段，找起來比一長串快。 */
-function 分組(全部: Choice[]) {
+function groupBy(all: Choice[]) {
   const g = new Map<string, Choice[]>()
-  for (const c of 全部) {
+  for (const c of all) {
     if (!g.has(c.group)) g.set(c.group, [])
     g.get(c.group)!.push(c)
   }
   return [...g.entries()]
 }
 
-const 來源分組 = computed(() => 分組(來源選項.value))
-const 目標分組 = computed(() => 分組(目標選項.value))
+const fromGroups = computed(() => groupBy(fromChoiceList.value))
+const toGroups = computed(() => groupBy(toChoiceList.value))
 
 /** 選單的 value 用序號——`endpointing` 是物件，塞不進 `<option value>`。 */
-function 選了(全部: Choice[], i: string): Endpointing | null {
-  return 全部[Number(i)]?.endpointing ?? null
+function picked(all: Choice[], i: string): Endpointing | null {
+  return all[Number(i)]?.endpointing ?? null
 }
 
-function 序號(全部: Choice[], 現在: Endpointing | null): string {
-  if (!現在) return ''
-  const i = 全部.findIndex((c) => JSON.stringify(c.endpointing) === JSON.stringify(現在))
+function indexOf(all: Choice[], current: Endpointing | null): string {
+  if (!current) return ''
+  const i = all.findIndex((c) => JSON.stringify(c.endpointing) === JSON.stringify(current))
   return i < 0 ? '' : String(i)
 }
 
 watch(
-  () => store.新增連線中,
-  async (目標契約) => {
-    提案.value = null
-    來源.value = null
-    目標.value = null
-    用途.value = ''
-    備援.value = false
-    if (!目標契約) return
+  () => store.addingConnection,
+  async (pending) => {
+    proposal.value = null
+    fromChoices.value = null
+    target.value = null
+    purpose.value = ''
+    isFallback.value = false
+    if (!pending) return
 
-    算著.value = true
+    computing.value = true
     const [p, f, t] = await Promise.all([
-      commands.proposeConnection(目標契約.environment, 目標契約.relationship),
-      commands.connectionChoices(目標契約.environment, 'from'),
-      commands.connectionChoices(目標契約.environment, 'to'),
+      commands.proposeConnection(pending.environment, pending.relationship),
+      commands.connectionChoices(pending.environment, 'from'),
+      commands.connectionChoices(pending.environment, 'to'),
     ])
-    算著.value = false
+    computing.value = false
 
     if (p.status !== 'ok') {
-      store.錯誤 = (p.error as { message?: string })?.message ?? String(p.error)
-      store.新增連線中 = null
+      store.error = (p.error as { message?: string })?.message ?? String(p.error)
+      store.addingConnection = null
       return
     }
-    提案.value = p.data
-    用途.value = p.data.purpose
-    來源.value = p.data.from
-    目標.value = p.data.to
-    if (f.status === 'ok') 來源選項.value = f.data
-    if (t.status === 'ok') 目標選項.value = t.data
+    proposal.value = p.data
+    purpose.value = p.data.purpose
+    fromChoices.value = p.data.from
+    target.value = p.data.to
+    if (f.status === 'ok') fromChoiceList.value = f.data
+    if (t.status === 'ok') toChoiceList.value = t.data
   },
   { immediate: true },
 )
 
-const 可以建了 = computed(() => 來源.value !== null && 目標.value !== null)
+const canCreate = computed(() => fromChoices.value !== null && target.value !== null)
 
-async function 建立() {
-  const 目標契約 = store.新增連線中
-  const p = 提案.value
-  if (!目標契約 || !p || !來源.value || !目標.value) return
+async function create() {
+  const pending = store.addingConnection
+  const p = proposal.value
+  if (!pending || !p || !fromChoices.value || !target.value) return
 
-  store.新增連線中 = null
-  await store.套用編輯({
+  store.addingConnection = null
+  await store.applyEdit({
     addConnection: {
-      environment: 目標契約.environment,
+      environment: pending.environment,
       id: p.id,
       serves: p.serves,
-      purpose: 用途.value,
-      kind: 備援.value ? 'fallback' : 'primary',
-      from: 來源.value,
-      to: 目標.value,
+      purpose: purpose.value,
+      kind: isFallback.value ? 'fallback' : 'primary',
+      from: fromChoices.value,
+      to: target.value,
     },
   })
 }
 </script>
 
 <template>
-  <div v-if="store.新增連線中" class="scrim" @click.self="store.新增連線中 = null">
+  <div v-if="store.addingConnection" class="scrim" @click.self="store.addingConnection = null">
     <section class="box" role="dialog" aria-modal="true">
       <h2>補一條連線</h2>
       <p class="muted sub">
-        <span class="mono">{{ store.新增連線中.label }}</span>
-        ・{{ store.環境名(store.新增連線中.environment) }}
+        <span class="mono">{{ store.addingConnection.label }}</span>
+        ・{{ store.envName(store.addingConnection.environment) }}
       </p>
 
-      <p v-if="算著" class="muted">正在照契約擬一條…</p>
+      <p v-if="computing" class="muted">正在照契約擬一條…</p>
 
-      <template v-else-if="提案">
+      <template v-else-if="proposal">
         <!-- 工具做了什麼假設、哪裡擬不出來，一定要講。
              擬得像真的卻不說，使用者會直接按下去。 -->
-        <ul v-if="提案.notes.length" class="notes">
-          <li v-for="(n, i) in 提案.notes" :key="i">{{ n }}</li>
+        <ul v-if="proposal.notes.length" class="notes">
+          <li v-for="(n, i) in proposal.notes" :key="i">{{ n }}</li>
         </ul>
 
         <label class="field">
           <span>來源</span>
-          <select :value="序號(來源選項, 來源)" @change="來源 = 選了(來源選項, ($event.target as HTMLSelectElement).value)">
+          <select :value="indexOf(fromChoiceList, fromChoices)" @change="fromChoices = picked(fromChoiceList, ($event.target as HTMLSelectElement).value)">
             <option value="">（尚未選擇）</option>
-            <optgroup v-for="[g, items] in 來源分組" :key="g" :label="g">
-              <option v-for="c in items" :key="c.label" :value="來源選項.indexOf(c)">{{ c.label }}</option>
+            <optgroup v-for="[g, items] in fromGroups" :key="g" :label="g">
+              <option v-for="c in items" :key="c.label" :value="fromChoiceList.indexOf(c)">{{ c.label }}</option>
             </optgroup>
           </select>
         </label>
 
         <label class="field">
           <span>目標</span>
-          <select :value="序號(目標選項, 目標)" @change="目標 = 選了(目標選項, ($event.target as HTMLSelectElement).value)">
+          <select :value="indexOf(toChoiceList, target)" @change="target = picked(toChoiceList, ($event.target as HTMLSelectElement).value)">
             <option value="">（尚未選擇）</option>
-            <optgroup v-for="[g, items] in 目標分組" :key="g" :label="g">
-              <option v-for="c in items" :key="c.label" :value="目標選項.indexOf(c)">{{ c.label }}</option>
+            <optgroup v-for="[g, items] in toGroups" :key="g" :label="g">
+              <option v-for="c in items" :key="c.label" :value="toChoiceList.indexOf(c)">{{ c.label }}</option>
             </optgroup>
           </select>
         </label>
 
         <label class="field">
           <span>用途</span>
-          <input v-model="用途" type="text" placeholder="這條連線是做什麼用的">
+          <input v-model="purpose" type="text" placeholder="這條連線是做什麼用的">
         </label>
 
         <label class="toggle">
-          <input v-model="備援" type="checkbox">
+          <input v-model="isFallback" type="checkbox">
           這是備援路徑（只在故障時走）
         </label>
       </template>
@@ -166,8 +166,8 @@ async function 建立() {
       <footer>
         <span class="muted hint">建錯了可以按 ⌘Z 復原</span>
         <span class="grow" />
-        <button @click="store.新增連線中 = null">取消</button>
-        <button class="primary" :disabled="!可以建了 || 算著" @click="建立()">建立</button>
+        <button @click="store.addingConnection = null">取消</button>
+        <button class="primary" :disabled="!canCreate || computing" @click="create()">建立</button>
       </footer>
     </section>
   </div>

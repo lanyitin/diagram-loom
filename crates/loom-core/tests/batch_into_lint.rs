@@ -56,7 +56,7 @@ fn prod_with_batch(count: u32, expect: u32) -> loom_core::Project {
 }
 
 #[test]
-fn 批次生出的十二台機器可以直接通過_lint() {
+fn twelve_batch_created_nodes_pass_lint_as_is() {
     let project = prod_with_batch(12, 12);
     let findings = lint(&project);
     assert!(
@@ -66,7 +66,7 @@ fn 批次生出的十二台機器可以直接通過_lint() {
 }
 
 #[test]
-fn 批次數量與expect對不上時會被抓到() {
+fn a_batch_count_that_disagrees_with_expect_is_caught() {
     // 使用者把數量打成 11，但連線仍寫 expect: 12。
     let project = prod_with_batch(11, 12);
 
@@ -81,7 +81,7 @@ fn 批次數量與expect對不上時會被抓到() {
 }
 
 #[test]
-fn 批次生出的實例都有位址不會觸發_l006() {
+fn batch_created_instances_all_have_addresses() {
     let project = prod_with_batch(12, 12);
 
     let addresses: Vec<String> = project.environments[0]
@@ -97,14 +97,14 @@ fn 批次生出的實例都有位址不會觸發_l006() {
 }
 
 #[test]
-fn 批次生出的名稱能被萬用字元選中() {
+fn batch_created_slugs_are_selected_by_the_wildcard() {
     let project = prod_with_batch(12, 12);
     let matched = project.environments[0].instances_matching("redis-*");
     assert_eq!(matched.len(), 12);
 }
 
 #[test]
-fn 批次建立的識別碼不重複() {
+fn batch_ids_are_unique() {
     let project = prod_with_batch(12, 12);
 
     let mut ids: Vec<String> = project.environments[0]
@@ -112,9 +112,9 @@ fn 批次建立的識別碼不重複() {
         .iter()
         .map(|i| i.id.to_string())
         .collect();
-    let 總數 = ids.len();
+    let total = ids.len();
     ids.sort();
     ids.dedup();
 
-    assert_eq!(ids.len(), 總數, "有重複的 Instance 識別碼");
+    assert_eq!(ids.len(), total, "有重複的 Instance 識別碼");
 }

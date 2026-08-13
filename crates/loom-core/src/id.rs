@@ -58,17 +58,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 相同字串視為同一個_id() {
+    fn equal_strings_are_the_same_id() {
         assert_eq!(Id::new("redis"), Id::from("redis"));
     }
 
     #[test]
-    fn 不同字串是不同的_id() {
+    fn different_strings_are_different_ids() {
         assert_ne!(Id::new("redis"), Id::new("consul"));
     }
 
     #[test]
-    fn 每次產生的識別碼都不同() {
+    fn every_generated_id_is_distinct() {
         let a = Id::generate();
         let b = Id::generate();
         assert_ne!(a, b);
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn 序列化成純字串不加包裝() {
+    fn serialises_as_a_bare_string() {
         let yaml = yaml_serde::to_string(&Id::new("c-redis")).unwrap();
         assert_eq!(yaml.trim(), "c-redis");
 
@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn 可以當成雜湊表的鍵() {
+    fn works_as_a_hash_key() {
         use std::collections::HashMap;
         let mut map = HashMap::new();
         map.insert(Id::new("redis"), 6379);

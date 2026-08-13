@@ -15,17 +15,17 @@ import type {
   Snapshot,
 } from './model'
 
-type 檢視 = '覆蓋矩陣' | '連線表' | '資源'
+type view = '覆蓋矩陣' | '連線表' | '資源'
 
 interface State {
   snapshot: Snapshot | null
-  檢視: 檢視
-  面板展開: boolean
-  匯入中: boolean
+  view: view
+  panelOpen: boolean
+  importing: boolean
   /** 使用者勾選要比對哪幾個環境。空陣列代表「全部」。 */
-  比對中的環境: Id[]
-  搜尋: string
-  只看有問題: boolean
+  selectedEnvironments: Id[]
+  search: string
+  onlyProblems: boolean
   /**
    * 從 lint 面板點過來時，只留跟這個元素有關的列。
    *
@@ -33,43 +33,43 @@ interface State {
    * 或 Instance（L008）。「這個 id 對應到哪幾列」由 Rust 的
    * `Row.subjects` 回答，前端只做比對。
    */
-  聚焦: 聚焦目標 | null
-  忙碌中: boolean
-  錯誤: string | null
+  focus: FocusTarget | null
+  busy: boolean
+  error: string | null
   /** 使用者按了刪除、還沒確認的那一條。`null` 表示沒有對話框。 */
-  刪除中: 待刪 | null
+  deleting: PendingDelete | null
   /** 使用者要補一條連線給哪個環境的哪條契約。 */
-  新增連線中: 待建 | null
+  addingConnection: PendingConnection | null
   /** 使用者要在哪個環境批次建立哪個服務的機器。 */
-  新增機器中: 待建機器 | null
+  addingInstances: PendingInstances | null
   /** 使用者正在新增或編輯的資源。 */
-  編輯資源中: 待編 | null
+  editingResource: PendingEdit | null
 }
 
 /** 資源表單需要知道的：改哪一個、是不是新的、怎麼稱呼它。 */
-export interface 待編 {
+export interface PendingEdit {
   resource: Resource
-  新的: boolean
+  isNew: boolean
   /** 標題用：「服務」「契約」。就是分頁上的那個字。 */
   kind: string
 }
 
 /** 批次建立的表單需要知道的：建哪個服務的機器，以及怎麼稱呼它。 */
-export interface 待建機器 {
+export interface PendingInstances {
   environment: Id
   container: Id
   label: string
 }
 
 /** 新增連線的表單需要知道的：補給誰，以及怎麼稱呼它。 */
-export interface 待建 {
+export interface PendingConnection {
   environment: Id
   relationship: Id
   label: string
 }
 
 /** 從哪一項發現跳過來的。標籤是給畫面上那顆「取消聚焦」的膠囊用的。 */
-export interface 聚焦目標 {
+export interface FocusTarget {
   subject: Id
   label: string
 }
@@ -80,7 +80,7 @@ export interface 聚焦目標 {
  * 帶的是一個完整的 `Edit`，不是「連線 id」——連線、服務、契約、機器
  * 都可以刪，而確認框問的問題（「會弄壞什麼」）對每一種都一樣。
  */
-export interface 待刪 {
+export interface PendingDelete {
   edit: Edit
   /** 標題用：「連線」「服務」「契約」。呼叫端本來就知道自己在刪什麼。 */
   kind: string
@@ -91,128 +91,128 @@ export interface 待刪 {
 export const useProject = defineStore('project', {
   state: (): State => ({
     snapshot: null,
-    檢視: '覆蓋矩陣',
-    面板展開: false,
-    匯入中: false,
-    比對中的環境: [],
-    搜尋: '',
-    只看有問題: false,
-    聚焦: null,
-    忙碌中: false,
-    錯誤: null,
-    刪除中: null,
-    新增連線中: null,
-    新增機器中: null,
-    編輯資源中: null,
+    view: '覆蓋矩陣',
+    panelOpen: false,
+    importing: false,
+    selectedEnvironments: [],
+    search: '',
+    onlyProblems: false,
+    focus: null,
+    busy: false,
+    error: null,
+    deleting: null,
+    addingConnection: null,
+    addingInstances: null,
+    editingResource: null,
   }),
 
   getters: {
-    已開啟: (s) => s.snapshot !== null,
+    isOpen: (s) => s.snapshot !== null,
 
-    環境: (s): Environment[] => s.snapshot?.project.environments ?? [],
+    environments: (s): Environment[] => s.snapshot?.project.environments ?? [],
 
-    契約: (s): Relationship[] => s.snapshot?.project.logical.relationships ?? [],
+    relationships: (s): Relationship[] => s.snapshot?.project.logical.relationships ?? [],
 
     /** 目前要顯示的環境欄位。沒勾就是全部。 */
-    顯示的環境(): Environment[] {
-      if (this.比對中的環境.length === 0) return this.環境
-      const 選了 = new Set(this.比對中的環境)
-      return this.環境.filter((e) => 選了.has(e.id))
+    visibleEnvironments(): Environment[] {
+      if (this.selectedEnvironments.length === 0) return this.environments
+      const picked = new Set(this.selectedEnvironments)
+      return this.environments.filter((e) => picked.has(e.id))
     },
 
     /** 依搜尋與「只看有問題」篩過的列。 */
-    顯示的契約(): Relationship[] {
-      const 關鍵字 = this.搜尋.trim().toLowerCase()
-      const 環境們 = new Set(this.顯示的環境.map((e) => e.id))
+    visibleRelationships(): Relationship[] {
+      const keyword = this.search.trim().toLowerCase()
+      const envIds = new Set(this.visibleEnvironments.map((e) => e.id))
 
-      return this.契約.filter((rel) => {
-        if (關鍵字 && !`${rel.slug} ${rel.purpose}`.toLowerCase().includes(關鍵字)) {
+      return this.relationships.filter((rel) => {
+        if (keyword && !`${rel.slug} ${rel.purpose}`.toLowerCase().includes(keyword)) {
           return false
         }
-        if (!this.只看有問題) return true
-        return this.格子們
-          .filter((c) => c.relationship === rel.id && 環境們.has(c.environment))
+        if (!this.onlyProblems) return true
+        return this.cells
+          .filter((c) => c.relationship === rel.id && envIds.has(c.environment))
           .some((c) => c.status !== 'realized')
       })
     },
 
-    格子們: (s): Cell[] => s.snapshot?.matrix.cells ?? [],
+    cells: (s): Cell[] => s.snapshot?.matrix.cells ?? [],
 
-    列: (s): Row[] => s.snapshot?.rows ?? [],
+    rows: (s): Row[] => s.snapshot?.rows ?? [],
 
     /** 連線表要顯示的列。跟矩陣共用同一組篩選條件，切換檢視時不會突然變一套。 */
-    顯示的列(): Row[] {
-      const 關鍵字 = this.搜尋.trim().toLowerCase()
-      const 環境們 = new Set(this.顯示的環境.map((e) => e.id))
+    visibleRows(): Row[] {
+      const keyword = this.search.trim().toLowerCase()
+      const envIds = new Set(this.visibleEnvironments.map((e) => e.id))
 
-      return this.列.filter((r) => {
-        if (!環境們.has(r.environment)) return false
+      return this.rows.filter((r) => {
+        if (!envIds.has(r.environment)) return false
         // 聚焦跟其他條件是 AND，不是取代。跳過去時會先把其他條件清乾淨，
         // 所以當下只有它在作用；之後再搜尋就是在這幾列裡面再縮小，不會跳來跳去。
-        if (this.聚焦 && !r.subjects.includes(this.聚焦.subject)) return false
-        if (this.只看有問題 && r.severity === null) return false
-        if (!關鍵字) return true
-        const 可搜尋 = [
+        if (this.focus && !r.subjects.includes(this.focus.subject)) return false
+        if (this.onlyProblems && r.severity === null) return false
+        if (!keyword) return true
+        const haystack = [
           r.servesSlug ?? r.serves, r.purpose,
           r.from.label, r.to.label,
           ...r.to.addresses,
         ].join(' ').toLowerCase()
-        return 可搜尋.includes(關鍵字)
+        return haystack.includes(keyword)
       })
     },
 
-    發現: (s): Finding[] => s.snapshot?.findings ?? [],
+    findings: (s): Finding[] => s.snapshot?.findings ?? [],
 
-    錯誤數(): number {
-      return this.發現.filter((f) => f.severity === 'error').length
+    errorCount(): number {
+      return this.findings.filter((f) => f.severity === 'error').length
     },
 
-    警告數(): number {
-      return this.發現.filter((f) => f.severity === 'warning').length
+    warningCount(): number {
+      return this.findings.filter((f) => f.severity === 'warning').length
     },
 
     /** 內容跟磁碟上不一樣。是 Rust 算的——前端沒有第二套判斷。 */
-    未儲存: (s): boolean => s.snapshot?.dirty ?? false,
+    dirty: (s): boolean => s.snapshot?.dirty ?? false,
 
-    可復原: (s): string | null => s.snapshot?.undoLabel ?? null,
-    可重做: (s): string | null => s.snapshot?.redoLabel ?? null,
+    undoLabel: (s): string | null => s.snapshot?.undoLabel ?? null,
+    redoLabel: (s): string | null => s.snapshot?.redoLabel ?? null,
   },
 
   actions: {
-    格子(relationship: Id, environment: Id): Cell | undefined {
-      return this.格子們.find(
+    cell(relationship: Id, environment: Id): Cell | undefined {
+      return this.cells.find(
         (c) => c.relationship === relationship && c.environment === environment,
       )
     },
 
-    環境名(id: Id): string {
-      return this.環境.find((e) => e.id === id)?.slug ?? id
+    envName(id: Id): string {
+      return this.environments.find((e) => e.id === id)?.slug ?? id
     },
 
-    async 開啟(path: string) {
-      await this.執行(() => commands.openProject(path))
+    async open(path: string) {
+      await this.run(() => commands.openProject(path))
     },
 
     /** 在一個空資料夾裡開新專案。資料夾非空時 Rust 會擋下來。 */
-    async 建立專案(path: string, name: string) {
-      await this.執行(() => commands.createProject(path, name))
+    async createProject(path: string, name: string) {
+      await this.run(() => commands.createProject(path, name))
       // 空專案沒有連線也沒有契約，矩陣是一片空白。直接帶到資源檢視，
       // 那裡每張表都會說「這是什麼、為什麼需要它」。
-      if (this.已開啟) this.檢視 = '資源'
+      if (this.isOpen) this.view = '資源'
     },
 
-    async 重新檢查() {
-      if (!this.已開啟) return
-      await this.執行(() => commands.recheck())
+    async recheck() {
+      if (!this.isOpen) return
+      await this.run(() => commands.recheck())
     },
 
-    async 儲存() {
-      if (!this.已開啟) return
-      await this.執行(() => commands.saveProject())
+    async save() {
+      if (!this.isOpen) return
+      await this.run(() => commands.saveProject())
     },
 
-    async 套用編輯(edit: Edit) {
-      await this.執行(() => commands.applyEdit(edit))
+    async applyEdit(edit: Edit) {
+      await this.run(() => commands.applyEdit(edit))
     },
 
     /**
@@ -221,8 +221,8 @@ export const useProject = defineStore('project', {
      * 送的是**發現本身 + 填的值**，不是一個 Edit——哪條規則要寫進哪個欄位
      * 由 Rust 的 `edit_for` 決定。這裡多一行對照表，就是第二套規則的開始。
      */
-    async 修好(finding: Finding, value: FixValue) {
-      await this.執行(() => commands.applyFix(finding, value))
+    async applyFix(finding: Finding, value: FixValue) {
+      await this.run(() => commands.applyFix(finding, value))
     },
 
     /**
@@ -231,46 +231,46 @@ export const useProject = defineStore('project', {
      * 跟其他 action 不同，它**不換掉 snapshot**——它什麼都沒改。
      * 失敗時回 null，呼叫端就不要往下走。
      */
-    async 預覽編輯(edit: Edit): Promise<Impact | null> {
-      const 回應 = await commands.previewEdit(edit)
-      if (回應.status === 'ok') return 回應.data
-      this.錯誤 = (回應.error as { message?: string })?.message ?? String(回應.error)
+    async previewEdit(edit: Edit): Promise<Impact | null> {
+      const res = await commands.previewEdit(edit)
+      if (res.status === 'ok') return res.data
+      this.error = (res.error as { message?: string })?.message ?? String(res.error)
       return null
     },
 
     /** 確認刪除。對話框在此之前已經把影響給使用者看過了。 */
-    async 確認刪除() {
-      const 目標 = this.刪除中
-      if (!目標) return
-      this.刪除中 = null
-      await this.套用編輯(目標.edit)
+    async confirmDelete() {
+      const target = this.deleting
+      if (!target) return
+      this.deleting = null
+      await this.applyEdit(target.edit)
     },
 
-    async 復原() {
-      if (!this.可復原) return
-      await this.執行(() => commands.undo())
+    async undo() {
+      if (!this.undoLabel) return
+      await this.run(() => commands.undo())
     },
 
-    async 重做() {
-      if (!this.可重做) return
-      await this.執行(() => commands.redo())
+    async redo() {
+      if (!this.redoLabel) return
+      await this.run(() => commands.redo())
     },
 
     /** 三個 command 的錯誤處理與忙碌狀態都一樣，集中在這裡。 */
-    async 執行(呼叫: () => Promise<{ status: 'ok' | 'error'; data?: unknown; error?: unknown }>) {
-      this.忙碌中 = true
-      this.錯誤 = null
+    async run(call: () => Promise<{ status: 'ok' | 'error'; data?: unknown; error?: unknown }>) {
+      this.busy = true
+      this.error = null
       try {
-        const 回應 = await 呼叫()
-        if (回應.status === 'ok') {
-          this.snapshot = 回應.data as Snapshot
+        const res = await call()
+        if (res.status === 'ok') {
+          this.snapshot = res.data as Snapshot
         } else {
-          this.錯誤 = (回應.error as { message?: string })?.message ?? String(回應.error)
+          this.error = (res.error as { message?: string })?.message ?? String(res.error)
         }
       } catch (e) {
-        this.錯誤 = e instanceof Error ? e.message : String(e)
+        this.error = e instanceof Error ? e.message : String(e)
       } finally {
-        this.忙碌中 = false
+        this.busy = false
       }
     },
   },

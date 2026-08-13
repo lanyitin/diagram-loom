@@ -47,7 +47,7 @@ vi.mock('./lib/bindings', () => ({
   },
 }))
 
-function 假快照(extra: Partial<Snapshot> = {}): Snapshot {
+function fakeSnapshot(extra: Partial<Snapshot> = {}): Snapshot {
   return {
     root: '/tmp/假的.loom',
     findings: [],
@@ -66,9 +66,9 @@ function 假快照(extra: Partial<Snapshot> = {}): Snapshot {
 }
 
 /** 依按鈕上的字找它。位置會變，字不會。 */
-function 鈕(w: ReturnType<typeof mount>, 字: string) {
-  const b = w.findAll('header button').find((x) => x.text().includes(字))
-  expect(b, `找不到「${字}」按鈕`).toBeTruthy()
+function headerButton(w: ReturnType<typeof mount>, text: string) {
+  const b = w.findAll('header button').find((x) => x.text().includes(text))
+  expect(b, `找不到「${text}」按鈕`).toBeTruthy()
   return b!
 }
 
@@ -89,7 +89,7 @@ describe('視窗組裝', () => {
 
   it('開了專案之後歡迎畫面要消失', () => {
     // 這正是踩過的那個 bug：兩個畫面疊在一起，下面那個把版面撐爛。
-    store.snapshot = 假快照()
+    store.snapshot = fakeSnapshot()
     const w = mount(App)
     expect(w.find('.welcome').exists()).toBe(false)
     expect(w.find('.toolbar').exists()).toBe(true)
@@ -98,8 +98,8 @@ describe('視窗組裝', () => {
   it('匯入精靈不會影響歡迎畫面該不該出現', () => {
     // 精靈是疊在上層的對話框，跟「有沒有開專案」是兩件獨立的事。
     // 當初就是把它插進 v-if / v-else 中間才出事的。
-    store.snapshot = 假快照()
-    store.匯入中 = true
+    store.snapshot = fakeSnapshot()
+    store.importing = true
     const w = mount(App)
     expect(w.find('.welcome').exists()).toBe(false)
     expect(w.find('.backdrop').exists()).toBe(true)
@@ -108,14 +108,14 @@ describe('視窗組裝', () => {
   it('歡迎畫面同時提供「從零開始」與「開啟現有」', () => {
     // 使用者不見得有 Excel 可以匯，從零開始是真實情境。
     const w = mount(App)
-    const 字 = w.find('.welcome').text()
-    expect(字).toContain('從零開始')
-    expect(字).toContain('開啟現有專案')
+    const text = w.find('.welcome').text()
+    expect(text).toContain('從零開始')
+    expect(text).toContain('開啟現有專案')
   })
 
   it('切到資源檢視時另外兩個要收起來', () => {
-    store.snapshot = 假快照()
-    store.檢視 = '資源'
+    store.snapshot = fakeSnapshot()
+    store.view = '資源'
     vi.mocked(commands.resourceTables).mockResolvedValue({ status: 'ok', data: [] } as never)
     const w = mount(App)
     expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
@@ -124,8 +124,8 @@ describe('視窗組裝', () => {
   })
 
   it('切到連線表時矩陣要收起來', () => {
-    store.snapshot = 假快照()
-    store.檢視 = '連線表'
+    store.snapshot = fakeSnapshot()
+    store.view = '連線表'
     const w = mount(App)
     expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
     expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(true)
@@ -134,94 +134,94 @@ describe('視窗組裝', () => {
 
   it('沒開專案時不能按儲存與匯入', () => {
     const w = mount(App)
-    const 停用的 = w.findAll('header button')
+    const disabled = w.findAll('header button')
       .filter((b) => b.attributes('disabled') !== undefined)
       .map((b) => b.text())
-    expect(停用的).toContain('儲存')
-    expect(停用的).toContain('匯入試算表…')
+    expect(disabled).toContain('儲存')
+    expect(disabled).toContain('匯入試算表…')
   })
 
   it('沒有未儲存的變更時儲存是停用的', () => {
     // 亮著的儲存鍵等於一直在說「你有事沒做」，看久了就沒意義了。
-    store.snapshot = 假快照({ dirty: false })
-    expect(鈕(mount(App), '儲存').attributes('disabled')).toBeDefined()
+    store.snapshot = fakeSnapshot({ dirty: false })
+    expect(headerButton(mount(App), '儲存').attributes('disabled')).toBeDefined()
 
-    store.snapshot = 假快照({ dirty: true })
+    store.snapshot = fakeSnapshot({ dirty: true })
     const w = mount(App)
-    expect(鈕(w, '儲存').attributes('disabled')).toBeUndefined()
+    expect(headerButton(w, '儲存').attributes('disabled')).toBeUndefined()
     expect(w.find('.dirty').exists()).toBe(true)
   })
 
   it('復原與重做各自看自己有沒有東西可做', () => {
-    store.snapshot = 假快照({ undoLabel: '刪除連線', redoLabel: null })
+    store.snapshot = fakeSnapshot({ undoLabel: '刪除連線', redoLabel: null })
     const w = mount(App)
 
-    expect(鈕(w, '復原').attributes('disabled')).toBeUndefined()
-    expect(鈕(w, '復原').attributes('title')).toBe('復原：刪除連線')
-    expect(鈕(w, '重做').attributes('disabled')).toBeDefined()
+    expect(headerButton(w, '復原').attributes('disabled')).toBeUndefined()
+    expect(headerButton(w, '復原').attributes('title')).toBe('復原：刪除連線')
+    expect(headerButton(w, '重做').attributes('disabled')).toBeDefined()
   })
 
   it('按了復原就往 Rust 送，畫面不自己算', async () => {
-    store.snapshot = 假快照({ undoLabel: '修改用途' })
-    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
+    store.snapshot = fakeSnapshot({ undoLabel: '修改用途' })
+    const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
 
-    await 鈕(mount(App), '復原').trigger('click')
-    expect(復原).toHaveBeenCalled()
+    await headerButton(mount(App), '復原').trigger('click')
+    expect(undo).toHaveBeenCalled()
   })
 
   it('⌘Z 復原、⇧⌘Z 重做', async () => {
     // 只有一顆按鈕的復原，使用者不會相信它——他會改成「不敢亂按」。
-    store.snapshot = 假快照({ undoLabel: '修改用途', redoLabel: '修改用途' })
-    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
-    const 重做 = vi.spyOn(store, '重做').mockResolvedValue(undefined)
+    store.snapshot = fakeSnapshot({ undoLabel: '修改用途', redoLabel: '修改用途' })
+    const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
+    const redo = vi.spyOn(store, 'redo').mockResolvedValue(undefined)
     mount(App, { attachTo: document.body })
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
-    expect(復原).toHaveBeenCalled()
-    expect(重做).not.toHaveBeenCalled()
+    expect(undo).toHaveBeenCalled()
+    expect(redo).not.toHaveBeenCalled()
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true }))
-    expect(重做).toHaveBeenCalled()
+    expect(redo).toHaveBeenCalled()
   })
 
   it('沒開專案時快捷鍵不做事', () => {
-    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
+    const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
     mount(App, { attachTo: document.body })
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
-    expect(復原).not.toHaveBeenCalled()
+    expect(undo).not.toHaveBeenCalled()
   })
 
   it('聚焦時工具列會說出來，而且按一下就沒', async () => {
     // 看不見的篩選會讓使用者以為表格漏了東西。
-    store.snapshot = 假快照()
-    store.檢視 = '連線表'
-    store.聚焦 = { subject: 'conn-1', label: 'L006 redis-01／client-port 缺少位址' }
+    store.snapshot = fakeSnapshot()
+    store.view = '連線表'
+    store.focus = { subject: 'conn-1', label: 'L006 redis-01／client-port 缺少位址' }
     const w = mount(App)
 
     expect(w.find('.focus').text()).toContain('缺少位址')
     await w.find('.focus').trigger('click')
-    expect(store.聚焦).toBeNull()
+    expect(store.focus).toBeNull()
     expect(w.find('.focus').exists()).toBe(false)
   })
 
   it('聚焦到沒有對應列的東西時講一句話，不是留一片空白', () => {
-    store.snapshot = 假快照()
-    store.檢視 = '連線表'
-    store.聚焦 = { subject: '邏輯層的東西', label: 'L007 …' }
+    store.snapshot = fakeSnapshot()
+    store.view = '連線表'
+    store.focus = { subject: '邏輯層的東西', label: 'L007 …' }
     const w = mount(App)
 
     expect(w.find('.notice').exists()).toBe(true)
   })
 
   it('補連線的表單跟歡迎畫面互不影響', () => {
-    store.snapshot = 假快照()
+    store.snapshot = fakeSnapshot()
     vi.mocked(commands.proposeConnection).mockResolvedValue({
       status: 'ok',
       data: { id: 'c', serves: 'r-1', purpose: '', from: null, to: null, notes: [] },
     } as never)
     vi.mocked(commands.connectionChoices).mockResolvedValue({ status: 'ok', data: [] } as never)
-    store.新增連線中 = { environment: 'env-prod', relationship: 'r-1', label: 'x' }
+    store.addingConnection = { environment: 'env-prod', relationship: 'r-1', label: 'x' }
     const w = mount(App)
     expect(w.find('.welcome').exists()).toBe(false)
     expect(w.findComponent({ name: 'AddConnection' }).exists()).toBe(true)
@@ -229,9 +229,9 @@ describe('視窗組裝', () => {
 
   it('刪除確認框跟歡迎畫面互不影響', () => {
     // 跟匯入精靈同一個坑：它是疊在上層的對話框，不是 v-if 鏈的一環。
-    store.snapshot = 假快照()
-    vi.spyOn(store, '預覽編輯').mockResolvedValue({ introduced: [], resolved: [] })
-    store.刪除中 = {
+    store.snapshot = fakeSnapshot()
+    vi.spyOn(store, 'previewEdit').mockResolvedValue({ introduced: [], resolved: [] })
+    store.deleting = {
       edit: { deleteConnection: { environment: 'env-prod', connection: 'c1' } },
       kind: '連線', label: 'a → b',
     }

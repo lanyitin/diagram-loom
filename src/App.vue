@@ -16,9 +16,9 @@ import LintPanel from './components/LintPanel.vue'
 
 const store = useProject()
 
-async function 選專案() {
-  const 選了 = await open({ directory: true, title: '選擇專案資料夾（.loom）' })
-  if (typeof 選了 === 'string') await store.開啟(選了)
+async function pickProject() {
+  const picked = await open({ directory: true, title: '選擇專案資料夾（.loom）' })
+  if (typeof picked === 'string') await store.open(picked)
 }
 
 /**
@@ -28,11 +28,11 @@ async function 選專案() {
  * 「從零開始」是真實情境。資料夾必須是空的，那是 Rust 擋的：
  * 選到一個已經有東西的資料夾就會蓋掉別人的檔案，而那沒辦法復原。
  */
-async function 新專案() {
-  const 選了 = await open({ directory: true, title: '選一個空資料夾放新專案' })
-  if (typeof 選了 !== 'string') return
-  const 名字 = 選了.split('/').pop()?.replace(/\.loom$/, '') || '新專案'
-  await store.建立專案(選了, 名字)
+async function newProject() {
+  const picked = await open({ directory: true, title: '選一個空資料夾放新專案' })
+  if (typeof picked !== 'string') return
+  const name = picked.split('/').pop()?.replace(/\.loom$/, '') || '新專案'
+  await store.createProject(picked, name)
 }
 
 /**
@@ -41,99 +41,99 @@ async function 新專案() {
  * 復原若只有畫面上一顆按鈕，使用者不會相信它——他會改成「不敢亂按」。
  * 快捷鍵是「這個工具可以放心亂試」的訊號。
  */
-function 按鍵(e: KeyboardEvent) {
-  if (!(e.metaKey || e.ctrlKey) || !store.已開啟) return
-  const 鍵 = e.key.toLowerCase()
-  if (鍵 === 'z') {
+function onKeydown(e: KeyboardEvent) {
+  if (!(e.metaKey || e.ctrlKey) || !store.isOpen) return
+  const key = e.key.toLowerCase()
+  if (key === 'z') {
     e.preventDefault()
-    void (e.shiftKey ? store.重做() : store.復原())
-  } else if (鍵 === 's') {
+    void (e.shiftKey ? store.redo() : store.undo())
+  } else if (key === 's') {
     e.preventDefault()
-    void store.儲存()
+    void store.save()
   }
 }
 
-onMounted(() => window.addEventListener('keydown', 按鍵))
-onUnmounted(() => window.removeEventListener('keydown', 按鍵))
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
   <div class="app">
     <header>
-      <strong v-if="store.已開啟">{{ store.snapshot!.project.name }}</strong>
+      <strong v-if="store.isOpen">{{ store.snapshot!.project.name }}</strong>
       <span v-else class="muted">尚未開啟專案</span>
       <!-- 未儲存要看得出來，但不必用紅字嚇人——這個工具本來就是拿來一直改的。 -->
-      <span v-if="store.未儲存" class="dirty" title="有未儲存的變更">未儲存</span>
-      <span v-if="store.已開啟" class="muted mono path">{{ store.snapshot!.root }}</span>
+      <span v-if="store.dirty" class="dirty" title="有未儲存的變更">未儲存</span>
+      <span v-if="store.isOpen" class="muted mono path">{{ store.snapshot!.root }}</span>
 
       <span class="grow" />
 
-      <div v-if="store.已開啟" class="seg">
+      <div v-if="store.isOpen" class="seg">
         <button
-          :disabled="!store.可復原 || store.忙碌中"
-          :title="store.可復原 ? `復原：${store.可復原}` : '沒有可以復原的動作'"
-          @click="store.復原()"
+          :disabled="!store.undoLabel || store.busy"
+          :title="store.undoLabel ? `復原：${store.undoLabel}` : '沒有可以復原的動作'"
+          @click="store.undo()"
         >↶ 復原</button>
         <button
-          :disabled="!store.可重做 || store.忙碌中"
-          :title="store.可重做 ? `重做：${store.可重做}` : '沒有可以重做的動作'"
-          @click="store.重做()"
+          :disabled="!store.redoLabel || store.busy"
+          :title="store.redoLabel ? `重做：${store.redoLabel}` : '沒有可以重做的動作'"
+          @click="store.redo()"
         >↷ 重做</button>
       </div>
 
-      <button :disabled="store.忙碌中" @click="新專案">新專案…</button>
-      <button :disabled="store.忙碌中" @click="選專案">開啟專案…</button>
-      <button :disabled="!store.已開啟 || store.忙碌中" @click="store.匯入中 = true">匯入試算表…</button>
-      <button :disabled="!store.已開啟 || store.忙碌中" @click="store.重新檢查()">重新檢查</button>
-      <button class="primary" :disabled="!store.未儲存 || store.忙碌中" @click="store.儲存()">
+      <button :disabled="store.busy" @click="newProject">新專案…</button>
+      <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
+      <button :disabled="!store.isOpen || store.busy" @click="store.importing = true">匯入試算表…</button>
+      <button :disabled="!store.isOpen || store.busy" @click="store.recheck()">重新檢查</button>
+      <button class="primary" :disabled="!store.dirty || store.busy" @click="store.save()">
         儲存
       </button>
     </header>
 
-    <p v-if="store.錯誤" class="failure" role="alert">{{ store.錯誤 }}</p>
+    <p v-if="store.error" class="failure" role="alert">{{ store.error }}</p>
 
-    <template v-if="store.已開啟">
+    <template v-if="store.isOpen">
       <div class="toolbar">
         <div class="seg">
           <button
             v-for="v in (['覆蓋矩陣', '連線表', '資源'] as const)" :key="v"
-            :class="{ on: store.檢視 === v }"
-            @click="store.檢視 = v"
+            :class="{ on: store.view === v }"
+            @click="store.view = v"
           >{{ v }}</button>
         </div>
-        <input v-model="store.搜尋" type="search" :placeholder="store.檢視 === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
+        <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
         <label class="toggle">
-          <input v-model="store.只看有問題" type="checkbox">
+          <input v-model="store.onlyProblems" type="checkbox">
           只看有問題
         </label>
         <EnvPicker />
 
         <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
              表格漏了東西，所以它必須寫在畫面上，而且一鍵拿得掉。 -->
-        <button v-if="store.聚焦 && store.檢視 === '連線表'" class="focus" @click="store.聚焦 = null">
-          <span class="mono">{{ store.聚焦.label }}</span>
+        <button v-if="store.focus && store.view === '連線表'" class="focus" @click="store.focus = null">
+          <span class="mono">{{ store.focus.label }}</span>
           <span class="x">✕</span>
         </button>
 
         <span class="grow" />
         <span class="muted count">
-          <template v-if="store.檢視 === '覆蓋矩陣'">
-            {{ store.顯示的契約.length }} / {{ store.契約.length }} 條契約
+          <template v-if="store.view === '覆蓋矩陣'">
+            {{ store.visibleRelationships.length }} / {{ store.relationships.length }} 條契約
           </template>
           <template v-else>
-            {{ store.顯示的列.length }} / {{ store.列.length }} 條連線
+            {{ store.visibleRows.length }} / {{ store.rows.length }} 條連線
           </template>
         </span>
       </div>
 
       <!-- 聚焦到一項邏輯層的發現時，連線表本來就不會有列。
            留一片空白會讓人以為工具壞了，所以講清楚。 -->
-      <p v-if="store.聚焦 && store.檢視 === '連線表' && store.顯示的列.length === 0" class="notice">
+      <p v-if="store.focus && store.view === '連線表' && store.visibleRows.length === 0" class="notice">
         這一項不對應到任何一條實際連線——它是邏輯層的問題，或是那個元素根本沒被任何連線碰到。
       </p>
 
-      <CoverageMatrix v-if="store.檢視 === '覆蓋矩陣'" />
-      <ConnectionTable v-else-if="store.檢視 === '連線表'" />
+      <CoverageMatrix v-if="store.view === '覆蓋矩陣'" />
+      <ConnectionTable v-else-if="store.view === '連線表'" />
       <ResourceView v-else />
 
       <LintPanel />
@@ -148,13 +148,13 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
         管理系統的部署與連線，找出每個環境還缺什麼。
       </p>
       <div class="two">
-        <button class="primary" @click="新專案">從零開始…</button>
-        <button @click="選專案">開啟現有專案…</button>
+        <button class="primary" @click="newProject">從零開始…</button>
+        <button @click="pickProject">開啟現有專案…</button>
       </div>
       <p class="muted hint mono">fixtures/sample.loom 是一份刻意留了破洞的範例</p>
     </section>
 
-    <ImportWizard v-if="store.匯入中" />
+    <ImportWizard v-if="store.importing" />
     <AddConnection />
     <AddInstances />
     <ResourceForm />

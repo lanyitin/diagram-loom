@@ -10,11 +10,11 @@ use common::*;
 use loom_core::importer::{Sheet, row_from_pairs, template_headers};
 use loom_core::plan::{ChangeKind, Element, plan};
 
-fn 表(rows: Vec<Vec<String>>) -> Sheet {
+fn sheet(rows: Vec<Vec<String>>) -> Sheet {
     Sheet::new(template_headers(), rows)
 }
 
-fn 一列(env: &str, from: &str, to: &str, address: &str) -> Vec<String> {
+fn row(env: &str, from: &str, to: &str, address: &str) -> Vec<String> {
     row_from_pairs(&[
         ("environment", env),
         ("purpose", "壓力測試"),
@@ -30,77 +30,77 @@ fn 一列(env: &str, from: &str, to: &str, address: &str) -> Vec<String> {
 }
 
 #[test]
-fn 匯進全新的環境時每一項都是新增() {
+fn importing_into_a_fresh_environment_is_all_additions() {
     let project = healthy_project();
     let (p, _) = plan(
         &project,
-        &表(vec![一列("stage", "vm-a", "vm-b", "10.9.0.1:6379")]),
+        &sheet(vec![row("stage", "vm-a", "vm-b", "10.9.0.1:6379")]),
     )
     .unwrap();
 
     assert!(p.changes.iter().all(|c| c.kind == ChangeKind::Added));
     assert_eq!(p.environments, vec!["stage"]);
 
-    let 種類: Vec<Element> = {
+    let kind: Vec<Element> = {
         let mut k: Vec<_> = p.changes.iter().map(|c| c.element).collect();
         k.sort();
         k.dedup();
         k
     };
-    assert!(種類.contains(&Element::Environment));
-    assert!(種類.contains(&Element::DeploymentNode));
-    assert!(種類.contains(&Element::ContainerInstance));
-    assert!(種類.contains(&Element::Connection));
+    assert!(kind.contains(&Element::Environment));
+    assert!(kind.contains(&Element::DeploymentNode));
+    assert!(kind.contains(&Element::ContainerInstance));
+    assert!(kind.contains(&Element::Connection));
 }
 
 #[test]
-fn 預覽不會動到原本的專案() {
+fn preview_leaves_the_original_project_alone() {
     // 預覽如果有副作用，使用者按「取消」之後資料就已經被改了。
     let project = healthy_project();
-    let 原本 = project.clone();
+    let original = project.clone();
 
     let _ = plan(
         &project,
-        &表(vec![一列("stage", "vm-a", "vm-b", "10.9.0.1:6379")]),
+        &sheet(vec![row("stage", "vm-a", "vm-b", "10.9.0.1:6379")]),
     )
     .unwrap();
 
-    assert_eq!(project, 原本);
+    assert_eq!(project, original);
 }
 
 #[test]
-fn 預覽說的就是套用之後的樣子() {
+fn the_preview_is_exactly_what_apply_produces() {
     // 這是整份測試最重要的一條。預覽與實際若不一致，這個步驟就只是裝飾。
     let project = healthy_project();
-    let sheet = 表(vec![
-        一列("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
-        一列("prod", "vm-api-01", "vm-new", "10.0.1.99:6379"),
+    let sheet = sheet(vec![
+        row("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
+        row("prod", "vm-api-01", "vm-new", "10.0.1.99:6379"),
     ]);
 
-    let (p, 套用後) = plan(&project, &sheet).unwrap();
+    let (p, applied) = plan(&project, &sheet).unwrap();
 
     // 拿套用後的結果再預覽一次同一張表——應該完全沒有變更可做。
-    let (再一次, _) = plan(&套用後, &sheet).unwrap();
+    let (again, _) = plan(&applied, &sheet).unwrap();
     assert!(
-        再一次.changes.is_empty(),
+        again.changes.is_empty(),
         "預覽宣稱會做這些事：{:?}\n但套用後再跑一次還有變更：{:?}",
         p.changes.len(),
-        再一次.changes
+        again.changes
     );
-    assert!(再一次.unchanged > 0);
+    assert!(again.unchanged > 0);
 }
 
 #[test]
-fn 重複匯入同一份檔案不會產生重複的連線() {
+fn reimporting_the_same_file_creates_no_duplicate_connections() {
     // 重新匯入更新過的 Excel 是最常見的用法。連線若不 upsert，
     // 每匯一次就整份複製一遍，而且 lint 不會抱怨——使用者根本不會發現。
     let project = healthy_project();
-    let sheet = 表(vec![一列("stage", "vm-a", "vm-b", "10.9.0.1:6379")]);
+    let sheet = sheet(vec![row("stage", "vm-a", "vm-b", "10.9.0.1:6379")]);
 
-    let (_, 第一次) = plan(&project, &sheet).unwrap();
-    let (_, 第二次) = plan(&第一次, &sheet).unwrap();
+    let (_, first) = plan(&project, &sheet).unwrap();
+    let (_, second) = plan(&first, &sheet).unwrap();
 
-    let 連線數 = |p: &loom_core::Project| {
+    let connection_count = |p: &loom_core::Project| {
         p.environments
             .iter()
             .find(|e| e.slug == "stage")
@@ -108,12 +108,12 @@ fn 重複匯入同一份檔案不會產生重複的連線() {
             .connections
             .len()
     };
-    assert_eq!(連線數(&第一次), 1);
-    assert_eq!(連線數(&第二次), 1, "第二次匯入把連線複製了一份");
+    assert_eq!(connection_count(&first), 1);
+    assert_eq!(connection_count(&second), 1, "第二次匯入把連線複製了一份");
 }
 
 #[test]
-fn 改了位址重新匯入不會覆蓋只會警告() {
+fn a_changed_address_warns_on_reimport_instead_of_overwriting() {
     // ⚠️ 這條測的是現行規則（docs/excel-import.md）：位址第一次出現時建立，
     // 之後不一致就警告、不覆蓋。
     //
@@ -123,18 +123,21 @@ fn 改了位址重新匯入不會覆蓋只會警告() {
     //
     // 先照文件走，但把它釘成測試——哪天決定要改，這裡會提醒你那是刻意的取捨。
     let project = healthy_project();
-    let sheet = 表(vec![一列("stage", "vm-a", "vm-b", "10.9.0.1:6379")]);
-    let (_, 之前) = plan(&project, &sheet).unwrap();
+    let first = sheet(vec![row("stage", "vm-a", "vm-b", "10.9.0.1:6379")]);
+    let (_, before) = plan(&project, &first).unwrap();
 
-    let 改過 = 表(vec![一列("stage", "vm-a", "vm-b", "10.9.0.99:6379")]);
-    let (p, _) = plan(&之前, &改過).unwrap();
+    let changed = sheet(vec![row("stage", "vm-a", "vm-b", "10.9.0.99:6379")]);
+    let (p, _) = plan(&before, &changed).unwrap();
 
-    let 位址變更: Vec<_> = p
+    let address_changes: Vec<_> = p
         .changes
         .iter()
         .filter(|c| c.element == Element::Address && c.kind == ChangeKind::Updated)
         .collect();
-    assert!(位址變更.is_empty(), "現行規則不覆蓋位址：{位址變更:?}");
+    assert!(
+        address_changes.is_empty(),
+        "現行規則不覆蓋位址：{address_changes:?}"
+    );
 
     assert_eq!(p.warnings.len(), 1, "但一定要講出來：{:?}", p.warnings);
     assert!(
@@ -145,13 +148,13 @@ fn 改了位址重新匯入不會覆蓋只會警告() {
 }
 
 #[test]
-fn 位址衝突會出現在警告裡而不是靜靜吞掉() {
+fn an_address_conflict_becomes_a_warning_not_a_silent_drop() {
     // 同一個 Endpoint 在兩列填了不同位址。工具保留先出現的，
     // 但一定要講出來——不然使用者會以為兩個都寫進去了。
     let project = healthy_project();
-    let sheet = 表(vec![
-        一列("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
-        一列("stage", "vm-a", "vm-b", "10.9.0.2:6379"),
+    let sheet = sheet(vec![
+        row("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
+        row("stage", "vm-a", "vm-b", "10.9.0.2:6379"),
     ]);
 
     let (p, _) = plan(&project, &sheet).unwrap();
@@ -160,19 +163,19 @@ fn 位址衝突會出現在警告裡而不是靜靜吞掉() {
 }
 
 #[test]
-fn 表頭有問題時整份拒絕不做半套() {
+fn a_bad_header_rejects_the_whole_sheet() {
     let project = healthy_project();
-    let 壞表 = Sheet::new(vec!["environment".into()], vec![vec!["prod".into()]]);
-    assert!(plan(&project, &壞表).is_err());
+    let broken_sheet = Sheet::new(vec!["environment".into()], vec![vec!["prod".into()]]);
+    assert!(plan(&project, &broken_sheet).is_err());
 }
 
 #[test]
-fn 一張表動到多個環境時全部列出來() {
+fn a_sheet_touching_several_environments_lists_them_all() {
     let project = healthy_project();
-    let sheet = 表(vec![
-        一列("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
-        一列("uat", "vm-c", "vm-d", "10.8.0.1:6379"),
-        一列("stage", "vm-a", "vm-e", "10.9.0.2:6379"),
+    let sheet = sheet(vec![
+        row("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
+        row("uat", "vm-c", "vm-d", "10.8.0.1:6379"),
+        row("stage", "vm-a", "vm-e", "10.9.0.2:6379"),
     ]);
 
     let (p, _) = plan(&project, &sheet).unwrap();
@@ -180,20 +183,20 @@ fn 一張表動到多個環境時全部列出來() {
 }
 
 #[test]
-fn 變更依種類分組排好() {
+fn changes_are_grouped_and_sorted_by_kind() {
     // 前端直接照順序畫，同一類的變更會排在一起。
     let project = healthy_project();
     let (p, _) = plan(
         &project,
-        &表(vec![
-            一列("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
-            一列("stage", "vm-c", "vm-d", "10.9.0.2:6379"),
+        &sheet(vec![
+            row("stage", "vm-a", "vm-b", "10.9.0.1:6379"),
+            row("stage", "vm-c", "vm-d", "10.9.0.2:6379"),
         ]),
     )
     .unwrap();
 
-    let 種類: Vec<Element> = p.changes.iter().map(|c| c.element).collect();
-    let mut 排好的 = 種類.clone();
-    排好的.sort();
-    assert_eq!(種類, 排好的);
+    let kind: Vec<Element> = p.changes.iter().map(|c| c.element).collect();
+    let mut sorted = kind.clone();
+    sorted.sort();
+    assert_eq!(kind, sorted);
 }

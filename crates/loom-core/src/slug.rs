@@ -45,42 +45,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 空白轉成連字號並轉小寫() {
+    fn spaces_become_hyphens_and_case_is_lowered() {
         assert_eq!(slugify("Redis Cluster"), "redis-cluster");
     }
 
     #[test]
-    fn 連續分隔符收合成一個() {
+    fn runs_of_separators_collapse_to_one() {
         assert_eq!(slugify("order   api"), "order-api");
         assert_eq!(slugify("f5 -- vip"), "f5-vip");
     }
 
     #[test]
-    fn 去掉頭尾的分隔符() {
+    fn trims_leading_and_trailing_separators() {
         assert_eq!(slugify("  app-vm-01  "), "app-vm-01");
         assert_eq!(slugify("///redis///"), "redis");
     }
 
     #[test]
-    fn 標點視為分隔符() {
+    fn punctuation_becomes_a_separator() {
         assert_eq!(slugify("jdbc:oracle:thin"), "jdbc-oracle-thin");
         assert_eq!(slugify("10.0.1.11:6379"), "10-0-1-11-6379");
     }
 
     #[test]
-    fn 保留中日韓文字() {
+    fn keeps_cjk_characters() {
         assert_eq!(slugify("訂單服務"), "訂單服務");
         assert_eq!(slugify("訂單 服務"), "訂單-服務");
     }
 
     #[test]
-    fn 全是分隔符時得到空字串() {
+    fn all_separators_gives_empty_string() {
         assert_eq!(slugify("---"), "");
         assert_eq!(slugify(""), "");
     }
 
     #[test]
-    fn 正規化後再跑一次不會再變() {
+    fn slugify_is_idempotent() {
         for input in ["Redis Cluster", "  f5 -- vip ", "訂單 服務", "10.0.1.11"] {
             let once = slugify(input);
             assert_eq!(slugify(&once), once, "slugify 對 {input:?} 不是冪等的");
@@ -88,7 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn 判斷是否已正規化() {
+    fn is_normalised() {
         assert!(is_normalized("redis-cluster"));
         assert!(!is_normalized("Redis Cluster"));
         assert!(!is_normalized(""));

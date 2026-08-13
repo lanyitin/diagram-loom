@@ -63,7 +63,7 @@ pub struct Table {
 /// `environment` 為 `None` 時只給邏輯層——剛開一個空專案就是這樣。
 pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
     let findings = lint(project);
-    let 嚴重度 = |id: &Id| {
+    let severity_of = |id: &Id| {
         findings
             .iter()
             .filter(|f| &f.subject == id)
@@ -72,27 +72,27 @@ pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
     };
 
     let mut out = vec![
-        系統表(project, &嚴重度),
-        服務表(project, &嚴重度),
-        接點定義表(project, &嚴重度),
-        契約表(project, &嚴重度),
-        人表(project, &嚴重度),
-        環境表(project, &嚴重度),
+        systems_table(project, &severity_of),
+        containers_table(project, &severity_of),
+        endpoint_defs_table(project, &severity_of),
+        relationships_table(project, &severity_of),
+        people_table(project, &severity_of),
+        environments_table(project, &severity_of),
     ];
 
     if let Some(env_id) = environment
         && let Some(env) = project.environment(env_id)
     {
-        out.push(機器表(env, &嚴重度));
-        out.push(設備表(env, &嚴重度));
-        out.push(外部系統落地表(project, env, &嚴重度));
+        out.push(nodes_table(env, &severity_of));
+        out.push(infra_table(env, &severity_of));
+        out.push(system_instances_table(project, env, &severity_of));
     }
     out
 }
 
-type 嚴重度查詢<'a> = &'a dyn Fn(&Id) -> Option<Severity>;
+type SeverityLookup<'a> = &'a dyn Fn(&Id) -> Option<Severity>;
 
-fn 系統表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
+fn systems_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::System,
         title: "系統".into(),
@@ -130,7 +130,7 @@ fn 系統表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 服務表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
+fn containers_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     // 每個環境一欄「幾台」。這是這張表最有用的東西：一眼看出哪個環境還沒建。
     let mut columns = vec![
         "名稱".into(),
@@ -192,7 +192,7 @@ fn 服務表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 接點定義表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
+fn endpoint_defs_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     // 接點定義掛在服務或外部系統身上，兩邊攤在同一張表裡看比較好核對
     // ——「哪個服務忘了定義接點」是實際會問的問題。
     let mut rows = Vec::new();
@@ -235,8 +235,8 @@ fn 接點定義表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 契約表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
-    let 端名 = |e: &crate::logical::RelationshipEnd| -> String {
+fn relationships_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
+    let end_name = |e: &crate::logical::RelationshipEnd| -> String {
         use crate::logical::RelationshipEnd as E;
         match e {
             E::Container(id) => project
@@ -279,8 +279,8 @@ fn 契約表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
             .map(|r| {
                 let mut cells = vec![
                     r.slug.clone(),
-                    端名(&r.from),
-                    端名(&r.to),
+                    end_name(&r.from),
+                    end_name(&r.to),
                     r.purpose.clone(),
                 ];
                 cells.extend(project.environments.iter().map(|env| {
@@ -301,7 +301,7 @@ fn 契約表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 人表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
+fn people_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Person,
         title: "人".into(),
@@ -323,7 +323,7 @@ fn 人表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 環境表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
+fn environments_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Environment,
         title: "環境".into(),
@@ -346,7 +346,7 @@ fn 環境表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
                 cells: vec![
                     e.slug.clone(),
                     e.name.clone(),
-                    數節點(&e.nodes).to_string(),
+                    count_nodes(&e.nodes).to_string(),
                     e.instances().len().to_string(),
                     e.connections.len().to_string(),
                 ],
@@ -356,18 +356,22 @@ fn 環境表(project: &Project, sev: 嚴重度查詢<'_>) -> Table {
     }
 }
 
-fn 數節點(nodes: &[DeploymentNode]) -> usize {
-    nodes.len() + nodes.iter().map(|n| 數節點(&n.children)).sum::<usize>()
+fn count_nodes(nodes: &[DeploymentNode]) -> usize {
+    nodes.len()
+        + nodes
+            .iter()
+            .map(|n| count_nodes(&n.children))
+            .sum::<usize>()
 }
 
-fn 機器表(env: &crate::environment::Environment, sev: 嚴重度查詢<'_>) -> Table {
+fn nodes_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -> Table {
     // 巢狀攤平成一層，用 `depth` 縮排。表格畫不出樹，但縮排看得出層級。
-    fn 走(
+    fn walk(
         nodes: &[DeploymentNode],
         parent: Option<Id>,
         env_id: &Id,
         depth: u32,
-        sev: 嚴重度查詢<'_>,
+        sev: SeverityLookup<'_>,
         out: &mut Vec<ResourceRow>,
     ) {
         for n in nodes {
@@ -390,12 +394,12 @@ fn 機器表(env: &crate::environment::Environment, sev: 嚴重度查詢<'_>) ->
                     node: n.clone(),
                 },
             });
-            走(&n.children, Some(n.id.clone()), env_id, depth + 1, sev, out);
+            walk(&n.children, Some(n.id.clone()), env_id, depth + 1, sev, out);
         }
     }
 
     let mut rows = Vec::new();
-    走(&env.nodes, None, &env.id, 0, sev, &mut rows);
+    walk(&env.nodes, None, &env.id, 0, sev, &mut rows);
 
     Table {
         kind: Kind::Node,
@@ -407,7 +411,7 @@ fn 機器表(env: &crate::environment::Environment, sev: 嚴重度查詢<'_>) ->
     }
 }
 
-fn 設備表(env: &crate::environment::Environment, sev: 嚴重度查詢<'_>) -> Table {
+fn infra_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Infra,
         title: "設備".into(),
@@ -444,10 +448,10 @@ fn 設備表(env: &crate::environment::Environment, sev: 嚴重度查詢<'_>) ->
     }
 }
 
-fn 外部系統落地表(
+fn system_instances_table(
     project: &Project,
     env: &crate::environment::Environment,
-    sev: 嚴重度查詢<'_>,
+    sev: SeverityLookup<'_>,
 ) -> Table {
     Table {
         kind: Kind::SystemInstance,

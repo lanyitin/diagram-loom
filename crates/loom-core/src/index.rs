@@ -52,7 +52,7 @@ impl<'a> EnvIndex<'a> {
         let mut ancestors: HashMap<&Id, Vec<&Id>> = HashMap::new();
         let mut known_nodes: HashSet<&Id> = HashSet::new();
         for node in &env.nodes {
-            走訪(node, &mut vec![], &mut ancestors, &mut known_nodes);
+            visit(node, &mut vec![], &mut ancestors, &mut known_nodes);
         }
 
         let mut serving: HashMap<&Id, Vec<&Connection>> = HashMap::new();
@@ -95,11 +95,11 @@ impl<'a> EnvIndex<'a> {
 
     /// 服務某條邏輯連線的所有實際連線。
     pub fn serving(&self, relationship: &Id) -> &[&'a Connection] {
-        const 沒有: &[&Connection] = &[];
+        const NONE: &[&Connection] = &[];
         self.serving
             .get(relationship)
             .map(Vec::as_slice)
-            .unwrap_or(沒有)
+            .unwrap_or(NONE)
     }
 
     /// 符合樣式的 Instance。
@@ -116,10 +116,9 @@ impl<'a> EnvIndex<'a> {
         pattern: &str,
         within: Option<&Id>,
     ) -> Vec<&'a ContainerInstance> {
-        let 全部 = self.符合樣式(pattern);
-        let Some(node) = within else { return 全部 };
-        全部
-            .into_iter()
+        let all = self.matching_pattern(pattern);
+        let Some(node) = within else { return all };
+        all.into_iter()
             .filter(|i| {
                 self.ancestors
                     .get(&i.id)
@@ -128,7 +127,7 @@ impl<'a> EnvIndex<'a> {
             .collect()
     }
 
-    fn 符合樣式(&self, pattern: &str) -> Vec<&'a ContainerInstance> {
+    fn matching_pattern(&self, pattern: &str) -> Vec<&'a ContainerInstance> {
         let prefix = pattern.split('*').next().unwrap_or("");
         let lo = self.by_slug.partition_point(|i| i.slug.as_str() < prefix);
         let hi = self
@@ -144,7 +143,7 @@ impl<'a> EnvIndex<'a> {
 }
 
 /// 走一遍部署樹，記下每個 Instance 的祖先鏈與所有節點 id。
-fn 走訪<'a>(
+fn visit<'a>(
     node: &'a DeploymentNode,
     chain: &mut Vec<&'a Id>,
     ancestors: &mut HashMap<&'a Id, Vec<&'a Id>>,
@@ -157,7 +156,7 @@ fn 走訪<'a>(
         ancestors.insert(&inst.id, chain.clone());
     }
     for child in &node.children {
-        走訪(child, chain, ancestors, nodes);
+        visit(child, chain, ancestors, nodes);
     }
 
     chain.pop();

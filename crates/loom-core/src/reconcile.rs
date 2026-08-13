@@ -373,7 +373,7 @@ pub fn model_elements(env: &Environment) -> Vec<ModelElement> {
 mod tests {
     use super::*;
 
-    fn 模型(pairs: &[(&str, &str)]) -> Vec<ModelElement> {
+    fn model(pairs: &[(&str, &str)]) -> Vec<ModelElement> {
         pairs
             .iter()
             .map(|(id, label)| ModelElement {
@@ -384,7 +384,7 @@ mod tests {
             .collect()
     }
 
-    fn 圖(pairs: &[(&str, &str)]) -> Vec<DiagramElement> {
+    fn diagram_of(pairs: &[(&str, &str)]) -> Vec<DiagramElement> {
         pairs
             .iter()
             .map(|(id, label)| DiagramElement {
@@ -394,38 +394,42 @@ mod tests {
             .collect()
     }
 
-    fn 快照(pairs: &[(&str, &str)]) -> SyncSnapshot {
+    fn snapshot_of(pairs: &[(&str, &str)]) -> SyncSnapshot {
         SyncSnapshot {
-            elements: 圖(pairs),
+            elements: diagram_of(pairs),
         }
     }
 
     #[test]
-    fn 三邊一致時沒有差異() {
+    fn no_diff_when_all_three_agree() {
         let diffs = reconcile(
-            &模型(&[("a", "redis-01")]),
-            &圖(&[("a", "redis-01")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "redis-01")]),
+            &diagram_of(&[("a", "redis-01")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert!(diffs.is_empty());
     }
 
     #[test]
-    fn 圖上被刪掉() {
+    fn deleted_from_the_diagram() {
         let diffs = reconcile(
-            &模型(&[("a", "redis-01")]),
-            &圖(&[]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "redis-01")]),
+            &diagram_of(&[]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].kind, DifferenceKind::RemovedFromDiagram);
     }
 
     #[test]
-    fn 模型新增() {
+    fn added_in_the_model() {
         // 跟上面那個測試的差別只在 base 有沒有這個元素——
         // 沒有 base 就分不出這兩種情況。
-        let diffs = reconcile(&模型(&[("a", "redis-01")]), &圖(&[]), &快照(&[]));
+        let diffs = reconcile(
+            &model(&[("a", "redis-01")]),
+            &diagram_of(&[]),
+            &snapshot_of(&[]),
+        );
         assert_eq!(diffs.len(), 1);
         assert_eq!(
             diffs[0].kind,
@@ -436,33 +440,41 @@ mod tests {
     }
 
     #[test]
-    fn 模型那邊刪掉但圖還留著() {
+    fn deleted_in_the_model_but_still_on_the_diagram() {
         let diffs = reconcile(
-            &模型(&[]),
-            &圖(&[("a", "redis-01")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[]),
+            &diagram_of(&[("a", "redis-01")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert_eq!(diffs[0].kind, DifferenceKind::RemovedFromModel);
     }
 
     #[test]
-    fn 圖上多了一個模型查無此元素的形狀() {
-        let diffs = reconcile(&模型(&[]), &圖(&[("a", "redis-01")]), &快照(&[]));
+    fn diagram_has_a_shape_the_model_does_not_know() {
+        let diffs = reconcile(
+            &model(&[]),
+            &diagram_of(&[("a", "redis-01")]),
+            &snapshot_of(&[]),
+        );
         assert_eq!(diffs[0].kind, DifferenceKind::AddedToDiagram);
     }
 
     #[test]
-    fn 兩邊都刪掉就是意見一致() {
-        let diffs = reconcile(&模型(&[]), &圖(&[]), &快照(&[("a", "redis-01")]));
+    fn deleting_on_both_sides_is_agreement() {
+        let diffs = reconcile(
+            &model(&[]),
+            &diagram_of(&[]),
+            &snapshot_of(&[("a", "redis-01")]),
+        );
         assert!(diffs.is_empty());
     }
 
     #[test]
-    fn 只有模型改名() {
+    fn renamed_only_in_the_model() {
         let diffs = reconcile(
-            &模型(&[("a", "redis-primary")]),
-            &圖(&[("a", "redis-01")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "redis-primary")]),
+            &diagram_of(&[("a", "redis-01")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert_eq!(
             diffs[0].kind,
@@ -474,11 +486,11 @@ mod tests {
     }
 
     #[test]
-    fn 只有圖上改名() {
+    fn renamed_only_on_the_diagram() {
         let diffs = reconcile(
-            &模型(&[("a", "redis-01")]),
-            &圖(&[("a", "快取主機")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "redis-01")]),
+            &diagram_of(&[("a", "快取主機")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert_eq!(
             diffs[0].kind,
@@ -490,11 +502,11 @@ mod tests {
     }
 
     #[test]
-    fn 兩邊改成不同名字就是衝突() {
+    fn renaming_both_sides_differently_is_a_conflict() {
         let diffs = reconcile(
-            &模型(&[("a", "redis-primary")]),
-            &圖(&[("a", "快取主機")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "redis-primary")]),
+            &diagram_of(&[("a", "快取主機")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert_eq!(
             diffs[0].kind,
@@ -508,30 +520,30 @@ mod tests {
     }
 
     #[test]
-    fn 兩邊改成同一個名字不算衝突() {
+    fn renaming_both_sides_alike_is_not_a_conflict() {
         let diffs = reconcile(
-            &模型(&[("a", "快取主機")]),
-            &圖(&[("a", "快取主機")]),
-            &快照(&[("a", "redis-01")]),
+            &model(&[("a", "快取主機")]),
+            &diagram_of(&[("a", "快取主機")]),
+            &snapshot_of(&[("a", "redis-01")]),
         );
         assert!(diffs.is_empty());
     }
 
     #[test]
-    fn 結果依id排序() {
+    fn results_are_sorted_by_id() {
         let diffs = reconcile(
-            &模型(&[("c", "三"), ("a", "一"), ("b", "二")]),
-            &圖(&[]),
-            &快照(&[]),
+            &model(&[("c", "三"), ("a", "一"), ("b", "二")]),
+            &diagram_of(&[]),
+            &snapshot_of(&[]),
         );
         let ids: Vec<&str> = diffs.iter().map(|d| d.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b", "c"]);
     }
 
     #[test]
-    fn 新的base只收雙方同意的部分() {
-        let model = 模型(&[("a", "同意"), ("b", "模型這樣叫"), ("c", "只有模型有")]);
-        let diagram = 圖(&[("a", "同意"), ("b", "圖上那樣叫"), ("d", "只有圖上有")]);
+    fn new_base_keeps_only_what_both_sides_agree_on() {
+        let model = model(&[("a", "同意"), ("b", "模型這樣叫"), ("c", "只有模型有")]);
+        let diagram = diagram_of(&[("a", "同意"), ("b", "圖上那樣叫"), ("d", "只有圖上有")]);
 
         let snapshot = settled_snapshot(&model, &diagram);
 
@@ -540,17 +552,17 @@ mod tests {
     }
 
     #[test]
-    fn 對帳解決後再跑一次就乾淨了() {
-        let model = 模型(&[("a", "redis-01")]);
-        let diagram = 圖(&[("a", "redis-01")]);
+    fn reconciling_again_after_resolving_is_clean() {
+        let model = model(&[("a", "redis-01")]);
+        let diagram = diagram_of(&[("a", "redis-01")]);
 
         let base = settled_snapshot(&model, &diagram);
         assert!(reconcile(&model, &diagram, &base).is_empty());
     }
 
     #[test]
-    fn 每種差異都至少提供兩個選項() {
-        let 各種情況 = [
+    fn every_difference_offers_at_least_two_choices() {
+        let cases = [
             DifferenceKind::RemovedFromDiagram,
             DifferenceKind::RemovedFromModel,
             DifferenceKind::AddedToModel {
@@ -572,7 +584,7 @@ mod tests {
             },
         ];
 
-        for kind in 各種情況 {
+        for kind in cases {
             assert!(
                 kind.resolutions().len() >= 2,
                 "{kind:?} 只給一個選項，等於沒得選"

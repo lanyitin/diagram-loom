@@ -33,7 +33,7 @@ fn summarize(project: &loom_core::Project) -> Vec<String> {
 }
 
 #[test]
-fn 健康的專案不該有任何發現() {
+fn a_healthy_project_has_no_findings() {
     let project = healthy_project();
     let found = summarize(&project);
     assert_eq!(
@@ -44,7 +44,7 @@ fn 健康的專案不該有任何發現() {
 }
 
 #[test]
-fn 少建一台機器會被萬用字元的_expect_抓到() {
+fn one_missing_node_is_caught_by_expect() {
     let mut project = healthy_project();
 
     // prod 原本 3 台 Redis，拔掉一台，但連線仍寫 expect: 3。
@@ -55,7 +55,7 @@ fn 少建一台機器會被萬用字元的_expect_抓到() {
 }
 
 #[test]
-fn 萬用字元沒填_expect_只是警告不是錯誤() {
+fn a_wildcard_without_expect_is_a_warning_not_an_error() {
     let mut project = healthy_project();
 
     let prod = &mut project.environments[0];
@@ -72,7 +72,7 @@ fn 萬用字元沒填_expect_只是警告不是錯誤() {
 }
 
 #[test]
-fn 開頭就是萬用字元的樣式也要算對數量() {
+fn a_pattern_starting_with_a_wildcard_still_counts_correctly() {
     // lint 內部為了效能，會先用「第一個 `*` 之前的字面前綴」二分搜出候選範圍，
     // 再做完整比對。`*-01` 這種沒有前綴的樣式是那個最佳化唯一會踩空的地方，
     // 所以特別釘住：它必須退回掃全部，而且算出來的數字要跟直覺一致。
@@ -93,15 +93,15 @@ fn 開頭就是萬用字元的樣式也要算對數量() {
     }
 
     let findings = lint(&project);
-    let 數量對不上: Vec<_> = findings.iter().filter(|f| f.rule == Rule::L004).collect();
+    let count_mismatch: Vec<_> = findings.iter().filter(|f| f.rule == Rule::L004).collect();
     assert!(
-        數量對不上.is_empty(),
-        "`*-01` 應該剛好符合 2 個，卻報了數量錯誤：{數量對不上:?}"
+        count_mismatch.is_empty(),
+        "`*-01` 應該剛好符合 2 個，卻報了數量錯誤：{count_mismatch:?}"
     );
 }
 
 #[test]
-fn f5後面忘了接會被可達性檢查抓到() {
+fn a_dead_end_after_the_f5_is_caught_by_reachability() {
     let mut project = healthy_project();
 
     // 只留下「API → F5」那一段，砍掉「F5 → Redis」。
@@ -118,7 +118,7 @@ fn f5後面忘了接會被可達性檢查抓到() {
 }
 
 #[test]
-fn 整個環境忘了實現邏輯連線() {
+fn an_environment_that_realises_no_contract() {
     let mut project = healthy_project();
 
     let prod = &mut project.environments[0];
@@ -141,7 +141,7 @@ fn 整個環境忘了實現邏輯連線() {
 }
 
 #[test]
-fn 服務在某個環境完全沒部署() {
+fn a_container_deployed_in_no_environment() {
     let mut project = healthy_project();
 
     let dev = &mut project.environments[2];
@@ -162,7 +162,7 @@ fn 服務在某個環境完全沒部署() {
 }
 
 #[test]
-fn endpoint忘了填位址() {
+fn endpoint_without_an_address() {
     let mut project = healthy_project();
 
     let dev = &mut project.environments[2];
@@ -172,7 +172,7 @@ fn endpoint忘了填位址() {
 }
 
 #[test]
-fn 連線指向不存在的機器() {
+fn a_connection_pointing_at_a_missing_instance() {
     let mut project = healthy_project();
 
     let dev = &mut project.environments[2];
@@ -189,15 +189,15 @@ fn 連線指向不存在的機器() {
 }
 
 #[test]
-fn 冷備機標記刻意獨立後就不再警告() {
+fn a_standby_marked_standalone_stops_warning() {
     let mut project = healthy_project();
 
     {
         let dev = &mut project.environments[2];
-        let mut 冷備 = dev.nodes[1].instances[0].clone();
-        冷備.id = Id::new("i-dev-redis-備援");
-        冷備.slug = "redis-standby".into();
-        dev.nodes[0].instances.push(冷備);
+        let mut standby = dev.nodes[1].instances[0].clone();
+        standby.id = Id::new("i-dev-redis-備援");
+        standby.slug = "redis-standby".into();
+        dev.nodes[0].instances.push(standby);
     }
 
     // 沒標記 → 應該要叫
@@ -209,7 +209,7 @@ fn 冷備機標記刻意獨立後就不再警告() {
 }
 
 #[test]
-fn 連線沒填用途只是警告() {
+fn a_connection_without_a_purpose_is_only_a_warning() {
     let mut project = healthy_project();
 
     let dev = &mut project.environments[2];
@@ -222,7 +222,7 @@ fn 連線沒填用途只是警告() {
 }
 
 #[test]
-fn 同一條邏輯連線在三個環境展開成不同數量都算健康() {
+fn one_contract_expanding_to_different_counts_is_still_healthy() {
     // 快取那條：prod 兩段（走 F5）＋ 3 台叢集；test 一段 ＋ 2 台；dev 一段 ＋ 1 台。
     // 數量不同是正常的，不該報錯——這是設計上刻意的決定。
     let project = healthy_project();
@@ -234,7 +234,7 @@ fn 同一條邏輯連線在三個環境展開成不同數量都算健康() {
 }
 
 #[test]
-fn 外部系統在每個環境的落地位址可以不同() {
+fn an_external_system_may_land_on_a_different_address_per_environment() {
     // prod 打正式閘道、test 打 sandbox、dev 打本機 mock。
     // 位址不同是正常的，重點是「每個環境都有指定」。
     let project = healthy_project();
@@ -259,7 +259,7 @@ fn 外部系統在每個環境的落地位址可以不同() {
 }
 
 #[test]
-fn 外部系統忘了在某環境指定落地() {
+fn an_external_system_with_no_landing_in_one_environment() {
     let mut project = healthy_project();
 
     // test 環境忘了填金流 sandbox 的位址。
@@ -278,7 +278,7 @@ fn 外部系統忘了在某環境指定落地() {
 }
 
 #[test]
-fn 外部系統的endpoint忘了填位址() {
+fn an_external_system_endpoint_without_an_address() {
     let mut project = healthy_project();
 
     project.environments[1].systems[0].endpoints[0].address = None;

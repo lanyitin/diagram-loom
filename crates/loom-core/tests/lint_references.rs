@@ -18,7 +18,7 @@ use loom_core::lint::{Rule, Severity, lint};
 use loom_core::logical::RelationshipEnd;
 
 /// 只挑 L012，其他規則會不會跟著叫是另一回事。
-fn 參照問題(project: &loom_core::Project) -> Vec<String> {
+fn reference_problems(project: &loom_core::Project) -> Vec<String> {
     lint(project)
         .iter()
         .filter(|f| f.rule == Rule::L012)
@@ -27,12 +27,12 @@ fn 參照問題(project: &loom_core::Project) -> Vec<String> {
 }
 
 #[test]
-fn 健康的專案不會報參照問題() {
-    assert_eq!(參照問題(&healthy_project()), Vec::<String>::new());
+fn a_healthy_project_reports_no_dangling_references() {
+    assert_eq!(reference_problems(&healthy_project()), Vec::<String>::new());
 }
 
 #[test]
-fn 刪掉服務之後_指著它的落地會被叫出來() {
+fn deleting_a_container_flags_the_instances_pointing_at_it() {
     // 這就是當初挖出這條規則的那個實驗：在有 L012 之前，lint 回傳空陣列。
     let mut project = healthy_project();
     project
@@ -40,18 +40,21 @@ fn 刪掉服務之後_指著它的落地會被叫出來() {
         .containers
         .retain(|c| c.id != Id::new(REDIS));
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        叫的.iter().any(|d| d.contains("指向不存在的服務")),
-        "刪掉服務之後 lint 竟然沒話說：{叫的:?}"
+        complaints.iter().any(|d| d.contains("指向不存在的服務")),
+        "刪掉服務之後 lint 竟然沒話說：{complaints:?}"
     );
     // prod 三台、test 兩台、dev 一台，每一台都要點名——
     // 只說「有東西壞了」而不說是哪幾台，使用者還是得自己找。
-    assert_eq!(叫的.iter().filter(|d| d.starts_with("落地")).count(), 6);
+    assert_eq!(
+        complaints.iter().filter(|d| d.starts_with("落地")).count(),
+        6
+    );
 }
 
 #[test]
-fn 是錯誤不是警告() {
+fn it_is_an_error_not_a_warning() {
     // 資料真的壞了。警告會被當成「之後再說」。
     let mut project = healthy_project();
     project
@@ -67,58 +70,60 @@ fn 是錯誤不是警告() {
 }
 
 #[test]
-fn 刪掉服務之後_契約指著它也會被叫出來() {
+fn deleting_a_container_flags_the_contracts_pointing_at_it() {
     let mut project = healthy_project();
     project
         .logical
         .containers
         .retain(|c| c.id != Id::new(REDIS));
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        叫的.iter().any(|d| d.contains("目標端指向不存在的服務")),
-        "契約還指著被刪掉的服務，卻沒被叫出來：{叫的:?}"
+        complaints
+            .iter()
+            .any(|d| d.contains("目標端指向不存在的服務")),
+        "契約還指著被刪掉的服務，卻沒被叫出來：{complaints:?}"
     );
 }
 
 #[test]
-fn 契約指著不存在的人() {
+fn a_contract_pointing_at_a_missing_person() {
     let mut project = healthy_project();
     project.logical.relationships[0].from = RelationshipEnd::Person(Id::new("p-沒這個人"));
 
-    let 叫的 = 參照問題(&project);
-    assert_eq!(叫的.len(), 1);
-    assert!(叫的[0].contains("來源端指向不存在的人"));
+    let complaints = reference_problems(&project);
+    assert_eq!(complaints.len(), 1);
+    assert!(complaints[0].contains("來源端指向不存在的人"));
 }
 
 #[test]
-fn 說得出是契約的哪一端() {
+fn it_names_which_end_of_the_contract() {
     // 兩端都可能壞掉，不指名的話兩項發現長得一模一樣。
     let mut project = healthy_project();
     project.logical.relationships[0].from = RelationshipEnd::Container(Id::new("c-沒這個"));
     project.logical.relationships[0].to = RelationshipEnd::Container(Id::new("c-也沒這個"));
 
-    let 兩端: Vec<_> = lint(&project)
+    let both_ends: Vec<_> = lint(&project)
         .into_iter()
         .filter(|f| f.rule == Rule::L012 && f.subject == project.logical.relationships[0].id)
         .filter_map(|f| f.end)
         .collect();
-    assert!(兩端.contains(&ConnectionEnd::From));
-    assert!(兩端.contains(&ConnectionEnd::To));
+    assert!(both_ends.contains(&ConnectionEnd::From));
+    assert!(both_ends.contains(&ConnectionEnd::To));
 }
 
 #[test]
-fn 服務屬於一個不存在的系統() {
+fn a_container_owned_by_a_missing_system() {
     let mut project = healthy_project();
     project.logical.containers[0].system = Id::new("s-被刪掉的系統");
 
-    let 叫的 = 參照問題(&project);
-    assert_eq!(叫的.len(), 1);
-    assert!(叫的[0].contains("屬於一個不存在的系統"));
+    let complaints = reference_problems(&project);
+    assert_eq!(complaints.len(), 1);
+    assert!(complaints[0].contains("屬於一個不存在的系統"));
 }
 
 #[test]
-fn 刪掉接點定義之後_用到它的落地會被叫出來() {
+fn deleting_an_endpoint_def_flags_the_instances_using_it() {
     // 這是最容易漏的一種：接點定義只是邏輯層的一個小條目，
     // 刪掉之後每個環境的實際 endpoint 都還在，看起來一切正常。
     let mut project = healthy_project();
@@ -126,45 +131,53 @@ fn 刪掉接點定義之後_用到它的落地會被叫出來() {
         c.endpoints.retain(|e| e.id != Id::new(REDIS_CLIENT));
     }
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        叫的.iter().any(|d| d.contains("指向不存在的接點定義")),
-        "落地上的 endpoint 還指著被刪掉的定義：{叫的:?}"
+        complaints
+            .iter()
+            .any(|d| d.contains("指向不存在的接點定義")),
+        "落地上的 endpoint 還指著被刪掉的定義：{complaints:?}"
     );
     assert!(
-        叫的.iter().any(|d| d.contains("目標身上沒有接點定義")),
-        "契約還指著被刪掉的接點定義：{叫的:?}"
+        complaints
+            .iter()
+            .any(|d| d.contains("目標身上沒有接點定義")),
+        "契約還指著被刪掉的接點定義：{complaints:?}"
     );
 }
 
 #[test]
-fn 契約的目標接點掛在別人身上也算壞掉() {
+fn a_target_endpoint_owned_by_someone_else_is_also_broken() {
     // 指到「存在但不屬於目標」的接點定義。連線展開時會找不到實際 endpoint，
     // 而那個錯誤會出現在很遠的地方，很難追回來。
     let mut project = healthy_project();
     project.logical.relationships[0].to_endpoint = Id::new(PAY_HTTPS);
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        叫的.iter().any(|d| d.contains("目標身上沒有接點定義")),
-        "接點掛在別人身上卻沒被叫出來：{叫的:?}"
+        complaints
+            .iter()
+            .any(|d| d.contains("目標身上沒有接點定義")),
+        "接點掛在別人身上卻沒被叫出來：{complaints:?}"
     );
 }
 
 #[test]
-fn 外部系統落地指著不存在的系統() {
+fn a_system_instance_pointing_at_a_missing_system() {
     let mut project = healthy_project();
     project.logical.systems.retain(|s| s.id != Id::new(PAYMENT));
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        叫的.iter().any(|d| d.contains("指向不存在的外部系統")),
-        "外部系統被刪掉，落地卻沒被叫出來：{叫的:?}"
+        complaints
+            .iter()
+            .any(|d| d.contains("指向不存在的外部系統")),
+        "外部系統被刪掉，落地卻沒被叫出來：{complaints:?}"
     );
 }
 
 #[test]
-fn 擁有者不存在時不會重複叫接點的問題() {
+fn a_missing_owner_does_not_also_flag_its_endpoints() {
     // 服務都不見了，它底下每個 endpoint 再各叫一次「定義不存在」只是噪音。
     // 誤報跟漏報一樣糟——使用者一旦習慣忽略雜訊，真正的問題也會被忽略。
     let mut project = healthy_project();
@@ -173,15 +186,17 @@ fn 擁有者不存在時不會重複叫接點的問題() {
         .containers
         .retain(|c| c.id != Id::new(REDIS));
 
-    let 叫的 = 參照問題(&project);
+    let complaints = reference_problems(&project);
     assert!(
-        !叫的.iter().any(|d| d.contains("指向不存在的接點定義")),
-        "服務不存在時還多叫了接點的問題：{叫的:?}"
+        !complaints
+            .iter()
+            .any(|d| d.contains("指向不存在的接點定義")),
+        "服務不存在時還多叫了接點的問題：{complaints:?}"
     );
 }
 
 #[test]
-fn 設備的接點沒有邏輯層對應_不該被誤報() {
+fn an_infra_endpoint_has_no_logical_counterpart_and_is_not_flagged() {
     // F5 這類設備不對應任何邏輯層元素，它的 endpoint 沒有 `def`。
     // 這是刻意的設計，不是缺漏。
     let project = healthy_project();
@@ -189,5 +204,5 @@ fn 設備的接點沒有邏輯層對應_不該被誤報() {
         project.environments[0].infra[0].endpoints[0].def.is_none(),
         "素材本身要有一個沒有 def 的設備接點，這個測試才有意義"
     );
-    assert_eq!(參照問題(&project), Vec::<String>::new());
+    assert_eq!(reference_problems(&project), Vec::<String>::new());
 }

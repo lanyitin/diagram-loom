@@ -205,7 +205,7 @@ fn project(scale: Scale) -> Project {
 }
 
 /// 跑幾次取最快的一次。最快的那次最接近「沒有被別的行程干擾」的真實成本。
-fn 量(project: &Project) -> (Duration, usize) {
+fn amount(project: &Project) -> (Duration, usize) {
     let mut best = Duration::MAX;
     let mut findings = 0;
     for _ in 0..5 {
@@ -218,7 +218,7 @@ fn 量(project: &Project) -> (Duration, usize) {
 }
 
 #[test]
-fn 產生出來的素材本身是乾淨的() {
+fn the_generated_fixture_is_itself_clean() {
     // 如果素材自己就一堆錯，量到的就不是「正常專案」的成本，
     // 而是「一直在配置錯誤字串」的成本。
     let findings = lint(&project(Scale {
@@ -235,8 +235,8 @@ fn 產生出來的素材本身是乾淨的() {
 }
 
 #[test]
-fn lint_在數百條連線下仍是毫秒級() {
-    let 梯 = [
+fn lint_stays_in_milliseconds_at_hundreds_of_connections() {
+    let step = [
         Scale {
             services: 25,
             envs: 3,
@@ -262,17 +262,17 @@ fn lint_在數百條連線下仍是毫秒級() {
     println!("\n 邏輯連線 │ 實際連線 │  Instance │      耗時 │ 問題數");
     println!("──────────┼──────────┼───────────┼───────────┼────────");
 
-    let mut 最慢 = Duration::ZERO;
-    for scale in 梯 {
-        let (耗時, 問題) = 量(&project(scale));
-        最慢 = 最慢.max(耗時);
+    let mut slowest = Duration::ZERO;
+    for scale in step {
+        let (elapsed, findings) = amount(&project(scale));
+        slowest = slowest.max(elapsed);
         println!(
             "{:>9} │{:>9} │{:>10} │{:>10?} │{:>7}",
             scale.relationships(),
             scale.connections(),
             scale.instances(),
-            耗時,
-            問題
+            elapsed,
+            findings
         );
     }
     println!();
@@ -280,7 +280,7 @@ fn lint_在數百條連線下仍是毫秒級() {
     // 這個上限刻意放得很寬——它不是效能目標，是「有沒有退化成平方級」的警報器。
     // 真實數字比這個小兩個數量級以上；訂太緊只會在別人的機器上隨機紅燈。
     assert!(
-        最慢 < Duration::from_secs(3),
-        "lint 最慢跑了 {最慢:?}——退化成這樣的話，UI 就不能每次改動都重跑了"
+        slowest < Duration::from_secs(3),
+        "lint 最慢跑了 {slowest:?}——退化成這樣的話，UI 就不能每次改動都重跑了"
     );
 }

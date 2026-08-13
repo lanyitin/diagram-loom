@@ -16,7 +16,7 @@ use loom_core::repository;
 
 #[test]
 #[ignore = "產生器，不是測試。用 mise run fixture 執行"]
-fn 產生範例專案() {
+fn dump_sample_fixture() {
     let mut project = healthy_project();
     project.name = "網路商店（範例）".into();
 
@@ -37,15 +37,15 @@ fn 產生範例專案() {
     // ③ test 的某條連線沒填用途 → L007，只是警告。
     project.environments[1].connections[0].purpose.clear();
 
-    let 目的地 =
+    let destination =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sample.loom");
-    if 目的地.exists() {
-        std::fs::remove_dir_all(&目的地).expect("清掉舊的範例專案");
+    if destination.exists() {
+        std::fs::remove_dir_all(&destination).expect("清掉舊的範例專案");
     }
-    repository::save_to_dir(&project, &目的地).expect("寫出範例專案");
+    repository::save_to_dir(&project, &destination).expect("寫出範例專案");
 
     let findings = loom_core::lint::lint(&project);
-    println!("\n已寫出 {}", 目的地.display());
+    println!("\n已寫出 {}", destination.display());
     println!("刻意留下的問題共 {} 項：", findings.len());
     for f in &findings {
         println!("  {} {}", f.rule.code(), f.detail);

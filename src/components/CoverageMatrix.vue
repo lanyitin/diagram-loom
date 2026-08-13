@@ -24,24 +24,24 @@ import type { Cell, Id } from '../lib/model'
 const store = useProject()
 
 /** 格子裡那行字。數字由 Rust 算好，這裡只負責排版。 */
-function 摘要(cell: Cell | undefined): string {
+function summary(cell: Cell | undefined): string {
   if (!cell || cell.status === 'missing') return '未實現'
-  const 段 = `${cell.segments} 段`
+  const segments = `${cell.segments} 段`
   if (cell.expect !== null && cell.expect !== cell.targets) {
-    return `${段} · ${cell.targets}／${cell.expect} 台`
+    return `${segments} · ${cell.targets}／${cell.expect} 台`
   }
-  return cell.targets > 1 ? `${段} · ${cell.targets} 台` : 段
+  return cell.targets > 1 ? `${segments} · ${cell.targets} 台` : segments
 }
 
 /** 滑鼠停留時的說明。把規則代號攤開，使用者不必記 L004 是什麼。 */
-function 說明(cell: Cell | undefined, rel: Id, env: Id): string {
-  const 位置 = `${rel} / ${store.環境名(env)}`
-  if (!cell) return 位置
-  if (cell.rules.length === 0) return `${位置}：沒有問題`
-  const 相關 = store.發現.filter(
+function description(cell: Cell | undefined, rel: Id, env: Id): string {
+  const position = `${rel} / ${store.envName(env)}`
+  if (!cell) return position
+  if (cell.rules.length === 0) return `${position}：沒有問題`
+  const related = store.findings.filter(
     (f) => f.environment === env && cell.rules.includes(f.rule),
   )
-  return [位置, ...相關.map((f) => `${f.rule} ${f.detail}`)].join('\n')
+  return [position, ...related.map((f) => `${f.rule} ${f.detail}`)].join('\n')
 }
 </script>
 
@@ -52,29 +52,29 @@ function 說明(cell: Cell | undefined, rel: Id, env: Id): string {
         <tr>
           <th class="rel">邏輯連線（契約）</th>
           <th class="purpose">用途</th>
-          <th v-for="env in store.顯示的環境" :key="env.id" class="env">
+          <th v-for="env in store.visibleEnvironments" :key="env.id" class="env">
             {{ env.slug }}
           </th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="rel in store.顯示的契約" :key="rel.id">
+        <tr v-for="rel in store.visibleRelationships" :key="rel.id">
           <td class="rel mono">{{ rel.slug }}</td>
           <td class="purpose muted">{{ rel.purpose }}</td>
           <td
-            v-for="env in store.顯示的環境"
+            v-for="env in store.visibleEnvironments"
             :key="env.id"
             class="cell"
-            :title="說明(store.格子(rel.id, env.id), rel.slug, env.id)"
+            :title="description(store.cell(rel.id, env.id), rel.slug, env.id)"
           >
-            <span :class="['chip', store.格子(rel.id, env.id)?.status ?? 'missing']">
-              {{ 摘要(store.格子(rel.id, env.id)) }}
+            <span :class="['chip', store.cell(rel.id, env.id)?.status ?? 'missing']">
+              {{ summary(store.cell(rel.id, env.id)) }}
             </span>
           </td>
         </tr>
-        <tr v-if="store.顯示的契約.length === 0">
-          <td :colspan="store.顯示的環境.length + 2" class="empty muted">
-            {{ store.契約.length === 0 ? '這個專案還沒有定義任何邏輯連線。' : '沒有符合條件的列。' }}
+        <tr v-if="store.visibleRelationships.length === 0">
+          <td :colspan="store.visibleEnvironments.length + 2" class="empty muted">
+            {{ store.relationships.length === 0 ? '這個專案還沒有定義任何邏輯連線。' : '沒有符合條件的列。' }}
           </td>
         </tr>
       </tbody>

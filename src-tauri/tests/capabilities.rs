@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 
-fn 權限() -> HashSet<String> {
+fn permissions() -> HashSet<String> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("讀不到 {}：{e}", path.display()));
@@ -34,11 +34,11 @@ fn 權限() -> HashSet<String> {
 }
 
 #[test]
-fn 前端關得掉視窗() {
+fn the_frontend_can_close_the_window() {
     // 只要 CloseGuard 還在監聽 onCloseRequested，這條就不能拿掉，
     // 否則視窗會關不起來、程序不會結束，而且完全沒有錯誤訊息。
     assert!(
-        權限().contains("core:window:allow-destroy"),
+        permissions().contains("core:window:allow-destroy"),
         "少了 core:window:allow-destroy。CloseGuard 監聽了 onCloseRequested，\
          Tauri 因此會自動 prevent_close()，關不關由前端決定；\
          前端的 destroy() 被權限擋下來的話，視窗就永遠關不掉了。"
@@ -46,10 +46,10 @@ fn 前端關得掉視窗() {
 }
 
 #[test]
-fn 只開必要的權限() {
+fn only_the_permissions_we_need() {
     // 這個檔是安全邊界，不是設定樣板。多開一條就要在這裡多一行，
     // 而多的那一行會逼人想一下「這個真的需要嗎」。
-    let 該有的: HashSet<String> = [
+    let expected: HashSet<String> = [
         // 事件、路徑、視窗查詢等等的基本盤。
         "core:default",
         // 見上面那個測試。
@@ -62,5 +62,5 @@ fn 只開必要的權限() {
     .map(|s| s.to_string())
     .collect();
 
-    assert_eq!(權限(), 該有的);
+    assert_eq!(permissions(), expected);
 }

@@ -133,7 +133,7 @@ pub struct Snapshot {
     pub redo_label: Option<String>,
 }
 
-fn 鎖<'a>(state: &'a State<'_>) -> Result<std::sync::MutexGuard<'a, Opened>, Failure> {
+fn lock_state<'a>(state: &'a State<'_>) -> Result<std::sync::MutexGuard<'a, Opened>, Failure> {
     state.lock().map_err(|_| Failure {
         message: "內部狀態毀損".into(),
     })
@@ -159,7 +159,7 @@ fn snapshot(root: &std::path::Path, history: &History) -> Snapshot {
 }
 
 /// 取出目前開著的專案，沒開就給一句話。
-fn 開著的(opened: &mut Opened) -> Result<(&PathBuf, &mut History), Failure> {
+fn opened_project(opened: &mut Opened) -> Result<(&PathBuf, &mut History), Failure> {
     match (&opened.root, &mut opened.history) {
         (Some(root), Some(history)) => Ok((root, history)),
         _ => Err(Failure {
@@ -175,7 +175,7 @@ fn open_project(state: State<'_>, path: String) -> Result<Snapshot, Failure> {
     let history = History::opened(repository::load_from_dir(&root)?);
 
     let out = snapshot(&root, &history);
-    let mut opened = 鎖(&state)?;
+    let mut opened = lock_state(&state)?;
     opened.root = Some(root);
     opened.history = Some(history);
     opened.pending = None;
@@ -189,8 +189,8 @@ fn open_project(state: State<'_>, path: String) -> Result<Snapshot, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn recheck(state: State<'_>) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     Ok(snapshot(root, history))
 }
 
@@ -200,16 +200,16 @@ fn recheck(state: State<'_>) -> Result<Snapshot, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn preview_edit(state: State<'_>, edit: Edit) -> Result<Impact, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
     edit::preview(history.project(), &edit).map_err(Into::into)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn apply_edit(state: State<'_>, edit: Edit) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     history.edit(&edit)?;
     Ok(snapshot(root, history))
 }
@@ -222,8 +222,8 @@ fn apply_edit(state: State<'_>, edit: Edit) -> Result<Snapshot, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn apply_fix(state: State<'_>, finding: Finding, value: FixValue) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     let edit = edit::edit_for(&finding, &value)?;
     history.edit(&edit)?;
     Ok(snapshot(root, history))
@@ -240,8 +240,8 @@ fn propose_connection(
     environment: loom_core::id::Id,
     relationship: loom_core::id::Id,
 ) -> Result<Proposal, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
     let project = history.project();
     let env = project.environment(&environment).ok_or_else(|| Failure {
         message: format!("找不到環境 {environment}"),
@@ -259,8 +259,8 @@ fn connection_choices(
     environment: loom_core::id::Id,
     end: loom_core::environment::ConnectionEnd,
 ) -> Result<Vec<Choice>, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
     let project = history.project();
     let env = project.environment(&environment).ok_or_else(|| Failure {
         message: format!("找不到環境 {environment}"),
@@ -278,8 +278,8 @@ fn preview_batch(
     environment: loom_core::id::Id,
     spec: BatchSpec,
 ) -> Result<BatchPlan, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
     let project = history.project();
     let env = project.environment(&environment).ok_or_else(|| Failure {
         message: format!("找不到環境 {environment}"),
@@ -297,8 +297,8 @@ fn resource_tables(
     state: State<'_>,
     environment: Option<loom_core::id::Id>,
 ) -> Result<Vec<Table>, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
     Ok(inventory::tables(history.project(), environment.as_ref()))
 }
 
@@ -344,7 +344,7 @@ fn create_project(state: State<'_>, path: String, name: String) -> Result<Snapsh
 
     let history = History::opened(project);
     let out = snapshot(&root, &history);
-    let mut opened = 鎖(&state)?;
+    let mut opened = lock_state(&state)?;
     opened.root = Some(root);
     opened.history = Some(history);
     opened.pending = None;
@@ -356,8 +356,8 @@ fn create_project(state: State<'_>, path: String, name: String) -> Result<Snapsh
 #[tauri::command]
 #[specta::specta]
 fn undo(state: State<'_>) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     history.undo();
     Ok(snapshot(root, history))
 }
@@ -365,8 +365,8 @@ fn undo(state: State<'_>) -> Result<Snapshot, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn redo(state: State<'_>) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     history.redo();
     Ok(snapshot(root, history))
 }
@@ -375,13 +375,13 @@ fn redo(state: State<'_>) -> Result<Snapshot, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn preview_import(state: State<'_>, path: String) -> Result<Plan, Failure> {
-    let sheet = 讀表(&path)?;
-    let mut opened = 鎖(&state)?;
-    let (_, history) = 開著的(&mut opened)?;
+    let sheet = read_sheet(&path)?;
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
 
-    let (計畫, 之後) = plan::plan(history.project(), &sheet)?;
-    opened.pending = Some(之後);
-    Ok(計畫)
+    let (plan_result, after) = plan::plan(history.project(), &sheet)?;
+    opened.pending = Some(after);
+    Ok(plan_result)
 }
 
 /// 套用剛剛預覽過的那一份。
@@ -391,26 +391,26 @@ fn preview_import(state: State<'_>, path: String) -> Result<Plan, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn apply_import(state: State<'_>) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let Some(之後) = opened.pending.take() else {
+    let mut opened = lock_state(&state)?;
+    let Some(after) = opened.pending.take() else {
         return Err(Failure {
             message: "沒有等待套用的匯入。請先預覽。".into(),
         });
     };
-    let (root, history) = 開著的(&mut opened)?;
-    history.replace(之後, "匯入");
+    let (root, history) = opened_project(&mut opened)?;
+    history.replace(after, "匯入");
     Ok(snapshot(root, history))
 }
 
 #[tauri::command]
 #[specta::specta]
 fn cancel_import(state: State<'_>) -> Result<(), Failure> {
-    鎖(&state)?.pending = None;
+    lock_state(&state)?.pending = None;
     Ok(())
 }
 
 /// 副檔名決定怎麼讀。這是轉接，不是判斷。
-fn 讀表(path: &str) -> Result<importer::Sheet, Failure> {
+fn read_sheet(path: &str) -> Result<importer::Sheet, Failure> {
     let p = std::path::Path::new(path);
     match p
         .extension()
@@ -429,8 +429,8 @@ fn 讀表(path: &str) -> Result<importer::Sheet, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn save_project(state: State<'_>) -> Result<Snapshot, Failure> {
-    let mut opened = 鎖(&state)?;
-    let (root, history) = 開著的(&mut opened)?;
+    let mut opened = lock_state(&state)?;
+    let (root, history) = opened_project(&mut opened)?;
     repository::save_to_dir(history.project(), root)?;
     // 只有真的寫成功才記下來，否則 dirty 會說謊，使用者會以為存過了。
     history.mark_saved();

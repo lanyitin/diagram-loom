@@ -432,9 +432,9 @@ fn import_row(
         .iter_mut()
         .find(|c| c.serves == serves && c.from == from_side && c.to == to_side)
     {
-        Some(既有) => {
-            既有.purpose = purpose;
-            既有.kind = kind;
+        Some(existing) => {
+            existing.purpose = purpose;
+            existing.kind = kind;
             report.connections_updated += 1;
         }
         None => {
@@ -640,9 +640,9 @@ fn ensure_site(project: &mut Project, env_slug: &str, site_slug: &str) -> Id {
 ///
 /// 已經存在但擺錯地方的會被**搬過去**——試算表補上 `site` 欄位之後
 /// 重新匯入，機器就會自己歸位，不必手動搬。
-fn 安置機器(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id {
+fn place_node(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id {
     // 先看它是不是已經在對的位置。
-    let 目標底下 = match site {
+    let under_target = match site {
         Some(sid) => env
             .nodes
             .iter()
@@ -651,19 +651,19 @@ fn 安置機器(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id
             .unwrap_or(false),
         None => env.nodes.iter().any(|n| n.slug == node_slug),
     };
-    if 目標底下 {
-        return 找機器(&env.nodes, node_slug).expect("剛剛才確認在的");
+    if under_target {
+        return find_machine(&env.nodes, node_slug).expect("剛剛才確認在的");
     }
 
     // 不在對的位置：從別處抽出來（或新建），再放進去。
-    let 機器 = 抽出機器(&mut env.nodes, node_slug).unwrap_or_else(|| DeploymentNode {
+    let machine = take_machine(&mut env.nodes, node_slug).unwrap_or_else(|| DeploymentNode {
         id: Id::generate(),
         slug: node_slug.to_string(),
         kind: NodeKind::VirtualMachine,
         children: vec![],
         instances: vec![],
     });
-    let id = 機器.id.clone();
+    let id = machine.id.clone();
 
     match site {
         Some(sid) => env
@@ -672,30 +672,30 @@ fn 安置機器(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id
             .find(|n| &n.id == sid)
             .expect("站點在此之前已由 ensure_site 建立")
             .children
-            .push(機器),
-        None => env.nodes.push(機器),
+            .push(machine),
+        None => env.nodes.push(machine),
     }
     id
 }
 
-fn 找機器(nodes: &[DeploymentNode], slug: &str) -> Option<Id> {
+fn find_machine(nodes: &[DeploymentNode], slug: &str) -> Option<Id> {
     for n in nodes {
         if n.slug == slug {
             return Some(n.id.clone());
         }
-        if let Some(found) = 找機器(&n.children, slug) {
+        if let Some(found) = find_machine(&n.children, slug) {
             return Some(found);
         }
     }
     None
 }
 
-fn 抽出機器(nodes: &mut Vec<DeploymentNode>, slug: &str) -> Option<DeploymentNode> {
+fn take_machine(nodes: &mut Vec<DeploymentNode>, slug: &str) -> Option<DeploymentNode> {
     if let Some(i) = nodes.iter().position(|n| n.slug == slug) {
         return Some(nodes.remove(i));
     }
     for n in nodes.iter_mut() {
-        if let Some(found) = 抽出機器(&mut n.children, slug) {
+        if let Some(found) = take_machine(&mut n.children, slug) {
             return Some(found);
         }
     }
@@ -716,7 +716,7 @@ fn ensure_instance(
 
     // 先把機器擺到正確的位置——即使 Instance 已經存在也要做。
     // 少了這一步，補上 site 欄位之後重新匯入，機器不會歸位。
-    let node_id = 安置機器(env, node_slug, site);
+    let node_id = place_node(env, node_slug, site);
 
     if let Some(found) = env
         .instances()
@@ -735,7 +735,7 @@ fn ensure_instance(
     };
     let id = instance.id.clone();
 
-    找機器可變(&mut env.nodes, &node_id)
+    find_machine_mut(&mut env.nodes, &node_id)
         .expect("剛剛才安置好的")
         .instances
         .push(instance);
@@ -744,14 +744,17 @@ fn ensure_instance(
     id
 }
 
-fn 找機器可變<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
+fn find_machine_mut<'a>(
+    nodes: &'a mut [DeploymentNode],
+    id: &Id,
+) -> Option<&'a mut DeploymentNode> {
     // 先用不可變借用把位置找出來，再一次可變借用——
     // 邊走邊借的寫法過不了 borrow checker。
     if let Some(i) = nodes.iter().position(|n| &n.id == id) {
         return nodes.get_mut(i);
     }
     for n in nodes.iter_mut() {
-        if let Some(found) = 找機器可變(&mut n.children, id) {
+        if let Some(found) = find_machine_mut(&mut n.children, id) {
             return Some(found);
         }
     }

@@ -7,7 +7,7 @@ use specta_typescript::Typescript;
 
 fn main() {
     // 相對於這個 crate 而不是相對於 cwd——否則從哪個目錄跑會決定檔案掉在哪。
-    let 輸出 = std::env::args().nth(1).unwrap_or_else(|| {
+    let out = std::env::args().nth(1).unwrap_or_else(|| {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../src/lib/bindings.ts")
             .display()
@@ -20,9 +20,9 @@ fn main() {
             // 而且 0.0.12 沒有全域開關。所以會跨邊界的計數一律用 u32——
             // 「期望有幾台機器」本來也不需要 64 位元。
             Typescript::default().header("// 由 `mise run bindings` 產生，不要手改。\n"),
-            &輸出,
+            &out,
         )
         .expect("產生 TypeScript 型別失敗");
 
-    println!("已寫出 {輸出}");
+    println!("已寫出 {out}");
 }

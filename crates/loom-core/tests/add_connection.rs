@@ -12,12 +12,12 @@ use loom_core::environment::{ConnectionEnd, ConnectionKind, Endpointing, Instanc
 use loom_core::id::Id;
 use loom_core::lint::{Rule, lint};
 
-fn 規則(project: &loom_core::Project) -> Vec<Rule> {
+fn rules(project: &loom_core::Project) -> Vec<Rule> {
     lint(project).iter().map(|f| f.rule).collect()
 }
 
 /// 把提案變成一次新增。使用者按下「建立」時做的就是這件事。
-fn 建立(project: &mut loom_core::Project, env: &Id, p: &Proposal) {
+fn create(project: &mut loom_core::Project, env: &Id, p: &Proposal) {
     edit::apply(
         project,
         &Edit::AddConnection {
@@ -34,31 +34,31 @@ fn 建立(project: &mut loom_core::Project, env: &Id, p: &Proposal) {
 }
 
 #[test]
-fn l001_整條契約沒實現_照提案建一條就修好了() {
+fn l001_unrealised_contract_is_fixed_by_the_proposed_connection() {
     let mut project = healthy_project();
     // dev 的快取那條整個拿掉 → L001。
     project.environments[2]
         .connections
         .retain(|c| c.serves != Id::new(REL_CACHE));
-    assert!(規則(&project).contains(&Rule::L001));
+    assert!(rules(&project).contains(&Rule::L001));
 
     let env = project.environments[2].clone();
     let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).unwrap();
     assert!(p.is_complete(), "擬不出來：{:?}", p.notes);
 
-    建立(&mut project, &env.id, &p);
-    assert_eq!(規則(&project), Vec::<Rule>::new());
+    create(&mut project, &env.id, &p);
+    assert_eq!(rules(&project), Vec::<Rule>::new());
 }
 
 #[test]
-fn l002_走不通_補上缺的那一段就通了() {
+fn l002_unreachable_is_fixed_by_adding_the_missing_segment() {
     // prod 的快取走兩段：API → F5 → Redis。砍掉第二段就走不通。
     let mut project = healthy_project();
-    let 第二段 = project.environments[0].connections[1].clone();
+    let second_hop = project.environments[0].connections[1].clone();
     project.environments[0]
         .connections
-        .retain(|c| c.id != 第二段.id);
-    assert!(規則(&project).contains(&Rule::L002));
+        .retain(|c| c.id != second_hop.id);
+    assert!(rules(&project).contains(&Rule::L002));
 
     // 提案擬的是直達那條（工具不知道中間要走 F5，這是人的決定），
     // 所以這裡示範的是使用者自己挑兩端——那正是 `choices` 的用途。
@@ -70,17 +70,17 @@ fn l002_走不通_補上缺的那一段就通了() {
             serves: Id::new(REL_CACHE),
             purpose: "F5 轉給 Redis".into(),
             kind: ConnectionKind::Primary,
-            from: 第二段.from,
-            to: 第二段.to,
+            from: second_hop.from,
+            to: second_hop.to,
         },
     )
     .unwrap();
 
-    assert_eq!(規則(&project), Vec::<Rule>::new());
+    assert_eq!(rules(&project), Vec::<Rule>::new());
 }
 
 #[test]
-fn 提案沿用契約的用途_不留白() {
+fn the_proposal_reuses_the_contract_purpose() {
     // 留白換來的只是一個 L007，而使用者剛剛才修好一個問題。
     let mut project = healthy_project();
     project.environments[2]
@@ -90,13 +90,13 @@ fn 提案沿用契約的用途_不留白() {
     let env = project.environments[2].clone();
     let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).unwrap();
 
-    let 契約用途 = &project.logical.relationships[0].purpose;
-    assert!(!契約用途.is_empty());
-    assert_eq!(&p.purpose, 契約用途);
+    let contract_purpose = &project.logical.relationships[0].purpose;
+    assert!(!contract_purpose.is_empty());
+    assert_eq!(&p.purpose, contract_purpose);
 }
 
 #[test]
-fn 多台的時候擬成萬用字元_不是列出每一台() {
+fn several_instances_are_proposed_as_a_wildcard_not_one_by_one() {
     // 列出每一台會產生 N 條連線，之後每加一台機器都要記得補一條——
     // 那正是「怕漏」要防的事。
     let mut project = healthy_project();
@@ -124,7 +124,7 @@ fn 多台的時候擬成萬用字元_不是列出每一台() {
 }
 
 #[test]
-fn 只有一台的時候就指名那一台() {
+fn with_a_single_instance_it_is_named_directly() {
     let mut project = healthy_project();
     project.environments[2]
         .connections
@@ -147,7 +147,7 @@ fn 只有一台的時候就指名那一台() {
 }
 
 #[test]
-fn 擬不出來時說清楚為什麼_而不是給一個空表單() {
+fn an_incomplete_proposal_says_why() {
     // 服務一台都還沒建的時候，「請選擇來源」是個無解的問題。
     let mut project = healthy_project();
     let dev = &mut project.environments[2];
@@ -167,7 +167,7 @@ fn 擬不出來時說清楚為什麼_而不是給一個空表單() {
 }
 
 #[test]
-fn 提案會講出它做了什麼假設() {
+fn the_proposal_states_its_assumptions() {
     // 工具不知道中間要不要經過 F5——那是人的決定。
     // 擬得像真的卻不說，使用者會直接按下去，然後少掉一段。
     let mut project = healthy_project();
@@ -186,7 +186,7 @@ fn 提案會講出它做了什麼假設() {
 }
 
 #[test]
-fn 提案先發好_id_所以套用是決定性的() {
+fn the_proposal_mints_the_id_so_apply_is_deterministic() {
     // 若 id 在 apply 裡才產生，預覽算出來的跟真正套用的就是兩份不同的東西，
     // 復原之後重做也會得到一條 id 不一樣的連線。
     let mut project = healthy_project();
@@ -197,15 +197,15 @@ fn 提案先發好_id_所以套用是決定性的() {
     let env = project.environments[2].clone();
     let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).unwrap();
 
-    let mut 甲 = project.clone();
-    建立(&mut 甲, &env.id, &p);
-    let mut 乙 = project.clone();
-    建立(&mut 乙, &env.id, &p);
-    assert_eq!(甲, 乙);
+    let mut first = project.clone();
+    create(&mut first, &env.id, &p);
+    let mut second = project.clone();
+    create(&mut second, &env.id, &p);
+    assert_eq!(first, second);
 }
 
 #[test]
-fn 同一條不會被加兩次() {
+fn the_same_connection_cannot_be_added_twice() {
     let mut project = healthy_project();
     project.environments[2]
         .connections
@@ -213,9 +213,9 @@ fn 同一條不會被加兩次() {
 
     let env = project.environments[2].clone();
     let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).unwrap();
-    建立(&mut project, &env.id, &p);
+    create(&mut project, &env.id, &p);
 
-    let 再一次 = edit::apply(
+    let again = edit::apply(
         &mut project,
         &Edit::AddConnection {
             environment: env.id.clone(),
@@ -227,18 +227,18 @@ fn 同一條不會被加兩次() {
             to: p.to.clone().unwrap(),
         },
     );
-    assert!(再一次.is_err(), "同一個 id 竟然加得進去第二次");
+    assert!(again.is_err(), "同一個 id 竟然加得進去第二次");
 }
 
 #[test]
-fn 新增之後可以復原掉() {
+fn an_addition_can_be_undone() {
     use loom_core::history::History;
 
     let mut project = healthy_project();
     project.environments[2]
         .connections
         .retain(|c| c.serves != Id::new(REL_CACHE));
-    let 原本 = project.clone();
+    let original = project.clone();
 
     let env = project.environments[2].clone();
     let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).unwrap();
@@ -257,16 +257,16 @@ fn 新增之後可以復原掉() {
 
     assert!(lint(h.project()).is_empty());
     assert!(h.undo());
-    assert_eq!(h.project(), &原本);
+    assert_eq!(h.project(), &original);
     assert_eq!(h.undo_label(), None);
     assert_eq!(h.redo_label(), Some("新增連線"));
 }
 
-mod 可以接的地方 {
+mod connectable_places {
     use super::*;
 
     #[test]
-    fn 人只出現在來源端() {
+    fn a_person_only_appears_on_the_source_side() {
         // 人是流量的起點，不會有人「連到一個人」。
         let mut project = healthy_project();
         project.logical.people.push(loom_core::logical::Person {
@@ -276,61 +276,64 @@ mod 可以接的地方 {
         });
         let env = &project.environments[0];
 
-        let 來源 = connect::choices(&project, env, ConnectionEnd::From);
-        let 目標 = connect::choices(&project, env, ConnectionEnd::To);
+        let source = connect::choices(&project, env, ConnectionEnd::From);
+        let target = connect::choices(&project, env, ConnectionEnd::To);
 
-        assert!(來源.iter().any(|c| c.group == "人"));
-        assert!(!目標.iter().any(|c| c.group == "人"));
+        assert!(source.iter().any(|c| c.group == "人"));
+        assert!(!target.iter().any(|c| c.group == "人"));
     }
 
     #[test]
-    fn 來源端多一個不指定接點的選項() {
+    fn the_source_side_offers_no_specific_endpoint() {
         // 客戶端的 port 通常是作業系統分配的。
         let project = healthy_project();
         let env = &project.environments[0];
 
-        let 來源 = connect::choices(&project, env, ConnectionEnd::From);
-        assert!(來源.iter().any(|c| c.label.contains("不指定接點")));
+        let source = connect::choices(&project, env, ConnectionEnd::From);
+        assert!(source.iter().any(|c| c.label.contains("不指定接點")));
 
-        let 目標 = connect::choices(&project, env, ConnectionEnd::To);
-        assert!(!目標.iter().any(|c| c.label.contains("不指定接點")));
+        let target = connect::choices(&project, env, ConnectionEnd::To);
+        assert!(!target.iter().any(|c| c.label.contains("不指定接點")));
     }
 
     #[test]
-    fn 多台的服務會多一個整群的選項() {
+    fn a_container_with_several_instances_offers_a_group_choice() {
         let project = healthy_project();
         let env = &project.environments[0]; // prod 有三台 Redis
 
-        let 目標 = connect::choices(&project, env, ConnectionEnd::To);
-        let 整群: Vec<_> = 目標.iter().filter(|c| c.group == "服務（整群）").collect();
+        let target = connect::choices(&project, env, ConnectionEnd::To);
+        let group: Vec<_> = target
+            .iter()
+            .filter(|c| c.group == "服務（整群）")
+            .collect();
 
-        assert!(!整群.is_empty());
-        assert!(整群[0].label.contains("redis-*"));
-        assert!(整群[0].label.contains("3 台"));
+        assert!(!group.is_empty());
+        assert!(group[0].label.contains("redis-*"));
+        assert!(group[0].label.contains("3 台"));
     }
 
     #[test]
-    fn 只有一台的環境不提供整群的選項() {
+    fn a_single_instance_environment_offers_no_group_choice() {
         // 一台也給「整群」只是多一個一定要想一下的選項。
         let project = healthy_project();
         let env = &project.environments[2]; // dev 只有一台 Redis
 
-        let 目標 = connect::choices(&project, env, ConnectionEnd::To);
-        assert!(!目標.iter().any(|c| c.group == "服務（整群）"));
+        let target = connect::choices(&project, env, ConnectionEnd::To);
+        assert!(!target.iter().any(|c| c.group == "服務（整群）"));
     }
 
     #[test]
-    fn 設備與外部系統都接得上() {
+    fn infra_and_external_systems_are_both_connectable() {
         let project = healthy_project();
         let env = &project.environments[0];
-        let 目標 = connect::choices(&project, env, ConnectionEnd::To);
+        let target = connect::choices(&project, env, ConnectionEnd::To);
 
-        assert!(目標.iter().any(|c| c.group == "設備"));
-        assert!(目標.iter().any(|c| c.group == "外部系統"));
+        assert!(target.iter().any(|c| c.group == "設備"));
+        assert!(target.iter().any(|c| c.group == "外部系統"));
     }
 
     #[test]
-    fn 挑出來的東西可以直接拿去建連線() {
+    fn a_picked_choice_can_build_a_connection_as_is() {
         // 這是整組的重點：`choices` 給的 `endpointing` 是**不透明值**，
         // 前端原樣帶回來就能用。若這裡要前端再加工，規則就漏到前端了。
         let mut project = healthy_project();
@@ -339,13 +342,13 @@ mod 可以接的地方 {
             .retain(|c| c.serves != Id::new(REL_CACHE));
         let env = project.environments[2].clone();
 
-        let 來源 = connect::choices(&project, &env, ConnectionEnd::From);
-        let 目標 = connect::choices(&project, &env, ConnectionEnd::To);
-        let api = 來源
+        let source = connect::choices(&project, &env, ConnectionEnd::From);
+        let target = connect::choices(&project, &env, ConnectionEnd::To);
+        let api = source
             .iter()
             .find(|c| c.label.starts_with("api-01（不指定接點）"))
             .expect("找不到 api-01");
-        let redis = 目標
+        let redis = target
             .iter()
             .find(|c| c.label.starts_with("redis-01 : "))
             .expect("找不到 redis-01");
@@ -364,6 +367,6 @@ mod 可以接的地方 {
         )
         .unwrap();
 
-        assert_eq!(規則(&project), Vec::<Rule>::new());
+        assert_eq!(rules(&project), Vec::<Rule>::new());
     }
 }

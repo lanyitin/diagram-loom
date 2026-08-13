@@ -66,11 +66,11 @@ impl History {
     /// 套用一次修改。**失敗時歷史完全沒被動過**——
     /// 否則使用者會多出一步「什麼都沒發生」的可復原步驟。
     pub fn edit(&mut self, edit: &Edit) -> Result<(), EditError> {
-        let mut 之後 = self.current.clone();
-        crate::edit::apply(&mut 之後, edit)?;
+        let mut after = self.current.clone();
+        crate::edit::apply(&mut after, edit)?;
 
         self.past.push(Step {
-            before: std::mem::replace(&mut self.current, 之後),
+            before: std::mem::replace(&mut self.current, after),
             label: edit.label(),
         });
         if self.past.len() > DEPTH {
@@ -145,7 +145,7 @@ mod tests {
     use crate::id::Id;
     use crate::logical::Logical;
 
-    fn 專案() -> Project {
+    fn project_of() -> Project {
         Project {
             id: Id::new("p"),
             slug: "p".into(),
@@ -180,7 +180,7 @@ mod tests {
         }
     }
 
-    fn 改用途(purpose: &str) -> Edit {
+    fn set_purpose(purpose: &str) -> Edit {
         Edit::SetPurpose {
             environment: Some(Id::new("env-prod")),
             subject: Id::new("conn-1"),
@@ -188,38 +188,38 @@ mod tests {
         }
     }
 
-    fn 用途(h: &History) -> String {
+    fn purpose_of(h: &History) -> String {
         h.project().environments[0].connections[0].purpose.clone()
     }
 
     #[test]
-    fn 復原之後再重做會回到同一個地方() {
-        let mut h = History::opened(專案());
-        h.edit(&改用途("第一次")).unwrap();
-        h.edit(&改用途("第二次")).unwrap();
+    fn redo_lands_back_where_undo_started() {
+        let mut h = History::opened(project_of());
+        h.edit(&set_purpose("第一次")).unwrap();
+        h.edit(&set_purpose("第二次")).unwrap();
 
-        assert_eq!(用途(&h), "第二次");
+        assert_eq!(purpose_of(&h), "第二次");
         assert!(h.undo());
-        assert_eq!(用途(&h), "第一次");
+        assert_eq!(purpose_of(&h), "第一次");
         assert!(h.undo());
-        assert_eq!(用途(&h), "原本的用途");
+        assert_eq!(purpose_of(&h), "原本的用途");
         assert!(!h.undo(), "已經到底了還說可以復原");
 
         assert!(h.redo());
-        assert_eq!(用途(&h), "第一次");
+        assert_eq!(purpose_of(&h), "第一次");
         assert!(h.redo());
-        assert_eq!(用途(&h), "第二次");
+        assert_eq!(purpose_of(&h), "第二次");
         assert!(!h.redo());
     }
 
     #[test]
-    fn 復原到跟磁碟一樣的內容就不算未儲存() {
+    fn undoing_back_to_the_saved_content_is_not_dirty() {
         // 這是計數器作法會答錯的那個情況：改了、又改回去，
         // 內容明明跟存檔時一模一樣，卻還逼使用者存一次。
-        let mut h = History::opened(專案());
+        let mut h = History::opened(project_of());
         assert!(!h.is_dirty());
 
-        h.edit(&改用途("改一下")).unwrap();
+        h.edit(&set_purpose("改一下")).unwrap();
         assert!(h.is_dirty());
 
         h.undo();
@@ -230,9 +230,9 @@ mod tests {
     }
 
     #[test]
-    fn 存檔之後就不算未儲存了() {
-        let mut h = History::opened(專案());
-        h.edit(&改用途("改一下")).unwrap();
+    fn saving_clears_the_dirty_flag() {
+        let mut h = History::opened(project_of());
+        h.edit(&set_purpose("改一下")).unwrap();
         h.mark_saved();
         assert!(!h.is_dirty());
 
@@ -242,8 +242,8 @@ mod tests {
     }
 
     #[test]
-    fn 失敗的修改不會留下一個空步驟() {
-        let mut h = History::opened(專案());
+    fn a_failed_edit_leaves_no_empty_step() {
+        let mut h = History::opened(project_of());
         let err = h.edit(&Edit::SetPurpose {
             environment: Some(Id::new("env-prod")),
             subject: Id::new("根本沒這條"),
@@ -256,22 +256,22 @@ mod tests {
     }
 
     #[test]
-    fn 改了新的東西就不能再重做了() {
-        let mut h = History::opened(專案());
-        h.edit(&改用途("第一次")).unwrap();
+    fn a_new_edit_clears_the_redo_stack() {
+        let mut h = History::opened(project_of());
+        h.edit(&set_purpose("第一次")).unwrap();
         h.undo();
-        h.edit(&改用途("走另一條路")).unwrap();
+        h.edit(&set_purpose("走另一條路")).unwrap();
 
         assert_eq!(h.redo_label(), None, "分岔之後還留著舊的重做");
-        assert_eq!(用途(&h), "走另一條路");
+        assert_eq!(purpose_of(&h), "走另一條路");
     }
 
     #[test]
-    fn 復原標籤說得出剛剛做了什麼() {
-        let mut h = History::opened(專案());
+    fn undo_label_names_the_last_action() {
+        let mut h = History::opened(project_of());
         assert_eq!(h.undo_label(), None);
 
-        h.edit(&改用途("x")).unwrap();
+        h.edit(&set_purpose("x")).unwrap();
         assert_eq!(h.undo_label(), Some("修改用途"));
 
         h.edit(&Edit::DeleteConnection {
@@ -287,12 +287,12 @@ mod tests {
     }
 
     #[test]
-    fn 匯入那種整份換掉的操作也能復原() {
-        let mut h = History::opened(專案());
-        let mut 新的 = 專案();
-        新的.environments[0].connections.clear();
+    fn wholesale_replacement_like_import_is_undoable() {
+        let mut h = History::opened(project_of());
+        let mut is_new = project_of();
+        is_new.environments[0].connections.clear();
 
-        h.replace(新的, "匯入");
+        h.replace(is_new, "匯入");
         assert!(h.project().environments[0].connections.is_empty());
 
         assert!(h.undo());
@@ -300,18 +300,18 @@ mod tests {
     }
 
     #[test]
-    fn 超過上限就丟掉最舊的() {
-        let mut h = History::opened(專案());
+    fn past_the_depth_limit_the_oldest_step_is_dropped() {
+        let mut h = History::opened(project_of());
         for i in 0..DEPTH + 10 {
-            h.edit(&改用途(&format!("第 {i} 次"))).unwrap();
+            h.edit(&set_purpose(&format!("第 {i} 次"))).unwrap();
         }
 
-        let mut 退了 = 0;
+        let mut steps_undone = 0;
         while h.undo() {
-            退了 += 1;
+            steps_undone += 1;
         }
-        assert_eq!(退了, DEPTH);
+        assert_eq!(steps_undone, DEPTH);
         // 退到底不會回到最初，因為最舊的幾步已經被丟掉了。
-        assert_eq!(用途(&h), "第 9 次");
+        assert_eq!(purpose_of(&h), "第 9 次");
     }
 }

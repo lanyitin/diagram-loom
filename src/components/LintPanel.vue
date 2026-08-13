@@ -29,7 +29,7 @@ import type { Finding } from '../lib/model'
 const store = useProject()
 
 /** 目前展開修法的那一項。用索引就好——清單每次 lint 都會重算。 */
-const 修改中 = ref<number | null>(null)
+const editingIndex = ref<number | null>(null)
 
 /**
  * 跳到這一項發現指的那幾列。
@@ -45,9 +45,9 @@ const 修改中 = ref<number | null>(null)
  * 要補哪條契約寫在 `fix.addConnection` 裡（Rust 決定的），
  * 這裡只負責把它遞出去——同樣不認得規則代號。
  */
-function 補連線(f: Finding) {
+function openAddConnection(f: Finding) {
   if (!f.fix?.addConnection || !f.environment) return
-  store.新增連線中 = {
+  store.addingConnection = {
     environment: f.environment,
     relationship: f.fix.addConnection.relationship,
     label: f.detail,
@@ -55,66 +55,66 @@ function 補連線(f: Finding) {
 }
 
 /** 開「批次建立機器」的表單。同樣不認得規則代號。 */
-function 建機器(f: Finding) {
+function openAddInstances(f: Finding) {
   if (!f.fix?.addInstances || !f.environment) return
-  store.新增機器中 = {
+  store.addingInstances = {
     environment: f.environment,
     container: f.fix.addInstances.container,
     label: f.detail,
   }
 }
 
-function 跳過去(f: Finding) {
-  store.檢視 = '連線表'
-  store.搜尋 = ''
-  store.只看有問題 = false
-  store.聚焦 = { subject: f.subject, label: `${f.rule} ${f.detail}` }
+function jumpTo(f: Finding) {
+  store.view = '連線表'
+  store.search = ''
+  store.onlyProblems = false
+  store.focus = { subject: f.subject, label: `${f.rule} ${f.detail}` }
   // 邏輯層的發現沒有環境，這時不要動環境勾選——它跟環境無關。
-  if (f.environment) store.比對中的環境 = [f.environment]
+  if (f.environment) store.selectedEnvironments = [f.environment]
 }
 </script>
 
 <template>
-  <section class="panel" :class="{ 展開: store.面板展開 }">
-    <button class="bar" @click="store.面板展開 = !store.面板展開">
-      <span v-if="store.錯誤數" class="tally error">{{ store.錯誤數 }} 錯誤</span>
-      <span v-if="store.警告數" class="tally warn">{{ store.警告數 }} 警告</span>
-      <span v-if="!store.錯誤數 && !store.警告數" class="tally ok">沒有發現問題</span>
+  <section class="panel" :class="{ expanded: store.panelOpen }">
+    <button class="bar" @click="store.panelOpen = !store.panelOpen">
+      <span v-if="store.errorCount" class="tally error">{{ store.errorCount }} 錯誤</span>
+      <span v-if="store.warningCount" class="tally warn">{{ store.warningCount }} 警告</span>
+      <span v-if="!store.errorCount && !store.warningCount" class="tally ok">沒有發現問題</span>
       <span class="grow" />
-      <span class="muted">{{ store.面板展開 ? '收合 ▼' : '展開 ▲' }}</span>
+      <span class="muted">{{ store.panelOpen ? '收合 ▼' : '展開 ▲' }}</span>
     </button>
 
-    <div v-if="store.面板展開" class="list">
+    <div v-if="store.panelOpen" class="list">
       <table>
         <tbody>
           <!-- key 要帶上 end：兩端都是萬用字元的連線會產生兩項 rule 與 subject
                完全相同的 L004，少了 end 兩列就會撞 key。 -->
           <template
-            v-for="(f, i) in store.發現"
+            v-for="(f, i) in store.findings"
             :key="`${f.rule}-${f.environment}-${f.subject}-${f.end}`"
           >
             <tr>
               <td class="rule">
                 <span :class="['code', f.severity]">{{ f.rule }}</span>
               </td>
-              <td class="mono env muted">{{ f.environment ? store.環境名(f.environment) : '邏輯層' }}</td>
+              <td class="mono env muted">{{ f.environment ? store.envName(f.environment) : '邏輯層' }}</td>
               <td class="mono subject">{{ f.subject }}</td>
-              <td class="detail" @click="跳過去(f)">{{ f.detail }}</td>
+              <td class="detail" @click="jumpTo(f)">{{ f.detail }}</td>
               <td class="act">
                 <!-- 這兩種要開一張表單，不是就地填一格，所以走另一顆鈕。 -->
                 <button
-                  v-if="f.fix?.addConnection" class="fix" :disabled="store.忙碌中"
-                  @click="補連線(f)"
+                  v-if="f.fix?.addConnection" class="fix" :disabled="store.busy"
+                  @click="openAddConnection(f)"
                 >補連線…</button>
                 <button
-                  v-else-if="f.fix?.addInstances" class="fix" :disabled="store.忙碌中"
-                  @click="建機器(f)"
+                  v-else-if="f.fix?.addInstances" class="fix" :disabled="store.busy"
+                  @click="openAddInstances(f)"
                 >建機器…</button>
                 <button
-                  v-else-if="f.fix" class="fix" :disabled="store.忙碌中"
-                  @click="修改中 = 修改中 === i ? null : i"
+                  v-else-if="f.fix" class="fix" :disabled="store.busy"
+                  @click="editingIndex = editingIndex === i ? null : i"
                 >
-                  {{ 修改中 === i ? '取消' : '修…' }}
+                  {{ editingIndex === i ? '取消' : '修…' }}
                 </button>
                 <!-- 剩下沒有修法的（L003：指到了不存在的東西）不放假按鈕。
                      一個按下去只會跳「這個還沒做」的按鈕，比沒有按鈕更糟。 -->
@@ -123,16 +123,16 @@ function 跳過去(f: Finding) {
             </tr>
 
             <tr
-              v-if="修改中 === i && f.fix && !f.fix.addConnection && !f.fix.addInstances"
+              v-if="editingIndex === i && f.fix && !f.fix.addConnection && !f.fix.addInstances"
               class="editor"
             >
               <td colspan="5">
-                <FixEditor :finding="f" :fix="f.fix" @done="修改中 = null" />
+                <FixEditor :finding="f" :fix="f.fix" @done="editingIndex = null" />
               </td>
             </tr>
           </template>
 
-          <tr v-if="store.發現.length === 0">
+          <tr v-if="store.findings.length === 0">
             <td class="empty muted" colspan="5">這個專案目前沒有任何缺漏。</td>
           </tr>
         </tbody>

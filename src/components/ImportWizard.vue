@@ -23,12 +23,12 @@ import type { Change, Element, Plan } from '../lib/model'
 
 const store = useProject()
 
-const 檔案 = ref<string | null>(null)
-const 計畫 = ref<Plan | null>(null)
-const 忙 = ref(false)
-const 錯 = ref<string | null>(null)
+const file = ref<string | null>(null)
+const plan = ref<Plan | null>(null)
+const busy = ref(false)
+const failed = ref<string | null>(null)
 
-const 種類名: Record<Element, string> = {
+const kindName: Record<Element, string> = {
   environment: '環境',
   container: '服務（邏輯層）',
   endpointDef: '接點定義',
@@ -41,11 +41,11 @@ const 種類名: Record<Element, string> = {
   connection: '連線',
 }
 
-const 新增 = computed(() => 計畫.value?.changes.filter((c) => c.kind === 'added') ?? [])
-const 更新 = computed(() => 計畫.value?.changes.filter((c) => c.kind === 'updated') ?? [])
+const addNew = computed(() => plan.value?.changes.filter((c) => c.kind === 'added') ?? [])
+const updated = computed(() => plan.value?.changes.filter((c) => c.kind === 'updated') ?? [])
 
 /** 同一種類的變更收成一組，幾百筆時才讀得下去。 */
-function 分組(changes: Change[]) {
+function groupBy(changes: Change[]) {
   const g = new Map<Element, Change[]>()
   for (const c of changes) {
     if (!g.has(c.element)) g.set(c.element, [])
@@ -54,104 +54,104 @@ function 分組(changes: Change[]) {
   return [...g.entries()]
 }
 
-async function 選檔() {
-  const 選了 = await open({
+async function pickFile() {
+  const picked = await open({
     title: '選擇要匯入的試算表',
     filters: [{ name: '試算表', extensions: ['csv', 'xlsx', 'xls', 'xlsm'] }],
   })
-  if (typeof 選了 !== 'string') return
+  if (typeof picked !== 'string') return
 
-  檔案.value = 選了
-  忙.value = true
-  錯.value = null
-  計畫.value = null
+  file.value = picked
+  busy.value = true
+  failed.value = null
+  plan.value = null
   try {
-    const r = await commands.previewImport(選了)
-    if (r.status === 'ok') 計畫.value = r.data
-    else 錯.value = (r.error as { message?: string })?.message ?? String(r.error)
+    const r = await commands.previewImport(picked)
+    if (r.status === 'ok') plan.value = r.data
+    else failed.value = (r.error as { message?: string })?.message ?? String(r.error)
   } finally {
-    忙.value = false
+    busy.value = false
   }
 }
 
-async function 套用() {
-  忙.value = true
+async function apply() {
+  busy.value = true
   try {
     const r = await commands.applyImport()
     if (r.status === 'ok') {
       store.snapshot = r.data
-      關閉()
+      close()
     } else {
-      錯.value = (r.error as { message?: string })?.message ?? String(r.error)
+      failed.value = (r.error as { message?: string })?.message ?? String(r.error)
     }
   } finally {
-    忙.value = false
+    busy.value = false
   }
 }
 
-function 關閉() {
+function close() {
   commands.cancelImport()
-  store.匯入中 = false
-  檔案.value = null
-  計畫.value = null
-  錯.value = null
+  store.importing = false
+  file.value = null
+  plan.value = null
+  failed.value = null
 }
 
-const 步驟 = computed(() => (計畫.value ? 2 : 1))
+const step = computed(() => (plan.value ? 2 : 1))
 </script>
 
 <template>
-  <div class="backdrop" @click.self="關閉">
+  <div class="backdrop" @click.self="close">
     <section class="dialog" role="dialog" aria-label="匯入試算表">
       <header>
         <strong>從試算表匯入</strong>
         <span class="grow" />
         <span class="steps mono">
-          <span :class="{ on: 步驟 === 1 }">① 選檔</span>
-          <span :class="{ on: 步驟 === 2 }">② 預覽差異</span>
+          <span :class="{ on: step === 1 }">① 選檔</span>
+          <span :class="{ on: step === 2 }">② 預覽差異</span>
           <span>③ 套用</span>
         </span>
       </header>
 
-      <p v-if="錯" class="failure" role="alert">{{ 錯 }}</p>
+      <p v-if="failed" class="failure" role="alert">{{ failed }}</p>
 
       <!-- ① 選檔 -->
-      <div v-if="!計畫" class="pick">
+      <div v-if="!plan" class="pick">
         <p class="muted">
           一列一條連線。環境寫在 <code>environment</code> 欄位裡，不必另外選。
         </p>
-        <button class="primary" :disabled="忙" @click="選檔">
-          {{ 忙 ? '讀取中…' : '選擇檔案…' }}
+        <button class="primary" :disabled="busy" @click="pickFile">
+          {{ busy ? '讀取中…' : '選擇檔案…' }}
         </button>
-        <p v-if="檔案" class="mono muted small">{{ 檔案 }}</p>
+        <p v-if="file" class="mono muted small">{{ file }}</p>
       </div>
 
       <!-- ② 預覽 -->
       <div v-else class="preview">
         <div class="summary">
-          <span class="tally add">{{ 新增.length }} 新增</span>
-          <span class="tally upd">{{ 更新.length }} 更新</span>
-          <span class="tally same muted">{{ 計畫.unchanged }} 沒有變化</span>
+          <span class="tally add">{{ addNew.length }} 新增</span>
+          <span class="tally upd">{{ updated.length }} 更新</span>
+          <span class="tally same muted">{{ plan.unchanged }} 沒有變化</span>
           <span class="grow" />
-          <span class="muted">動到：<b class="mono">{{ 計畫.environments.join('、') }}</b></span>
+          <span class="muted">動到：<b class="mono">{{ plan.environments.join('、') }}</b></span>
         </div>
 
         <!-- 警告要顯眼。位址不一致時工具保留舊的——不講清楚，
              使用者會以為試算表上的新 IP 已經寫進去了。 -->
-        <div v-if="計畫.warnings.length" class="warnings">
-          <b>{{ 計畫.warnings.length }} 項提醒（不會中斷匯入）</b>
+        <div v-if="plan.warnings.length" class="warnings">
+          <b>{{ plan.warnings.length }} 項提醒（不會中斷匯入）</b>
           <ul>
-            <li v-for="(w, i) in 計畫.warnings" :key="i">{{ w }}</li>
+            <li v-for="(w, i) in plan.warnings" :key="i">{{ w }}</li>
           </ul>
         </div>
 
         <div class="changes">
-          <p v-if="計畫.changes.length === 0" class="muted nothing">
+          <p v-if="plan.changes.length === 0" class="muted nothing">
             這份檔案的內容跟現有資料完全相同，套用不會改變任何東西。
           </p>
 
-          <template v-for="[element, list] in 分組(更新)" :key="'u' + element">
-            <h4><span class="pip upd" />{{ 種類名[element] }}　<span class="muted">{{ list.length }} 項更新</span></h4>
+          <template v-for="[element, list] in groupBy(updated)" :key="'u' + element">
+            <h4><span class="pip upd" />{{ kindName[element] }}　<span class="muted">{{ list.length }} 項更新</span></h4>
             <table>
               <tbody>
                 <tr v-for="c in list" :key="c.label">
@@ -164,8 +164,8 @@ const 步驟 = computed(() => (計畫.value ? 2 : 1))
             </table>
           </template>
 
-          <template v-for="[element, list] in 分組(新增)" :key="'a' + element">
-            <h4><span class="pip add" />{{ 種類名[element] }}　<span class="muted">{{ list.length }} 項新增</span></h4>
+          <template v-for="[element, list] in groupBy(addNew)" :key="'a' + element">
+            <h4><span class="pip add" />{{ kindName[element] }}　<span class="muted">{{ list.length }} 項新增</span></h4>
             <table>
               <tbody>
                 <tr v-for="c in list" :key="c.label">
@@ -179,16 +179,16 @@ const 步驟 = computed(() => (計畫.value ? 2 : 1))
       </div>
 
       <footer>
-        <span v-if="計畫" class="muted small">套用後會重新檢查</span>
+        <span v-if="plan" class="muted small">套用後會重新檢查</span>
         <span class="grow" />
-        <button @click="關閉">取消</button>
+        <button @click="close">取消</button>
         <button
-          v-if="計畫"
+          v-if="plan"
           class="primary"
-          :disabled="忙 || 計畫.changes.length === 0"
-          @click="套用"
+          :disabled="busy || plan.changes.length === 0"
+          @click="apply"
         >
-          套用 {{ 計畫.changes.length }} 項變更
+          套用 {{ plan.changes.length }} 項變更
         </button>
       </footer>
     </section>

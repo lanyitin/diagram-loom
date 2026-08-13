@@ -26,51 +26,51 @@ import type { ResourceRow, Table } from '../lib/model'
 const store = useProject()
 
 const tables = ref<Table[]>([])
-const 目前分頁 = ref(0)
+const activeTab = ref(0)
 
 /** 環境層的表要看哪個環境。只有一個環境時不必問。 */
-const 看哪個環境 = ref<string | null>(null)
+const whichEnvironment = ref<string | null>(null)
 
-const 現在這張 = computed<Table | null>(() => tables.value[目前分頁.value] ?? null)
+const currentTable = computed<Table | null>(() => tables.value[activeTab.value] ?? null)
 
-async function 重新取() {
-  if (!store.已開啟) return
-  const env = 看哪個環境.value ?? store.環境[0]?.id ?? null
-  const 回應 = await commands.resourceTables(env)
-  if (回應.status === 'ok') {
-    tables.value = 回應.data
-    if (目前分頁.value >= tables.value.length) 目前分頁.value = 0
+async function reload() {
+  if (!store.isOpen) return
+  const env = whichEnvironment.value ?? store.environments[0]?.id ?? null
+  const res = await commands.resourceTables(env)
+  if (res.status === 'ok') {
+    tables.value = res.data
+    if (activeTab.value >= tables.value.length) activeTab.value = 0
   } else {
-    store.錯誤 = (回應.error as { message?: string })?.message ?? String(回應.error)
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
   }
 }
 
 // 每次專案變動都重算。表格上的數字（幾台、幾段）就是 lint 在看的同一批資料，
 // 兩者不同步的話使用者會以為 lint 誤報。
-watch(() => store.snapshot, () => void 重新取(), { immediate: true })
-watch(看哪個環境, () => void 重新取())
+watch(() => store.snapshot, () => void reload(), { immediate: true })
+watch(whichEnvironment, () => void reload())
 
-async function 新增() {
-  const t = 現在這張.value
+async function addNew() {
+  const t = currentTable.value
   if (!t) return
-  const 回應 = await commands.blankResource(t.kind, t.environment, null)
-  if (回應.status !== 'ok') {
-    store.錯誤 = (回應.error as { message?: string })?.message ?? String(回應.error)
+  const res = await commands.blankResource(t.kind, t.environment, null)
+  if (res.status !== 'ok') {
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
     return
   }
-  store.編輯資源中 = { resource: 回應.data, 新的: true, kind: t.title }
+  store.editingResource = { resource: res.data, isNew: true, kind: t.title }
 }
 
-function 編輯(row: ResourceRow) {
+function edit(row: ResourceRow) {
   // 表格每一列都帶著自己的 `Resource`，表單直接拿它當起點。
   // 讓前端從 project 裡自己撈的話，要知道每種資源住在哪一層——那是模型知識。
-  store.編輯資源中 = { resource: row.resource, 新的: false, kind: 現在這張.value?.title ?? '' }
+  store.editingResource = { resource: row.resource, isNew: false, kind: currentTable.value?.title ?? '' }
 }
 
-function 想刪(row: ResourceRow) {
-  store.刪除中 = {
+function askDelete(row: ResourceRow) {
+  store.deleting = {
     edit: { deleteResource: row.resource },
-    kind: 現在這張.value?.title ?? '東西',
+    kind: currentTable.value?.title ?? '東西',
     label: row.cells[0] ?? row.id,
   }
 }
@@ -81,8 +81,8 @@ function 想刪(row: ResourceRow) {
     <div class="tabs">
       <button
         v-for="(t, i) in tables" :key="t.title"
-        :class="{ on: 目前分頁 === i }"
-        @click="目前分頁 = i"
+        :class="{ on: activeTab === i }"
+        @click="activeTab = i"
       >
         {{ t.title }}
         <span class="n">{{ t.rows.length }}</span>
@@ -91,32 +91,32 @@ function 想刪(row: ResourceRow) {
       <span class="grow" />
 
       <!-- 環境層的表才需要問是哪個環境。邏輯層是母版，跟環境無關。 -->
-      <label v-if="現在這張?.environment && store.環境.length > 1" class="pick">
+      <label v-if="currentTable?.environment && store.environments.length > 1" class="pick">
         環境
-        <select v-model="看哪個環境">
-          <option v-for="e in store.環境" :key="e.id" :value="e.id">{{ e.slug }}</option>
+        <select v-model="whichEnvironment">
+          <option v-for="e in store.environments" :key="e.id" :value="e.id">{{ e.slug }}</option>
         </select>
       </label>
 
-      <button class="primary add" :disabled="store.忙碌中" @click="新增()">
-        ＋ 新增{{ 現在這張?.title }}
+      <button class="primary add" :disabled="store.busy" @click="addNew()">
+        ＋ 新增{{ currentTable?.title }}
       </button>
     </div>
 
-    <div v-if="現在這張" class="body">
+    <div v-if="currentTable" class="body">
       <!-- 空的表不留白。第一次用的人需要知道「這是什麼、為什麼需要它」。 -->
-      <p v-if="現在這張.rows.length === 0" class="empty muted">{{ 現在這張.emptyHint }}</p>
+      <p v-if="currentTable.rows.length === 0" class="empty muted">{{ currentTable.emptyHint }}</p>
 
       <table v-else>
         <thead>
           <tr>
             <th class="sev" />
-            <th v-for="c in 現在這張.columns" :key="c">{{ c }}</th>
+            <th v-for="c in currentTable.columns" :key="c">{{ c }}</th>
             <th class="act" />
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in 現在這張.rows" :key="row.id">
+          <tr v-for="row in currentTable.rows" :key="row.id">
             <td class="sev">
               <span v-if="row.severity" :class="['dot', row.severity]" :title="'這一列有 lint 問題'" />
             </td>
@@ -126,8 +126,8 @@ function 想刪(row: ResourceRow) {
               :style="i === 0 && row.depth ? { paddingLeft: `${12 + row.depth * 18}px` } : undefined"
             >{{ cell }}</td>
             <td class="act">
-              <button class="icon" :disabled="store.忙碌中" title="編輯" @click="編輯(row)">✎</button>
-              <button class="icon del" :disabled="store.忙碌中" title="刪除" @click="想刪(row)">✕</button>
+              <button class="icon" :disabled="store.busy" title="編輯" @click="edit(row)">✎</button>
+              <button class="icon del" :disabled="store.busy" title="刪除" @click="askDelete(row)">✕</button>
             </td>
           </tr>
         </tbody>

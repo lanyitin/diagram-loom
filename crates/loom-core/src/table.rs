@@ -97,24 +97,27 @@ pub fn rows(project: &Project) -> Vec<Row> {
         let index = EnvIndex::build(project, env);
 
         // 這個環境裡，每條連線各自有哪些問題。
-        let mut 每條的問題: HashMap<&Id, Vec<Rule>> = HashMap::new();
+        let mut issues_by_connection: HashMap<&Id, Vec<Rule>> = HashMap::new();
         for f in &findings {
             if f.environment.as_ref() != Some(&env.id) {
                 continue;
             }
-            let bucket = 每條的問題.entry(&f.subject).or_default();
+            let bucket = issues_by_connection.entry(&f.subject).or_default();
             if !bucket.contains(&f.rule) {
                 bucket.push(f.rule);
             }
         }
 
         for conn in &env.connections {
-            let mut rules = 每條的問題.get(&conn.id).cloned().unwrap_or_default();
+            let mut rules = issues_by_connection
+                .get(&conn.id)
+                .cloned()
+                .unwrap_or_default();
             rules.sort();
 
             let mut subjects = vec![conn.id.clone(), conn.serves.clone()];
             for side in [&conn.from, &conn.to] {
-                收集元素(&index, env, side, &mut subjects);
+                collect_elements(&index, env, side, &mut subjects);
             }
             subjects.sort();
             subjects.dedup();
@@ -131,8 +134,8 @@ pub fn rows(project: &Project) -> Vec<Row> {
                     .map(|r| r.slug.clone()),
                 purpose: conn.purpose.clone(),
                 kind: conn.kind,
-                from: 解析(&index, env, &project.logical, &conn.from),
-                to: 解析(&index, env, &project.logical, &conn.to),
+                from: resolve_side(&index, env, &project.logical, &conn.from),
+                to: resolve_side(&index, env, &project.logical, &conn.to),
                 severity: rules.iter().map(|r| r.severity()).max(),
                 rules,
                 subjects,
@@ -141,14 +144,14 @@ pub fn rows(project: &Project) -> Vec<Row> {
     }
 
     out.sort_by(|a, b| {
-        let 環境 = |r: &Row| {
+        let env_of = |r: &Row| {
             project
                 .environments
                 .iter()
                 .position(|e| e.id == r.environment)
         };
-        (環境(a), a.serves.to_string(), a.id.to_string()).cmp(&(
-            環境(b),
+        (env_of(a), a.serves.to_string(), a.id.to_string()).cmp(&(
+            env_of(b),
             b.serves.to_string(),
             b.id.to_string(),
         ))
@@ -160,9 +163,14 @@ pub fn rows(project: &Project) -> Vec<Row> {
 ///
 /// 找不到的 id **也要收**——那正是 L003 的情況，使用者點那項發現時
 /// 需要跳到這一列看是哪個 id 壞了。
-fn 收集元素(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing, out: &mut Vec<Id>) {
+fn collect_elements(
+    index: &EnvIndex<'_>,
+    env: &Environment,
+    side: &Endpointing,
+    out: &mut Vec<Id>,
+) {
     /// 這個 Instance／落地上，對應某個 `EndpointDef` 的那個具體 Endpoint。
-    fn 端點(endpoints: &[crate::environment::Endpoint], def: Option<&Id>) -> Option<Id> {
+    fn endpoint_id(endpoints: &[crate::environment::Endpoint], def: Option<&Id>) -> Option<Id> {
         endpoints
             .iter()
             .find(|e| def.is_some_and(|d| e.def.as_ref() == Some(d)))
@@ -174,7 +182,7 @@ fn 收集元素(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing, out
             InstanceRef::One(id) => {
                 out.push(id.clone());
                 if let Some(i) = index.instance(id) {
-                    out.extend(端點(&i.endpoints, endpoint.as_ref()));
+                    out.extend(endpoint_id(&i.endpoints, endpoint.as_ref()));
                 }
             }
             InstanceRef::Pattern {
@@ -184,7 +192,7 @@ fn 收集元素(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing, out
             } => {
                 for i in index.matching_within(slug_pattern, within.as_ref()) {
                     out.push(i.id.clone());
-                    out.extend(端點(&i.endpoints, endpoint.as_ref()));
+                    out.extend(endpoint_id(&i.endpoints, endpoint.as_ref()));
                 }
                 out.extend(within.clone());
             }
@@ -197,14 +205,19 @@ fn 收集元素(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing, out
         Endpointing::System { instance, endpoint } => {
             out.push(instance.clone());
             if let Some(s) = env.system_instance(instance) {
-                out.extend(端點(&s.endpoints, endpoint.as_ref()));
+                out.extend(endpoint_id(&s.endpoints, endpoint.as_ref()));
             }
         }
         Endpointing::Person { person } => out.push(person.clone()),
     }
 }
 
-fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &Endpointing) -> Side {
+fn resolve_side(
+    index: &EnvIndex<'_>,
+    env: &Environment,
+    logical: &Logical,
+    side: &Endpointing,
+) -> Side {
     match side {
         Endpointing::Instance { target, endpoint } => match target {
             InstanceRef::One(id) => {
@@ -250,7 +263,7 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &End
                     kind: SideKind::Instance,
                     // 限定了範圍就寫出來，否則「3 台」看起來像全部只有 3 台。
                     label: match within {
-                        Some(node) => format!("{slug_pattern} @ {}", 節點名(env, node)),
+                        Some(node) => format!("{slug_pattern} @ {}", node_name(env, node)),
                         None => slug_pattern.clone(),
                     },
                     endpoint: ep.map(|e| e.slug.clone()),
@@ -317,19 +330,19 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &End
 }
 
 /// 部署節點的顯示名。找不到就印 id——那是 L003，使用者要知道是哪個壞了。
-fn 節點名(env: &Environment, id: &Id) -> String {
-    fn 找<'a>(nodes: &'a [crate::environment::DeploymentNode], id: &Id) -> Option<&'a str> {
+fn node_name(env: &Environment, id: &Id) -> String {
+    fn search<'a>(nodes: &'a [crate::environment::DeploymentNode], id: &Id) -> Option<&'a str> {
         for n in nodes {
             if &n.id == id {
                 return Some(&n.slug);
             }
-            if let Some(found) = 找(&n.children, id) {
+            if let Some(found) = search(&n.children, id) {
                 return Some(found);
             }
         }
         None
     }
-    找(&env.nodes, id)
+    search(&env.nodes, id)
         .map(str::to_string)
         .unwrap_or_else(|| id.to_string())
 }

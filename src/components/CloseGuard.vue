@@ -21,18 +21,18 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useProject } from '../lib/store'
 
 const store = useProject()
-const 問著 = ref(false)
-let 收工: (() => void) | null = null
+const asking = ref(false)
+let unlisten: (() => void) | null = null
 
 onMounted(async () => {
-  收工 = await getCurrentWindow().onCloseRequested((e) => {
-    if (!store.未儲存) return
+  unlisten = await getCurrentWindow().onCloseRequested((e) => {
+    if (!store.dirty) return
     e.preventDefault()
-    問著.value = true
+    asking.value = true
   })
 })
 
-onUnmounted(() => 收工?.())
+onUnmounted(() => unlisten?.())
 
 /**
  * 真的關掉。`destroy` 不會再觸發 `onCloseRequested`，所以不會繞回來。
@@ -41,36 +41,36 @@ onUnmounted(() => 收工?.())
  * destroy 被權限擋下、Promise 靜靜地 reject，於是視窗永遠關不掉，
  * 而畫面上一個字都沒有。由 `src-tauri/tests/capabilities.rs` 守著。
  */
-async function 關掉() {
-  問著.value = false
+async function destroyWindow() {
+  asking.value = false
   try {
     await getCurrentWindow().destroy()
   } catch (e) {
-    store.錯誤 = `關不掉視窗：${e instanceof Error ? e.message : String(e)}`
+    store.error = `關不掉視窗：${e instanceof Error ? e.message : String(e)}`
   }
 }
 
-async function 存了再關() {
-  await store.儲存()
+async function saveThenClose() {
+  await store.save()
   // 存檔失敗時**不關**——關掉就真的沒了，而錯誤訊息也會跟著視窗一起消失。
-  if (store.錯誤) {
-    問著.value = false
+  if (store.error) {
+    asking.value = false
     return
   }
-  await 關掉()
+  await destroyWindow()
 }
 </script>
 
 <template>
-  <div v-if="問著" class="scrim">
+  <div v-if="asking" class="scrim">
     <section class="box" role="dialog" aria-modal="true">
       <h2>有還沒存檔的變更</h2>
       <p class="muted">關掉視窗就會不見。</p>
       <footer>
-        <button @click="問著 = false">取消</button>
+        <button @click="asking = false">取消</button>
         <span class="grow" />
-        <button class="danger-btn" @click="關掉()">不存直接關</button>
-        <button class="primary" @click="存了再關()">存檔並關閉</button>
+        <button class="danger-btn" @click="destroyWindow()">不存直接關</button>
+        <button class="primary" @click="saveThenClose()">存檔並關閉</button>
       </footer>
     </section>
   </div>

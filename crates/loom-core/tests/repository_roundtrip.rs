@@ -16,11 +16,11 @@ use loom_core::lint::lint;
 use loom_core::repository::{load_from_dir, save_to_dir};
 
 /// 每個測試用自己的暫存資料夾，避免互相干擾。
-struct 暫存資料夾(PathBuf);
+struct TempDir(PathBuf);
 
-impl 暫存資料夾 {
-    fn 建立(名稱: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("loom-test-{名稱}"));
+impl TempDir {
+    fn create(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("loom-test-{name}"));
         let _ = fs::remove_dir_all(&path);
         Self(path)
     }
@@ -30,15 +30,15 @@ impl 暫存資料夾 {
     }
 }
 
-impl Drop for 暫存資料夾 {
+impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
 
 #[test]
-fn 存檔再讀回來得到一模一樣的專案() {
-    let dir = 暫存資料夾::建立("roundtrip");
+fn save_then_load_returns_an_identical_project() {
+    let dir = TempDir::create("roundtrip");
     let original = healthy_project();
 
     save_to_dir(&original, dir.path()).unwrap();
@@ -48,9 +48,9 @@ fn 存檔再讀回來得到一模一樣的專案() {
 }
 
 #[test]
-fn 讀回來的專案跑lint結果相同() {
+fn a_reloaded_project_lints_identically() {
     // 這是真正要保護的性質：存檔不能悄悄改變任何影響 lint 的東西。
-    let dir = 暫存資料夾::建立("lint-stable");
+    let dir = TempDir::create("lint-stable");
     let original = healthy_project();
 
     save_to_dir(&original, dir.path()).unwrap();
@@ -61,11 +61,11 @@ fn 讀回來的專案跑lint結果相同() {
 }
 
 #[test]
-fn 產生預期的檔案結構() {
-    let dir = 暫存資料夾::建立("layout");
+fn produces_the_expected_file_layout() {
+    let dir = TempDir::create("layout");
     save_to_dir(&healthy_project(), dir.path()).unwrap();
 
-    for 相對路徑 in [
+    for relative in [
         "project.yaml",
         "logical/systems.yaml",
         "logical/containers.yaml",
@@ -74,72 +74,78 @@ fn 產生預期的檔案結構() {
         "environments/test.yaml",
         "environments/dev.yaml",
     ] {
-        assert!(dir.path().join(相對路徑).is_file(), "少了檔案 {相對路徑}");
+        assert!(dir.path().join(relative).is_file(), "少了檔案 {relative}");
     }
 }
 
 #[test]
-fn 改一個環境不會動到其他環境的檔案() {
+fn editing_one_environment_leaves_the_others_files_alone() {
     // 純文字格式的重點就在這裡：改 prod 時 dev 的 diff 應該是空的。
-    let dir = 暫存資料夾::建立("isolation");
+    let dir = TempDir::create("isolation");
     let mut project = healthy_project();
     save_to_dir(&project, dir.path()).unwrap();
 
-    let dev檔 = dir.path().join("environments/dev.yaml");
-    let dev原內容 = fs::read_to_string(&dev檔).unwrap();
+    let dev_file = dir.path().join("environments/dev.yaml");
+    let dev_before = fs::read_to_string(&dev_file).unwrap();
 
     project.environments[0].connections[0].purpose = "改過的用途".into();
     save_to_dir(&project, dir.path()).unwrap();
 
-    assert_eq!(fs::read_to_string(&dev檔).unwrap(), dev原內容);
+    assert_eq!(fs::read_to_string(&dev_file).unwrap(), dev_before);
 }
 
 #[test]
-fn 環境檔用slug當檔名而不是uuid() {
+fn environment_files_are_named_by_slug_not_uuid() {
     // 檔名是給人看的。UUID 檔名的 git diff 完全讀不出改了哪個環境。
-    let dir = 暫存資料夾::建立("filename");
+    let dir = TempDir::create("filename");
     save_to_dir(&healthy_project(), dir.path()).unwrap();
 
-    let mut 檔名: Vec<String> = fs::read_dir(dir.path().join("environments"))
+    let mut file_name: Vec<String> = fs::read_dir(dir.path().join("environments"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    檔名.sort();
+    file_name.sort();
 
-    assert_eq!(檔名, vec!["dev.yaml", "prod.yaml", "test.yaml"]);
+    assert_eq!(file_name, vec!["dev.yaml", "prod.yaml", "test.yaml"]);
 }
 
 #[test]
-fn yaml內容是人看得懂的() {
-    let dir = 暫存資料夾::建立("readable");
+fn yaml_is_readable_by_a_human() {
+    let dir = TempDir::create("readable");
     save_to_dir(&healthy_project(), dir.path()).unwrap();
 
-    let 內容 = fs::read_to_string(dir.path().join("logical/containers.yaml")).unwrap();
+    let contents = fs::read_to_string(dir.path().join("logical/containers.yaml")).unwrap();
 
     // 服務名稱、endpoint 名稱、協定都應該以原樣出現，
     // 而不是被編碼成數字或 base64。
-    assert!(內容.contains("order-api"), "找不到服務名稱：\n{內容}");
-    assert!(內容.contains("client-port"), "找不到 endpoint 名稱");
-    assert!(內容.contains("tcp"), "協定應該是可讀的 kebab-case");
-    assert!(內容.contains("Redis 快取"), "中文名稱應該原樣保留");
+    assert!(
+        contents.contains("order-api"),
+        "找不到服務名稱：\n{contents}"
+    );
+    assert!(contents.contains("client-port"), "找不到 endpoint 名稱");
+    assert!(contents.contains("tcp"), "協定應該是可讀的 kebab-case");
+    assert!(contents.contains("Redis 快取"), "中文名稱應該原樣保留");
 }
 
 #[test]
-fn 連線的兩端在yaml上讀得出來() {
-    let dir = 暫存資料夾::建立("connections");
+fn both_ends_of_a_connection_are_readable_in_the_yaml() {
+    let dir = TempDir::create("connections");
     save_to_dir(&healthy_project(), dir.path()).unwrap();
 
-    let 內容 = fs::read_to_string(dir.path().join("environments/prod.yaml")).unwrap();
+    let contents = fs::read_to_string(dir.path().join("environments/prod.yaml")).unwrap();
 
     // 經過 F5 的第二段：從設備連到一整群 Redis，期望 3 台。
-    assert!(內容.contains("infra"), "看不出連線經過設備：\n{內容}");
-    assert!(內容.contains("redis-*"), "看不出萬用字元");
-    assert!(內容.contains("expect"), "看不出期望數量");
+    assert!(
+        contents.contains("infra"),
+        "看不出連線經過設備：\n{contents}"
+    );
+    assert!(contents.contains("redis-*"), "看不出萬用字元");
+    assert!(contents.contains("expect"), "看不出期望數量");
 }
 
 #[test]
-fn 環境名稱不能當檔名時會被擋下() {
-    let dir = 暫存資料夾::建立("bad-slug");
+fn an_environment_slug_that_cannot_be_a_filename_is_rejected() {
+    let dir = TempDir::create("bad-slug");
     let mut project = healthy_project();
 
     // 這種名稱若直接當檔名，會跳出專案資料夾。
@@ -153,7 +159,7 @@ fn 環境名稱不能當檔名時會被擋下() {
 }
 
 #[test]
-fn 讀不存在的資料夾會給出含路徑的錯誤() {
+fn loading_a_missing_directory_reports_the_path() {
     let err = load_from_dir(&PathBuf::from("/tmp/loom-這個資料夾不存在")).unwrap_err();
     assert!(
         err.to_string().contains("project.yaml"),
@@ -164,7 +170,7 @@ fn 讀不存在的資料夾會給出含路徑的錯誤() {
 // ── 用記憶體儲存體，完全不碰磁碟 ─────────────────────────────
 
 #[test]
-fn 記憶體儲存體能完整往返() {
+fn the_memory_store_round_trips() {
     use loom_core::repository::{load, save};
     use loom_core::store::MemoryStore;
 
@@ -176,7 +182,7 @@ fn 記憶體儲存體能完整往返() {
 }
 
 #[test]
-fn 不碰磁碟就能驗證整份檔案清單() {
+fn the_whole_file_list_is_verifiable_without_touching_disk() {
     use loom_core::repository::save;
     use loom_core::store::MemoryStore;
 
@@ -198,7 +204,7 @@ fn 不碰磁碟就能驗證整份檔案清單() {
 }
 
 #[test]
-fn 存檔前可以先看會寫成什麼() {
+fn the_files_to_be_written_can_be_inspected_first() {
     // 記憶體儲存體也能拿來做「先算出結果、讓使用者確認再落地」。
     use loom_core::repository::save;
     use loom_core::store::MemoryStore;
@@ -212,7 +218,7 @@ fn 存檔前可以先看會寫成什麼() {
 }
 
 #[test]
-fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
+fn an_unsafe_environment_slug_writes_nothing_to_the_store() {
     // 驗證失敗要在寫入之前發生，不能寫到一半才發現。
     use loom_core::repository::save;
     use loom_core::store::MemoryStore;
@@ -230,7 +236,7 @@ fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
 }
 
 #[test]
-fn 真實架構樣本可以完整讀回來() {
+fn the_real_architecture_fixture_round_trips() {
     // 照一個真實系統的架構建的（28 個落地、兩層巢狀站點、一台 VM 跑兩個服務、
     // 同站優先加跨站備援）。假素材通常太乾淨，這份用來確認 YAML 佈局
     // 撐得住現實的形狀。
@@ -238,29 +244,32 @@ fn 真實架構樣本可以完整讀回來() {
     // **現建一份，不讀 `fixtures/通路系統.loom`。** 磁碟上那份是開來玩的範例，
     // 使用者在 App 裡改它、存檔正是它的用途；拿它當測試素材的話，
     // 每次有人玩過 `mise run check` 就紅一次，然後只能把他的操作洗掉。
-    let project = common::real::專案();
+    let project = common::real::project();
 
     // 走一趟真正的存檔與讀檔，因為這裡要驗的就是 YAML 佈局。
     // 記憶體儲存體就夠了——不碰磁碟，也就不會動到那份範例專案。
     let mut store = loom_core::store::MemoryStore::new();
     loom_core::repository::save(&project, &mut store).expect("存得下去");
-    let 讀回來 = loom_core::repository::load(&store).expect("讀得回來");
-    assert_eq!(讀回來, project, "存檔再讀回來變了樣");
+    let loaded = loom_core::repository::load(&store).expect("讀得回來");
+    assert_eq!(loaded, project, "存檔再讀回來變了樣");
 
-    assert_eq!(讀回來.logical.containers.len(), 8);
-    assert_eq!(讀回來.logical.relationships.len(), 11);
-    assert_eq!(讀回來.environments.len(), 2);
+    assert_eq!(loaded.logical.containers.len(), 8);
+    assert_eq!(loaded.logical.relationships.len(), 11);
+    assert_eq!(loaded.environments.len(), 2);
 
-    let 落地數: usize = 讀回來.environments[0]
+    let instance_count: usize = loaded.environments[0]
         .nodes
         .iter()
         .map(|n| n.instances_recursive().len())
         .sum();
-    assert_eq!(落地數, 28, "prod 應該有 28 個落地（含兩層巢狀站點底下的）");
+    assert_eq!(
+        instance_count, 28,
+        "prod 應該有 28 個落地（含兩層巢狀站點底下的）"
+    );
 
     // 順便釘住 lint 的結果：哪天改了模型讓這份樣本的結論變了，
     // 這裡會提醒你那是不是預期中的。
-    let found: Vec<String> = loom_core::lint::lint(&讀回來)
+    let found: Vec<String> = loom_core::lint::lint(&loaded)
         .iter()
         .map(|f| format!("{} {}", f.rule.code(), f.subject))
         .collect();

@@ -27,13 +27,13 @@ use loom_core::logical::{
     SoftwareSystem,
 };
 
-const 系統: &str = "s-通路";
+const SYSTEM: &str = "s-通路";
 /// 站點的節點 id。`within` 用它把萬用字元限定在某個機房底下。
-const 主中心節點: &str = "n-prod-dc-主中心";
-const 異地節點: &str = "n-prod-dc-異地";
+const MAIN_SITE: &str = "n-prod-dc-主中心";
+const DR_SITE: &str = "n-prod-dc-異地";
 
 /// 服務、顯示名、對外接點、協定。
-const 服務清單: &[(&str, &str, &str, Protocol)] = &[
+const CONTAINER_SLUGS: &[(&str, &str, &str, Protocol)] = &[
     ("apache", "Apache 反向代理", "http", Protocol::Tcp),
     ("gateway", "Gateway Service", "http", Protocol::Tcp),
     ("channel", "Channel Service", "http", Protocol::Tcp),
@@ -44,45 +44,45 @@ const 服務清單: &[(&str, &str, &str, Protocol)] = &[
     ("db", "資料庫", "jdbc", Protocol::Jdbc),
 ];
 
-fn 接點(服務: &str) -> Id {
-    Id::new(format!("e-{服務}"))
+fn endpoint(container: &str) -> Id {
+    Id::new(format!("e-{container}"))
 }
 
-fn 契約(slug: &str) -> Id {
+fn relationship_id(slug: &str) -> Id {
     Id::new(format!("r-{slug}"))
 }
 
-fn 服務欄位(服務: &str) -> (&'static str, Protocol) {
-    服務清單
+fn service_columns(container: &str) -> (&'static str, Protocol) {
+    CONTAINER_SLUGS
         .iter()
-        .find(|(s, ..)| *s == 服務)
+        .find(|(s, ..)| *s == container)
         .map(|(_, _, ep, p)| (*ep, *p))
         .expect("服務清單裡沒有這個服務")
 }
 
 fn logical() -> Logical {
-    let containers = 服務清單
+    let containers = CONTAINER_SLUGS
         .iter()
         .map(|(slug, name, ep, protocol)| Container {
             id: Id::new(format!("c-{slug}")),
             slug: (*slug).into(),
             name: (*name).into(),
-            system: Id::new(系統),
+            system: Id::new(SYSTEM),
             endpoints: vec![EndpointDef {
-                id: 接點(slug),
+                id: endpoint(slug),
                 slug: (*ep).into(),
                 protocol: *protocol,
             }],
         })
         .collect();
 
-    let 連 = |slug: &str, purpose: &str, from: &str, to: &str| Relationship {
-        id: 契約(slug),
+    let link = |slug: &str, purpose: &str, from: &str, to: &str| Relationship {
+        id: relationship_id(slug),
         slug: slug.into(),
         purpose: purpose.into(),
         from: RelationshipEnd::Container(Id::new(format!("c-{from}"))),
         to: RelationshipEnd::Container(Id::new(format!("c-{to}"))),
-        to_endpoint: 接點(to),
+        to_endpoint: endpoint(to),
     };
 
     Logical {
@@ -92,7 +92,7 @@ fn logical() -> Logical {
             name: "End User".into(),
         }],
         systems: vec![SoftwareSystem {
-            id: Id::new(系統),
+            id: Id::new(SYSTEM),
             slug: "通路系統".into(),
             name: "網路通路系統".into(),
             external: false,
@@ -103,67 +103,67 @@ fn logical() -> Logical {
             // 使用者是流量的起點。這條在 C4 Context 圖上最常見，
             // 有了 `RelationshipEnd::Person` 才表達得出來。
             Relationship {
-                id: 契約("使用者-連-apache"),
+                id: relationship_id("使用者-連-apache"),
                 slug: "使用者-連-apache".into(),
                 purpose: "使用者從瀏覽器連進系統".into(),
                 from: RelationshipEnd::Person(Id::new("p-使用者")),
                 to: RelationshipEnd::Container(Id::new("c-apache")),
-                to_endpoint: 接點("apache"),
+                to_endpoint: endpoint("apache"),
             },
-            連("apache-連-gateway", "反向代理轉送請求", "apache", "gateway"),
-            連(
+            link("apache-連-gateway", "反向代理轉送請求", "apache", "gateway"),
+            link(
                 "gateway-連-channel",
                 "解析後把 payload 轉給通路服務",
                 "gateway",
                 "channel",
             ),
-            連(
+            link(
                 "gateway-連-consul",
                 "服務探索：查詢 Channel Service 位置",
                 "gateway",
                 "consul",
             ),
-            連("channel-連-consul", "服務註冊", "channel", "consul"),
-            連("channel-連-redis", "Session 存取", "channel", "redis"),
-            連(
+            link("channel-連-consul", "服務註冊", "channel", "consul"),
+            link("channel-連-redis", "Session 存取", "channel", "redis"),
+            link(
                 "channel-連-apigw",
                 "呼叫共通服務前先過 API Gateway",
                 "channel",
                 "apigw",
             ),
-            連(
+            link(
                 "apigw-連-common",
                 "API Gateway 轉送給共通服務",
                 "apigw",
                 "common",
             ),
-            連("gateway-連-db", "讀寫資料庫", "gateway", "db"),
-            連("channel-連-db", "讀寫資料庫", "channel", "db"),
-            連("common-連-db", "讀寫資料庫", "common", "db"),
+            link("gateway-連-db", "讀寫資料庫", "gateway", "db"),
+            link("channel-連-db", "讀寫資料庫", "channel", "db"),
+            link("common-連-db", "讀寫資料庫", "common", "db"),
         ],
     }
 }
 
 // ── 環境層的組裝零件 ────────────────────────────────────
 
-fn 落地(env: &str, slug: &str, 服務: &str, 位址: &str) -> ContainerInstance {
-    let (ep, protocol) = 服務欄位(服務);
+fn instance(env: &str, slug: &str, container: &str, address: &str) -> ContainerInstance {
+    let (ep, protocol) = service_columns(container);
     ContainerInstance {
         id: Id::new(format!("i-{env}-{slug}")),
         slug: slug.into(),
-        container: Id::new(format!("c-{服務}")),
+        container: Id::new(format!("c-{container}")),
         endpoints: vec![Endpoint {
             id: Id::new(format!("ep-{env}-{slug}")),
             slug: ep.into(),
-            def: Some(接點(服務)),
+            def: Some(endpoint(container)),
             protocol,
-            address: Some(位址.into()),
+            address: Some(address.into()),
         }],
         standalone: false,
     }
 }
 
-fn 機器(env: &str, slug: &str, instances: Vec<ContainerInstance>) -> DeploymentNode {
+fn node(env: &str, slug: &str, instances: Vec<ContainerInstance>) -> DeploymentNode {
     DeploymentNode {
         id: Id::new(format!("n-{env}-{slug}")),
         slug: slug.into(),
@@ -174,38 +174,38 @@ fn 機器(env: &str, slug: &str, instances: Vec<ContainerInstance>) -> Deploymen
 }
 
 /// 機房。`NodeKind::Site` 是裝別的節點用的，本身不跑東西。
-fn 站點(env: &str, slug: &str, 機器們: Vec<DeploymentNode>) -> DeploymentNode {
+fn site(env: &str, slug: &str, nodes: Vec<DeploymentNode>) -> DeploymentNode {
     DeploymentNode {
         id: Id::new(format!("n-{env}-{slug}")),
         slug: slug.into(),
         kind: NodeKind::Site,
-        children: 機器們,
+        children: nodes,
         instances: vec![],
     }
 }
 
-fn 群(pattern: &str, expect: u32, 服務: &str) -> Endpointing {
-    群於(pattern, None, expect, 服務)
+fn group_to(pattern: &str, expect: u32, container: &str) -> Endpointing {
+    group_within(pattern, None, expect, container)
 }
 
 /// 限定在某個部署節點底下的一群。站點就用這個表達，不必編進 slug。
-fn 群於(pattern: &str, within: Option<&str>, expect: u32, 服務: &str) -> Endpointing {
+fn group_within(pattern: &str, within: Option<&str>, expect: u32, container: &str) -> Endpointing {
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
             within: within.map(Id::new),
             expect: Some(expect),
         },
-        endpoint: Some(接點(服務)),
+        endpoint: Some(endpoint(container)),
     }
 }
 
 /// 來源端不指定接點——由作業系統分配 ephemeral port。
-fn 從群(pattern: &str, expect: u32) -> Endpointing {
-    從群於(pattern, None, expect)
+fn group_from(pattern: &str, expect: u32) -> Endpointing {
+    group_from_within(pattern, None, expect)
 }
 
-fn 從群於(pattern: &str, within: Option<&str>, expect: u32) -> Endpointing {
+fn group_from_within(pattern: &str, within: Option<&str>, expect: u32) -> Endpointing {
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
@@ -216,20 +216,20 @@ fn 從群於(pattern: &str, within: Option<&str>, expect: u32) -> Endpointing {
     }
 }
 
-fn 設備(node: &str, endpoint: Option<&str>) -> Endpointing {
+fn infra(node: &str, endpoint: Option<&str>) -> Endpointing {
     Endpointing::Infra {
         node: Id::new(node),
         endpoint: endpoint.map(Id::new),
     }
 }
 
-struct 連線表 {
+struct ConnectionRows {
     env: &'static str,
     n: usize,
     out: Vec<Connection>,
 }
 
-impl 連線表 {
+impl ConnectionRows {
     fn new(env: &'static str) -> Self {
         Self {
             env,
@@ -238,11 +238,11 @@ impl 連線表 {
         }
     }
 
-    fn 加(&mut self, serves: &str, purpose: &str, from: Endpointing, to: Endpointing) {
-        self.加種類(serves, purpose, ConnectionKind::Primary, from, to);
+    fn push_row(&mut self, serves: &str, purpose: &str, from: Endpointing, to: Endpointing) {
+        self.push_row_with_kind(serves, purpose, ConnectionKind::Primary, from, to);
     }
 
-    fn 加種類(
+    fn push_row_with_kind(
         &mut self,
         serves: &str,
         purpose: &str,
@@ -253,7 +253,7 @@ impl 連線表 {
         self.n += 1;
         self.out.push(Connection {
             id: Id::new(format!("conn-{}-{:02}", self.env, self.n)),
-            serves: 契約(serves),
+            serves: relationship_id(serves),
             purpose: purpose.into(),
             kind,
             from,
@@ -268,39 +268,46 @@ impl 連線表 {
     ///
     /// 站點用 `within` 限定，不編進 slug。編進名字的話機器搬家之後
     /// 名字就說謊了，而且 `expect` 只數總量，搬家根本抓不到。
-    fn 兩站互連(&mut self, serves: &str, 來源: &str, 目標: &str, 主: u32, 異: u32) {
-        let 樣式 = |s: &str| format!("{s}-*");
-        self.加(
+    fn cross_site_pair(
+        &mut self,
+        serves: &str,
+        source: &str,
+        target: &str,
+        main_site_of: u32,
+        dr_site_of: u32,
+    ) {
+        let pattern = |s: &str| format!("{s}-*");
+        self.push_row(
             serves,
             "同中心優先（主中心）",
-            從群於(&樣式(來源), Some(主中心節點), 主),
-            群於(&樣式(目標), Some(主中心節點), 主, 目標),
+            group_from_within(&pattern(source), Some(MAIN_SITE), main_site_of),
+            group_within(&pattern(target), Some(MAIN_SITE), main_site_of, target),
         );
-        self.加(
+        self.push_row(
             serves,
             "同中心優先（異地）",
-            從群於(&樣式(來源), Some(異地節點), 異),
-            群於(&樣式(目標), Some(異地節點), 異, 目標),
+            group_from_within(&pattern(source), Some(DR_SITE), dr_site_of),
+            group_within(&pattern(target), Some(DR_SITE), dr_site_of, target),
         );
         // 標成 Fallback：一樣要建立、防火牆一樣要開，只是畫面上會區分開來。
-        self.加種類(
+        self.push_row_with_kind(
             serves,
             "跨中心備援：主中心 → 異地",
             ConnectionKind::Fallback,
-            從群於(&樣式(來源), Some(主中心節點), 主),
-            群於(&樣式(目標), Some(異地節點), 異, 目標),
+            group_from_within(&pattern(source), Some(MAIN_SITE), main_site_of),
+            group_within(&pattern(target), Some(DR_SITE), dr_site_of, target),
         );
-        self.加種類(
+        self.push_row_with_kind(
             serves,
             "跨中心備援：異地 → 主中心",
             ConnectionKind::Fallback,
-            從群於(&樣式(來源), Some(異地節點), 異),
-            群於(&樣式(目標), Some(主中心節點), 主, 目標),
+            group_from_within(&pattern(source), Some(DR_SITE), dr_site_of),
+            group_within(&pattern(target), Some(MAIN_SITE), main_site_of, target),
         );
     }
 }
 
-fn vip(id: &str, slug: &str, 位址: &str) -> InfrastructureNode {
+fn vip(id: &str, slug: &str, address: &str) -> InfrastructureNode {
     InfrastructureNode {
         id: Id::new(id),
         slug: slug.into(),
@@ -309,7 +316,7 @@ fn vip(id: &str, slug: &str, 位址: &str) -> InfrastructureNode {
             slug: "vip".into(),
             def: None,
             protocol: Protocol::Tcp,
-            address: Some(位址.into()),
+            address: Some(address.into()),
         }],
     }
 }
@@ -323,90 +330,90 @@ fn vip(id: &str, slug: &str, 位址: &str) -> InfrastructureNode {
 fn prod() -> Environment {
     let e = "prod";
 
-    let 主中心 = 站點(
+    let main_site = site(
         e,
         "dc-主中心",
         vec![
-            機器(
+            node(
                 e,
                 "vm-b01",
-                vec![落地(e, "apache-01", "apache", "10.1.1.11:8080")],
+                vec![instance(e, "apache-01", "apache", "10.1.1.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-b02",
-                vec![落地(e, "apache-02", "apache", "10.1.1.12:8080")],
+                vec![instance(e, "apache-02", "apache", "10.1.1.12:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-c01",
-                vec![落地(e, "gateway-01", "gateway", "10.1.2.11:8080")],
+                vec![instance(e, "gateway-01", "gateway", "10.1.2.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-c02",
-                vec![落地(e, "gateway-02", "gateway", "10.1.2.12:8080")],
+                vec![instance(e, "gateway-02", "gateway", "10.1.2.12:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-d01",
-                vec![落地(e, "channel-01", "channel", "10.1.3.11:8080")],
+                vec![instance(e, "channel-01", "channel", "10.1.3.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-d02",
-                vec![落地(e, "channel-02", "channel", "10.1.3.12:8080")],
+                vec![instance(e, "channel-02", "channel", "10.1.3.12:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-e01",
-                vec![落地(e, "apigw-01", "apigw", "10.1.6.11:8080")],
+                vec![instance(e, "apigw-01", "apigw", "10.1.6.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-e02",
-                vec![落地(e, "apigw-02", "apigw", "10.1.6.12:8080")],
+                vec![instance(e, "apigw-02", "apigw", "10.1.6.12:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-f01",
-                vec![落地(e, "common-01", "common", "10.1.4.11:8080")],
+                vec![instance(e, "common-01", "common", "10.1.4.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-f02",
-                vec![落地(e, "common-02", "common", "10.1.4.12:8080")],
+                vec![instance(e, "common-02", "common", "10.1.4.12:8080")],
             ),
             // 一台 VM 同時跑 Consul 與 Redis——模型接得住，
             // 一個 DeploymentNode 可以有多個 ContainerInstance。
-            機器(
+            node(
                 e,
                 "vm-g01",
                 vec![
-                    落地(e, "consul-01", "consul", "10.1.5.11:8500"),
-                    落地(e, "redis-01", "redis", "10.1.5.11:6379"),
+                    instance(e, "consul-01", "consul", "10.1.5.11:8500"),
+                    instance(e, "redis-01", "redis", "10.1.5.11:6379"),
                 ],
             ),
-            機器(
+            node(
                 e,
                 "vm-g02",
                 vec![
-                    落地(e, "consul-02", "consul", "10.1.5.12:8500"),
-                    落地(e, "redis-02", "redis", "10.1.5.12:6379"),
+                    instance(e, "consul-02", "consul", "10.1.5.12:8500"),
+                    instance(e, "redis-02", "redis", "10.1.5.12:6379"),
                 ],
             ),
-            機器(
+            node(
                 e,
                 "vm-g03",
                 vec![
-                    落地(e, "consul-03", "consul", "10.1.5.13:8500"),
-                    落地(e, "redis-03", "redis", "10.1.5.13:6379"),
+                    instance(e, "consul-03", "consul", "10.1.5.13:8500"),
+                    instance(e, "redis-03", "redis", "10.1.5.13:6379"),
                 ],
             ),
-            機器(
+            node(
                 e,
                 "vm-h",
-                vec![落地(
+                vec![instance(
                     e,
                     "db-01",
                     "db",
@@ -416,147 +423,147 @@ fn prod() -> Environment {
         ],
     );
 
-    let 異地 = 站點(
+    let dr_site = site(
         e,
         "dc-異地",
         vec![
-            機器(
+            node(
                 e,
                 "vm-b03",
-                vec![落地(e, "apache-03", "apache", "10.2.1.11:8080")],
+                vec![instance(e, "apache-03", "apache", "10.2.1.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-c03",
-                vec![落地(e, "gateway-03", "gateway", "10.2.2.11:8080")],
+                vec![instance(e, "gateway-03", "gateway", "10.2.2.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-d03",
-                vec![落地(e, "channel-03", "channel", "10.2.3.11:8080")],
+                vec![instance(e, "channel-03", "channel", "10.2.3.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-e03",
-                vec![落地(e, "apigw-03", "apigw", "10.2.6.11:8080")],
+                vec![instance(e, "apigw-03", "apigw", "10.2.6.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-f03",
-                vec![落地(e, "common-03", "common", "10.2.4.11:8080")],
+                vec![instance(e, "common-03", "common", "10.2.4.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-g04",
                 vec![
-                    落地(e, "consul-04", "consul", "10.2.5.11:8500"),
-                    落地(e, "redis-04", "redis", "10.2.5.11:6379"),
+                    instance(e, "consul-04", "consul", "10.2.5.11:8500"),
+                    instance(e, "redis-04", "redis", "10.2.5.11:6379"),
                 ],
             ),
-            機器(
+            node(
                 e,
                 "vm-g05",
                 vec![
-                    落地(e, "consul-05", "consul", "10.2.5.12:8500"),
-                    落地(e, "redis-05", "redis", "10.2.5.12:6379"),
+                    instance(e, "consul-05", "consul", "10.2.5.12:8500"),
+                    instance(e, "redis-05", "redis", "10.2.5.12:6379"),
                 ],
             ),
-            機器(
+            node(
                 e,
                 "vm-g06",
                 vec![
-                    落地(e, "consul-06", "consul", "10.2.5.13:8500"),
-                    落地(e, "redis-06", "redis", "10.2.5.13:6379"),
+                    instance(e, "consul-06", "consul", "10.2.5.13:8500"),
+                    instance(e, "redis-06", "redis", "10.2.5.13:6379"),
                 ],
             ),
         ],
     );
 
-    let mut c = 連線表::new(e);
+    let mut c = ConnectionRows::new(e);
 
-    c.加(
+    c.push_row(
         "使用者-連-apache",
         "使用者連上對外的 VIP",
         Endpointing::Person {
             person: Id::new("p-使用者"),
         },
-        設備("f5-前台", Some("ep-f5-前台")),
+        infra("f5-前台", Some("ep-f5-前台")),
     );
-    c.加(
+    c.push_row(
         "使用者-連-apache",
         "F5 分流到反向代理",
-        設備("f5-前台", Some("ep-f5-前台")),
-        群("apache-*", 3, "apache"),
+        infra("f5-前台", Some("ep-f5-前台")),
+        group_to("apache-*", 3, "apache"),
     );
-    c.加(
+    c.push_row(
         "apache-連-gateway",
         "反向代理轉送給 Gateway",
-        從群("apache-*", 3),
-        群("gateway-*", 3, "gateway"),
+        group_from("apache-*", 3),
+        group_to("gateway-*", 3, "gateway"),
     );
 
-    c.加(
+    c.push_row(
         "gateway-連-consul",
         "查詢 Channel Service 的位置",
-        從群("gateway-*", 3),
-        群("consul-*", 6, "consul"),
+        group_from("gateway-*", 3),
+        group_to("consul-*", 6, "consul"),
     );
-    c.加(
+    c.push_row(
         "channel-連-consul",
         "啟動時註冊自己",
-        從群("channel-*", 3),
-        群("consul-*", 6, "consul"),
+        group_from("channel-*", 3),
+        group_to("consul-*", 6, "consul"),
     );
 
-    c.兩站互連("gateway-連-channel", "gateway", "channel", 2, 1);
+    c.cross_site_pair("gateway-連-channel", "gateway", "channel", 2, 1);
 
-    c.加(
+    c.push_row(
         "channel-連-redis",
         "讀寫 Session",
-        從群("channel-*", 3),
-        群("redis-*", 6, "redis"),
+        group_from("channel-*", 3),
+        group_to("redis-*", 6, "redis"),
     );
 
     // API Gateway ＝ 一台 F5 ＋ 三台 API Gateway Service。
-    c.加(
+    c.push_row(
         "channel-連-apigw",
         "先送到 API Gateway 的 VIP",
-        從群("channel-*", 3),
-        設備("f5-apigw", Some("ep-f5-apigw")),
+        group_from("channel-*", 3),
+        infra("f5-apigw", Some("ep-f5-apigw")),
     );
-    c.加(
+    c.push_row(
         "channel-連-apigw",
         "VIP 分流到 API Gateway Service",
-        設備("f5-apigw", None),
-        群("apigw-*", 3, "apigw"),
+        infra("f5-apigw", None),
+        group_to("apigw-*", 3, "apigw"),
     );
 
-    c.兩站互連("apigw-連-common", "apigw", "common", 2, 1);
+    c.cross_site_pair("apigw-連-common", "apigw", "common", 2, 1);
 
-    c.加(
+    c.push_row(
         "gateway-連-db",
         "讀寫資料庫",
-        從群("gateway-*", 3),
-        群("db-*", 1, "db"),
+        group_from("gateway-*", 3),
+        group_to("db-*", 1, "db"),
     );
-    c.加(
+    c.push_row(
         "channel-連-db",
         "讀寫資料庫",
-        從群("channel-*", 3),
-        群("db-*", 1, "db"),
+        group_from("channel-*", 3),
+        group_to("db-*", 1, "db"),
     );
-    c.加(
+    c.push_row(
         "common-連-db",
         "讀寫資料庫",
-        從群("common-*", 3),
-        群("db-*", 1, "db"),
+        group_from("common-*", 3),
+        group_to("db-*", 1, "db"),
     );
 
     Environment {
         id: Id::new("env-prod"),
         slug: "prod".into(),
         name: "正式環境".into(),
-        nodes: vec![主中心, 異地],
+        nodes: vec![main_site, dr_site],
         infra: vec![
             vip("f5-前台", "f5-前台", "203.0.113.10:443"),
             vip("f5-apigw", "f5-api-gateway", "10.1.0.20:8443"),
@@ -578,44 +585,44 @@ fn prod() -> Environment {
 fn test_env() -> Environment {
     let e = "test";
 
-    let 站 = 站點(
+    let site = site(
         e,
         "dc-測試機房",
         vec![
-            機器(
+            node(
                 e,
                 "vm-t-b01",
-                vec![落地(e, "apache-01", "apache", "10.9.1.11:8080")],
+                vec![instance(e, "apache-01", "apache", "10.9.1.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-c01",
-                vec![落地(e, "gateway-01", "gateway", "10.9.2.11:8080")],
+                vec![instance(e, "gateway-01", "gateway", "10.9.2.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-d01",
-                vec![落地(e, "channel-01", "channel", "10.9.3.11:8080")],
+                vec![instance(e, "channel-01", "channel", "10.9.3.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-e01",
-                vec![落地(e, "apigw-01", "apigw", "10.9.6.11:8080")],
+                vec![instance(e, "apigw-01", "apigw", "10.9.6.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-f01",
-                vec![落地(e, "common-01", "common", "10.9.4.11:8080")],
+                vec![instance(e, "common-01", "common", "10.9.4.11:8080")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-g01",
-                vec![落地(e, "consul-01", "consul", "10.9.5.11:8500")],
+                vec![instance(e, "consul-01", "consul", "10.9.5.11:8500")],
             ),
-            機器(
+            node(
                 e,
                 "vm-t-h",
-                vec![落地(
+                vec![instance(
                     e,
                     "db-01",
                     "db",
@@ -625,83 +632,83 @@ fn test_env() -> Environment {
         ],
     );
 
-    let mut c = 連線表::new(e);
-    c.加(
+    let mut c = ConnectionRows::new(e);
+    c.push_row(
         "使用者-連-apache",
         "使用者直接連反向代理（測試環境沒有 F5）",
         Endpointing::Person {
             person: Id::new("p-使用者"),
         },
-        群("apache-*", 1, "apache"),
+        group_to("apache-*", 1, "apache"),
     );
-    c.加(
+    c.push_row(
         "apache-連-gateway",
         "反向代理轉送給 Gateway",
-        從群("apache-*", 1),
-        群("gateway-*", 1, "gateway"),
+        group_from("apache-*", 1),
+        group_to("gateway-*", 1, "gateway"),
     );
-    c.加(
+    c.push_row(
         "gateway-連-consul",
         "查詢 Channel Service 的位置",
-        從群("gateway-*", 1),
-        群("consul-*", 1, "consul"),
+        group_from("gateway-*", 1),
+        group_to("consul-*", 1, "consul"),
     );
-    c.加(
+    c.push_row(
         "channel-連-consul",
         "啟動時註冊自己",
-        從群("channel-*", 1),
-        群("consul-*", 1, "consul"),
+        group_from("channel-*", 1),
+        group_to("consul-*", 1, "consul"),
     );
-    c.加(
+    c.push_row(
         "gateway-連-channel",
         "轉送解析後的 payload",
-        從群("gateway-*", 1),
-        群("channel-*", 1, "channel"),
+        group_from("gateway-*", 1),
+        group_to("channel-*", 1, "channel"),
     );
-    c.加(
+    c.push_row(
         "channel-連-apigw",
         "呼叫 API Gateway",
-        從群("channel-*", 1),
-        群("apigw-*", 1, "apigw"),
+        group_from("channel-*", 1),
+        group_to("apigw-*", 1, "apigw"),
     );
     // 共通服務實際只有 1 台，這裡寫 2——刻意留的洞。
-    c.加(
+    c.push_row(
         "apigw-連-common",
         "轉送給共通服務",
-        從群("apigw-*", 1),
-        群("common-*", 2, "common"),
+        group_from("apigw-*", 1),
+        group_to("common-*", 2, "common"),
     );
-    c.加(
+    c.push_row(
         "gateway-連-db",
         "讀寫資料庫",
-        從群("gateway-*", 1),
-        群("db-*", 1, "db"),
+        group_from("gateway-*", 1),
+        group_to("db-*", 1, "db"),
     );
-    c.加(
+    c.push_row(
         "channel-連-db",
         "讀寫資料庫",
-        從群("channel-*", 1),
-        群("db-*", 1, "db"),
+        group_from("channel-*", 1),
+        group_to("db-*", 1, "db"),
     );
-    c.加(
+    c.push_row(
         "common-連-db",
         "讀寫資料庫",
-        從群("common-*", 1),
-        群("db-*", 1, "db"),
+        group_from("common-*", 1),
+        group_to("db-*", 1, "db"),
     );
 
     Environment {
         id: Id::new("env-test"),
         slug: "test".into(),
         name: "測試環境".into(),
-        nodes: vec![站],
+        nodes: vec![site],
         infra: vec![],
         systems: Vec::<SoftwareSystemInstance>::new(),
         connections: c.out,
     }
 }
 
-pub fn 專案() -> Project {
+pub fn project() -> Project {
     Project {
         id: Id::new("p-通路系統"),
         slug: "通路系統".into(),

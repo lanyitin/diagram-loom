@@ -293,18 +293,18 @@ pub fn plan(
 
     // 撞名一律擋下來。同一個環境有兩台 redis-01 會讓萬用字元數到 2，
     // 而使用者以為那是兩台不同的機器——正好是這個工具要防的誤會。
-    let 既有機器: HashSet<&str> = 所有機器名(&env.nodes);
-    let 既有落地: HashSet<&str> = env
+    let existing_nodes: HashSet<&str> = all_node_slugs(&env.nodes);
+    let existing_instances: HashSet<&str> = env
         .instances()
         .into_iter()
         .map(|i| i.slug.as_str())
         .collect();
     for node in &nodes {
-        if 既有機器.contains(node.slug.as_str()) {
+        if existing_nodes.contains(node.slug.as_str()) {
             return Err(BatchError::Taken(node.slug.clone()));
         }
         for i in &node.instances {
-            if 既有落地.contains(i.slug.as_str()) {
+            if existing_instances.contains(i.slug.as_str()) {
                 return Err(BatchError::Taken(i.slug.clone()));
             }
         }
@@ -314,12 +314,12 @@ pub fn plan(
         .iter()
         .flat_map(|n| {
             n.instances.iter().map(move |i| {
-                let 位址 = i
+                let address_of = i
                     .endpoints
                     .first()
                     .and_then(|e| e.address.as_deref())
                     .unwrap_or("（沒有位址）");
-                format!("{} / {} @ {}", n.slug, i.slug, 位址)
+                format!("{} / {} @ {}", n.slug, i.slug, address_of)
             })
         })
         .collect();
@@ -327,11 +327,11 @@ pub fn plan(
     Ok(BatchPlan { nodes, preview })
 }
 
-fn 所有機器名(nodes: &[DeploymentNode]) -> HashSet<&str> {
+fn all_node_slugs(nodes: &[DeploymentNode]) -> HashSet<&str> {
     let mut out = HashSet::new();
     for n in nodes {
         out.insert(n.slug.as_str());
-        out.extend(所有機器名(&n.children));
+        out.extend(all_node_slugs(&n.children));
     }
     out
 }
@@ -340,7 +340,7 @@ fn 所有機器名(nodes: &[DeploymentNode]) -> HashSet<&str> {
 mod tests {
     use super::*;
 
-    fn 規格(count: u32) -> BatchSpec {
+    fn spec(count: u32) -> BatchSpec {
         BatchSpec {
             count,
             name_template: "redis-{n}".into(),
@@ -359,91 +359,94 @@ mod tests {
         }
     }
 
-    fn 展開(spec: &BatchSpec) -> Result<Vec<DeploymentNode>, BatchError> {
+    fn expanded(spec: &BatchSpec) -> Result<Vec<DeploymentNode>, BatchError> {
         expand(spec, |hint| Id::new(hint))
     }
 
     #[test]
-    fn 產生指定數量的機器每台一個實例() {
-        let nodes = 展開(&規格(12)).unwrap();
+    fn creates_the_requested_number_of_nodes_one_instance_each() {
+        let nodes = expanded(&spec(12)).unwrap();
         assert_eq!(nodes.len(), 12);
         assert!(nodes.iter().all(|n| n.instances.len() == 1));
     }
 
     #[test]
-    fn 序號補零() {
-        let nodes = 展開(&規格(12)).unwrap();
+    fn sequence_number_is_padded() {
+        let nodes = expanded(&spec(12)).unwrap();
         assert_eq!(nodes[0].instances[0].slug, "redis-01");
         assert_eq!(nodes[8].instances[0].slug, "redis-09");
         assert_eq!(nodes[9].instances[0].slug, "redis-10");
     }
 
     #[test]
-    fn 位址用自己的計數器不補零() {
-        let nodes = 展開(&規格(12)).unwrap();
-        let 位址 = |i: usize| nodes[i].instances[0].endpoints[0].address.clone();
-        assert_eq!(位址(0).as_deref(), Some("10.0.1.11:6379"));
-        assert_eq!(位址(11).as_deref(), Some("10.0.1.22:6379"));
+    fn address_counter_is_separate_and_unpadded() {
+        let nodes = expanded(&spec(12)).unwrap();
+        let address_of = |i: usize| nodes[i].instances[0].endpoints[0].address.clone();
+        assert_eq!(address_of(0).as_deref(), Some("10.0.1.11:6379"));
+        assert_eq!(address_of(11).as_deref(), Some("10.0.1.22:6379"));
     }
 
     #[test]
-    fn 機器名稱與實例名稱分開() {
-        let nodes = 展開(&規格(2)).unwrap();
+    fn node_slug_and_instance_slug_are_separate() {
+        let nodes = expanded(&spec(2)).unwrap();
         assert_eq!(nodes[0].slug, "vm-redis-01");
         assert_eq!(nodes[0].instances[0].slug, "redis-01");
     }
 
     #[test]
-    fn 兩種佔位符都能用在任何樣板上() {
-        let mut spec = 規格(2);
+    fn both_placeholders_work_in_every_template() {
+        let mut spec = spec(2);
         spec.name_template = "redis-{n}-{ip}".into();
-        let nodes = 展開(&spec).unwrap();
+        let nodes = expanded(&spec).unwrap();
         assert_eq!(nodes[0].instances[0].slug, "redis-01-11");
     }
 
     #[test]
-    fn 數量為零視為錯誤() {
-        assert_eq!(展開(&規格(0)), Err(BatchError::EmptyCount));
+    fn zero_count_is_an_error() {
+        assert_eq!(expanded(&spec(0)), Err(BatchError::EmptyCount));
     }
 
     #[test]
-    fn 名稱樣板忘了放序號會產生重複() {
-        let mut spec = 規格(3);
+    fn template_without_sequence_number_duplicates() {
+        let mut spec = spec(3);
         spec.name_template = "redis".into();
-        assert_eq!(展開(&spec), Err(BatchError::DuplicateName("redis".into())));
+        assert_eq!(
+            expanded(&spec),
+            Err(BatchError::DuplicateName("redis".into()))
+        );
     }
 
     #[test]
-    fn 只建一個時沒有序號也可以() {
-        let mut spec = 規格(1);
+    fn single_item_needs_no_sequence_number() {
+        let mut spec = spec(1);
         spec.name_template = "redis".into();
         spec.node_template = "vm-redis".into();
-        assert_eq!(展開(&spec).unwrap()[0].instances[0].slug, "redis");
+        assert_eq!(expanded(&spec).unwrap()[0].instances[0].slug, "redis");
     }
 
     #[test]
-    fn 打錯佔位符會被擋下() {
-        let mut spec = 規格(1);
+    fn unknown_placeholder_is_rejected() {
+        let mut spec = spec(1);
         spec.name_template = "redis-{num}".into();
         assert_eq!(
-            展開(&spec),
+            expanded(&spec),
             Err(BatchError::UnknownPlaceholder("num".into()))
         );
     }
 
     #[test]
-    fn 大括號沒關會被擋下() {
-        let mut spec = 規格(1);
+    fn unclosed_brace_is_rejected() {
+        let mut spec = spec(1);
         spec.name_template = "redis-{n".into();
-        assert_eq!(展開(&spec), Err(BatchError::UnclosedPlaceholder));
+        assert_eq!(expanded(&spec), Err(BatchError::UnclosedPlaceholder));
     }
 
     #[test]
-    fn 名稱不是正規寫法時報錯並給建議() {
-        let mut spec = 規格(1);
+    fn rejects_unnormalised_names_with_a_suggestion() {
+        let mut spec = spec(1);
         spec.name_template = "Redis Node {n}".into();
         assert_eq!(
-            展開(&spec),
+            expanded(&spec),
             Err(BatchError::NotNormalized {
                 produced: "Redis Node 01".into(),
                 suggestion: "redis-node-01".into(),
@@ -452,11 +455,11 @@ mod tests {
     }
 
     #[test]
-    fn 位址樣板不受slug正規化限制() {
+    fn address_template_is_not_slug_normalised() {
         // 位址可以是 JDBC URL、socket 路徑、檔案路徑，不該被當成 slug 檢查。
-        let mut spec = 規格(1);
+        let mut spec = spec(1);
         spec.address_template = "jdbc:oracle:thin:@10.0.2.{ip}:1521/ORCL".into();
-        let nodes = 展開(&spec).unwrap();
+        let nodes = expanded(&spec).unwrap();
         assert_eq!(
             nodes[0].instances[0].endpoints[0].address.as_deref(),
             Some("jdbc:oracle:thin:@10.0.2.11:1521/ORCL")
@@ -464,16 +467,16 @@ mod tests {
     }
 
     #[test]
-    fn 識別碼由呼叫端決定() {
-        let mut 次數 = 0;
-        let nodes = expand(&規格(1), |hint| {
-            次數 += 1;
+    fn the_caller_decides_the_id() {
+        let mut count = 0;
+        let nodes = expand(&spec(1), |hint| {
+            count += 1;
             Id::new(format!("uuid-{hint}"))
         })
         .unwrap();
 
         // 每個實例會要三個 id：endpoint、instance、node
-        assert_eq!(次數, 3);
+        assert_eq!(count, 3);
         assert_eq!(nodes[0].id, Id::new("uuid-n-vm-redis-01"));
         assert_eq!(nodes[0].instances[0].id, Id::new("uuid-i-redis-01"));
     }
