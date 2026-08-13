@@ -54,11 +54,29 @@ describe('版面在縮放之後不會破', () => {
     expect(用了).toEqual([])
   })
 
-  it('沒有人再去除 --zoom', () => {
+  it('沒有人再拿長度去除 --zoom', () => {
     // 除了不會被乘回來。要嘛用百分比（zoom 不碰），要嘛用 px（zoom 會等比放大）。
+    //
+    // 唯一的例外是 `zoom: calc(1 / var(--zoom))`——那不是在算長度，
+    // 而是在**抵銷 zoom 本身**（內嵌的 draw.io 不該吃我們的介面縮放）。
+    // 那一條由下面的測試守著。
     const 除了的 = [...styleBlocks(), { file: 'styles.css', css: stripComments(readFileSync(join(import.meta.dirname, 'styles.css'), 'utf8')) }]
+      .map(({ file, css }) => ({ file, css: css.replace(/zoom:\s*calc\(\s*1\s*\/\s*var\(--zoom\)\s*\)/g, '') }))
       .filter(({ css }) => /\/\s*var\(--zoom\)/.test(css))
       .map(({ file }) => file)
     expect(除了的).toEqual([])
+  })
+})
+
+describe('內嵌的 draw.io 不吃我們的縮放', () => {
+  it('iframe 把 zoom 抵銷掉', () => {
+    // 真的踩過：`#app` 的 zoom 一路蓋到 iframe，而 draw.io 用絕對像素算
+    // 自己的面板寬度——右邊的格式面板被擠成一條，只剩幾個核取方塊。
+    //
+    // 它有自己的縮放（右下角、⌘＋），所以不需要我們這一份。
+    const { css } = styleBlocks().find((b) => b.file === 'DiagramView.vue')!
+    expect(css, 'draw.io 的 iframe 要把介面縮放抵銷掉').toMatch(
+      /\.editor\s*\{[^}]*zoom:\s*calc\(\s*1\s*\/\s*var\(--zoom\)\s*\)/,
+    )
   })
 })

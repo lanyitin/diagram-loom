@@ -20,7 +20,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
-import { boundShapes, dim, toXml } from '../lib/diagram'
+import { boundShapes, dim, shapesOf, toXml } from '../lib/diagram'
 import DiagramFilter from './DiagramFilter.vue'
 import type { Contract, Highlight, Link } from '../lib/model'
 
@@ -54,14 +54,39 @@ const filtering = computed(() => picked.value.length > 0 || store.onlyProblems)
 const litCount = computed(() => highlight.value?.shapes.length ?? 0)
 
 /**
+ * 這個環境一台機器都沒有。
+ *
+ * 空的部署圖跟壞掉的編輯器長得一模一樣——都是一片空白格線。
+ * 使用者第一個念頭會是「工具壞了」，而不是「這裡還沒填東西」。
+ */
+const empty = computed(() => {
+  const env = environment.value
+  if (!env || !store.snapshot) return false
+  return shapesOf(store.snapshot.project, env).length === 0
+})
+
+/**
  * 一條萬用字元連線是 N×M 條線——12 台連 12 台就是 144 條。
  * 超過這個數字，圖已經沒有人讀得動了，該用篩選（尚未實作）而不是硬畫。
  */
 const TOO_MANY = 600
 const tooMany = computed(() => links.value.length > TOO_MANY)
 
-/** 現在畫的是哪個環境。沒勾就畫第一個——一張圖只屬於一個環境。 */
-const environment = computed(() => store.visibleEnvironments[0] ?? store.environments[0] ?? null)
+/**
+ * 現在畫的是哪個環境。
+ *
+ * **一張圖只屬於一個環境**，所以這裡要自己選一個，不能跟著上面那排
+ * 勾選走——兩個都勾的時候，跟著走就永遠只看得到第一個，另一個
+ * 沒有任何辦法可以打開。
+ */
+const chosen = ref<string | null>(null)
+const environment = computed(
+  () =>
+    store.environments.find((e) => e.id === chosen.value)
+    ?? store.visibleEnvironments[0]
+    ?? store.environments[0]
+    ?? null,
+)
 
 function send(message: unknown) {
   frame.value?.contentWindow?.postMessage(JSON.stringify(message), '*')
@@ -186,7 +211,10 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 
     <template v-else>
       <div class="bar">
-        <span class="muted">{{ environment.slug }}</span>
+        <select v-if="store.environments.length > 1" :value="environment.id" @change="chosen = ($event.target as HTMLSelectElement).value">
+          <option v-for="e in store.environments" :key="e.id" :value="e.id">{{ e.slug }}</option>
+        </select>
+        <span v-else class="muted">{{ environment.slug }}</span>
         <span class="muted small">{{ links.length }} 條線</span>
         <!-- 萬用字元是 N×M，所以「幾條連線」跟「圖上幾條線」差很多。
              不講的話使用者只會覺得圖突然變成一團毛線，不知道為什麼。 -->
@@ -207,11 +235,20 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
           @update:picked="picked = $event"
           @update:problems="store.onlyProblems = $event"
         />
-        <iframe
-          ref="frame"
-          class="editor"
-          :src="`drawio://localhost/index.html?${PARAMS}`"
-        />
+        <div class="canvas">
+          <!-- 空的部署圖跟壞掉的編輯器長得一樣，都是一片空白格線。
+               不講的話使用者會以為是工具壞了。 -->
+          <p v-if="empty" class="hint">
+            <strong>{{ environment.slug }} 還沒有任何機器。</strong>
+            部署圖畫的是「東西跑在哪裡」，所以要先到<strong>資源</strong>那一頁
+            建機器與落地，這裡才畫得出東西。
+          </p>
+          <iframe
+            ref="frame"
+            class="editor"
+            :src="`drawio://localhost/index.html?${PARAMS}`"
+          />
+        </div>
       </div>
     </template>
   </div>
@@ -233,7 +270,33 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 .small { font-size: 11.5px; }
 
 .body { flex: 1; min-height: 0; display: flex; }
-.editor { flex: 1; min-width: 0; border: 0; }
+.canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  width: 100%;
+  /*
+   * 把介面縮放抵銷掉。
+   *
+   * `#app` 上的 `zoom` 會一路蓋到 iframe，而 draw.io 用絕對像素在算它自己的
+   * 面板寬度——被 zoom 一乘，右邊的格式面板就會被擠成一條，只剩幾個核取方塊。
+   *
+   * draw.io 有自己的縮放（右下角、⌘＋），所以這裡不需要我們的那一份。
+   * 這是 `zoom` 第二次咬人了，第一次是底下那條黑帶。
+   */
+  zoom: calc(1 / var(--zoom));
+}
+
+.hint {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
 .warn { color: var(--broken); }
 
 .empty { padding: 40px 24px; text-align: center; max-width: 46ch; margin: 0 auto; line-height: 1.7; }
