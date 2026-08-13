@@ -66,9 +66,9 @@ async function 選專案() {
       <LintPanel />
     </template>
 
-    <ImportWizard v-if="store.匯入中" />
-
-    <!-- 空狀態。第一次開啟時畫面不該是一片白。 -->
+    <!-- 空狀態。第一次開啟時畫面不該是一片白。
+         這個 v-else 必須緊貼著上面的 v-if——中間插任何東西都會把
+         if/else 鏈打斷，變成兩個畫面同時出現。 -->
     <section v-else class="welcome">
       <h1>diagram-loom</h1>
       <p class="muted">
@@ -77,6 +77,8 @@ async function 選專案() {
       <button class="primary" @click="選專案">開啟專案…</button>
       <p class="muted hint mono">fixtures/sample.loom 是一份刻意留了破洞的範例</p>
     </section>
+
+    <ImportWizard v-if="store.匯入中" />
   </div>
 </template>
 
