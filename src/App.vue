@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
+import { SCALES, apply as applyScale, load as loadScale, type Scale } from './lib/ui'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
@@ -15,6 +16,13 @@ import ImportWizard from './components/ImportWizard.vue'
 import LintPanel from './components/LintPanel.vue'
 
 const store = useProject()
+
+/**
+ * 介面大小。放在標頭而不是某個設定頁裡——看不清楚的人第一件事就是找它，
+ * 而藏在兩層選單後面的無障礙設定等於沒有。
+ */
+const scale = ref<Scale>(loadScale())
+watch(scale, applyScale, { immediate: true })
 
 async function pickProject() {
   const picked = await open({ directory: true, title: '選擇專案資料夾（.loom）' })
@@ -79,6 +87,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           :title="store.redoLabel ? `重做：${store.redoLabel}` : '沒有可以重做的動作'"
           @click="store.redo()"
         >↷ 重做</button>
+      </div>
+
+      <div class="seg scale" role="group" aria-label="介面大小">
+        <button
+          v-for="s in SCALES" :key="s.value"
+          :class="{ on: scale === s.value }"
+          :title="`介面大小：${s.label}`"
+          @click="scale = s.value"
+        >{{ s.label }}</button>
       </div>
 
       <button :disabled="store.busy" @click="newProject">新專案…</button>
@@ -180,6 +197,9 @@ header {
   border-bottom: 1px solid var(--rule);
 }
 .path { font-size: 11.5px; }
+
+/* 三個字的級距鈕，比其他鈕窄。 */
+.scale button { padding: 4px 9px; }
 
 .dirty {
   font-size: 11px;

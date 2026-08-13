@@ -143,7 +143,7 @@ function jumpTo(f: Finding) {
 
 <style scoped>
 .panel { border-top: 1px solid var(--rule); background: var(--surface-2); }
-.panel.展開 { display: flex; flex-direction: column; max-height: 44vh; }
+.panel.展開 { display: flex; flex-direction: column; max-height: calc(44vh / var(--zoom)); }
 
 .bar {
   display: flex;

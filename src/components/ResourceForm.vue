@@ -258,7 +258,7 @@ function write(path: string, v: unknown) {
 }
 .box {
   width: min(520px, 92vw);
-  max-height: 86vh;
+  max-height: calc(86vh / var(--zoom));
   overflow: auto;
   padding: 18px 20px 14px;
   border: 1px solid var(--rule);

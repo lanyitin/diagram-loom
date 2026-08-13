@@ -206,7 +206,7 @@ async function create() {
 }
 .box {
   width: min(680px, 94vw);
-  max-height: 86vh;
+  max-height: calc(86vh / var(--zoom));
   overflow: auto;
   padding: 18px 20px 14px;
   border: 1px solid var(--rule);
@@ -241,7 +241,7 @@ p { margin: 0; }
   display: flex;
   flex-direction: column;
   gap: 3px;
-  max-height: 30vh;
+  max-height: calc(30vh / var(--zoom));
   overflow: auto;
   border: 1px solid var(--rule);
   border-radius: 5px;

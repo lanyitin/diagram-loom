@@ -31,6 +31,17 @@
   --sans: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
 
   --row: 34px;
+
+  /*
+   * 介面縮放：小／中／大。由 `ui.ts` 寫進來。
+   *
+   * # 為什麼是縮放整個介面，不只是字
+   *
+   * 這是密度很高的表格 UI。只把字放大、列高與內距不動的話，字會擠在
+   * 一起，而核取方塊、刪除鈕還是一樣小——對看不清楚的人來說，
+   * **點得到跟看得到一樣重要**。
+   */
+  --zoom: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -56,6 +67,17 @@
 html, body, #app {
   height: 100%;
   margin: 0;
+}
+
+#app {
+  zoom: var(--zoom);
+  /*
+   * `zoom` 會把 `height: 100%` 也一起放大，版面就會溢出視窗底部。
+   * 先除回去，放大之後剛好等於視窗高度。
+   *
+   * 同理，元件裡的 `vh` 也要除——見那些 `calc(… / var(--zoom))`。
+   */
+  height: calc(100% / var(--zoom));
 }
 
 body {

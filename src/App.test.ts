@@ -105,6 +105,24 @@ describe('視窗組裝', () => {
     expect(w.find('.backdrop').exists()).toBe(true)
   })
 
+  it('介面大小的三個級距在標頭上，不用開設定頁', () => {
+    // 看不清楚的人第一件事就是找它。藏在兩層選單後面的無障礙設定等於沒有。
+    const w = mount(App)
+    const scale = w.find('.scale')
+    expect(scale.exists()).toBe(true)
+    expect(scale.findAll('button').map((b) => b.text())).toEqual(['小', '中', '大'])
+    // 沒開專案也要能調——歡迎畫面的字一樣小。
+    expect(scale.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('按了大就真的放大，而且記得住', async () => {
+    const w = mount(App)
+    await w.findAll('.scale button')[2]!.trigger('click')
+
+    expect(document.documentElement.style.getPropertyValue('--zoom')).toBe('1.32')
+    expect(localStorage.getItem('diagram-loom.ui-scale')).toBe('large')
+  })
+
   it('歡迎畫面同時提供「從零開始」與「開啟現有」', () => {
     // 使用者不見得有 Excel 可以匯，從零開始是真實情境。
     const w = mount(App)
