@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { boundShapes, peopleOf, shapesOf, toXml } from './diagram'
+import { boundShapes, dim, peopleOf, shapesOf, toXml } from './diagram'
 import type { Environment, Link, Project } from './model'
 
 function project(): Project {
@@ -274,5 +274,63 @@ describe('從圖上讀回 loomId', () => {
     const back = boundShapes(xml).map((s) => s.id).sort()
     const want = shapesOf(project(), environment()).map((s) => s.loomId).sort()
     expect(back).toEqual(want)
+  })
+})
+
+describe('調暗', () => {
+  function lit(ids: string[]) {
+    return dim(toXml(project(), environment(), [link({})]), new Set(ids))
+  }
+
+  it('沒被點亮的形狀調暗', () => {
+    const xml = lit(['i-redis'])
+    expect(xml).toMatch(/loomId="n-site"[\s\S]*?opacity=25/)
+  })
+
+  it('點亮的形狀不帶 opacity', () => {
+    // 設成 100 而不是拿掉的話，使用者自己調的半透明會被我們永久蓋掉。
+    const xml = lit(['i-redis'])
+    const cell = xml.match(/loomId="i-redis"[\s\S]{0,300}?<\/mxCell>/)![0]
+    expect(cell).not.toContain('opacity=')
+  })
+
+  it('只動 opacity，其他樣式一個字都不改', () => {
+    // style 字串裡住著使用者調的顏色與字體。這支螢光筆只有一個顏色。
+    const xml = lit([])
+    expect(xml).toContain('shape=hexagon')
+    expect(xml).toContain('verticalAlign=top')
+    expect(xml).toContain('dashed=1')
+  })
+
+  it('重複套用不會疊出兩個 opacity', () => {
+    // 篩選會被按很多次。疊起來的話 style 字串會越長越髒，
+    // 而 draw.io 只認最後一個——症狀是「調了但沒反應」。
+    const once = lit([])
+    const twice = dim(once, new Set())
+    expect(twice.match(/opacity=/g)!.length).toBe(once.match(/opacity=/g)!.length)
+  })
+
+  it('調暗不會弄丟任何形狀', () => {
+    // 這是整個設計的支點：篩選不改變圖上有什麼，所以對帳不受影響。
+    const before = toXml(project(), environment(), [link({})])
+    expect(boundShapes(dim(before, new Set())).map((s) => s.id).sort())
+      .toEqual(boundShapes(before).map((s) => s.id).sort())
+  })
+
+  it('調暗不會弄丟座標', () => {
+    // 從模型重產會洗掉手工排好的版面。這裡是改，不是重產。
+    const moved = toXml(project(), environment(), []).replace('x="0" y="0"', 'x="640" y="280"')
+    expect(dim(moved, new Set())).toContain('x="640"')
+  })
+
+  it('使用者自己畫的裝飾不碰', () => {
+    // 沒有 loomKind 的形狀不是我們的東西。
+    const note = '<root><mxCell id="n" value="便利貼" style="rounded=1;" vertex="1"/></root>'
+    expect(dim(note, new Set())).not.toContain('opacity')
+  })
+
+  it('線也調得暗', () => {
+    const xml = lit(['i-redis'])
+    expect(xml).toMatch(/loomKind="connection"[\s\S]*?opacity=25/)
   })
 })

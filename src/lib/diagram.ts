@@ -178,17 +178,16 @@ export function toXml(project: Project, environment: Environment, links: Link[] 
   const cells = shapes
     .map((s) => {
       const label = s.detail ? `${esc(s.label)}&#10;${esc(s.detail)}` : esc(s.label)
-      // 沒有 loomId 的形狀（人）不包 `<object>`——空的 loomId 會被
-      // `boundShapes` 挖出來變成一個 id 是空字串的元素。
-      const open = s.loomId
-        ? `        <object label="${label}" loomId="${esc(s.loomId)}" loomKind="${s.kind}" id="${esc(s.id)}">`
-        : null
-      const cell = [
-        `          <mxCell ${open ? '' : `value="${label}" `}style="${s.style}" vertex="1" parent="${esc(s.parent ?? '1')}"${open ? '' : ` id="${esc(s.id)}"`}>`,
+      // `loomKind` 標「這個形狀是我們畫的」，`loomId` 標「它是哪個模型元素」。
+      // 兩者分開才有辦法畫出「人」——它是我們畫的，但不是環境層的元素。
+      const bind = s.loomId ? ` loomId="${esc(s.loomId)}"` : ''
+      return [
+        `        <object label="${label}"${bind} loomKind="${s.kind}" id="${esc(s.id)}">`,
+        `          <mxCell style="${s.style}" vertex="1" parent="${esc(s.parent ?? '1')}">`,
         `            <mxGeometry x="0" y="0" width="180" height="60" as="geometry"/>`,
         `          </mxCell>`,
+        `        </object>`,
       ].join('\n')
-      return open ? [open, cell, '        </object>'].join('\n') : cell
     })
     .join('\n')
 
@@ -256,4 +255,53 @@ export function boundShapes(xml: string): { id: string; label: string }[] {
     out.set(id, { id, label })
   }
   return [...out.values()]
+}
+
+/** 調暗的透明度。25% 淡到不會搶，但還看得出那裡有東西。 */
+const DIM = 25
+
+/**
+ * 把不在 `lit` 裡的形狀與線調暗。
+ *
+ * # 這支螢光筆只有一個顏色
+ *
+ * **只動 `opacity`，其他樣式一個字都不改。** style 字串裡還住著使用者自己
+ * 調的顏色、框線、字體——界線講死了，我們才可以放心反覆重寫它，不必記
+ * 「它原本是多少」（見 `docs/drawio-integration.md`）。
+ *
+ * # 不刪任何東西
+ *
+ * 調暗不是隱藏。隱藏等於把課本剪掉，剪過的課本永遠回答不了「有沒有漏字」；
+ * 調暗之後**圖上的形狀一個都沒少**，所以對帳完全不受篩選影響。
+ *
+ * # 為什麼吃 XML 而不是重新產圖
+ *
+ * 從模型重產會洗掉使用者手工排好的版面——按一下篩選，半小時的拖拉就沒了。
+ * 座標本來就寫在傳進來的這份 XML 裡，改完再 `load` 回去，一個都不會跑掉。
+ *
+ * 使用者自己畫的裝飾（沒有 `loomKind`）不碰：那不是我們的東西。
+ */
+export function dim(xml: string, lit: Set<string>): string {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+
+  for (const el of Array.from(doc.querySelectorAll('[loomKind]'))) {
+    // 線的 `loomId` 是連線 id，形狀的是元素 id；人沒有 `loomId`，
+    // 用 cell id 認（`Highlight.shapes` 裡放的就是人的 id）。
+    const key = el.getAttribute('loomId') ?? el.getAttribute('id') ?? ''
+    const cell = el.querySelector('mxCell') ?? el
+    cell.setAttribute('style', withOpacity(cell.getAttribute('style') ?? '', lit.has(key)))
+  }
+
+  return new XMLSerializer().serializeToString(doc)
+}
+
+/** 換掉 style 裡的 `opacity`，其餘原樣保留。 */
+function withOpacity(style: string, isLit: boolean): string {
+  const kept = style
+    .split(';')
+    .filter((part) => part !== '' && !part.startsWith('opacity='))
+    .join(';')
+  // 亮的就把 opacity 拿掉，而不是設成 100——留著的話使用者自己調的
+  // 半透明會被我們永久蓋掉。
+  return isLit ? `${kept};` : `${kept};opacity=${DIM};`
 }

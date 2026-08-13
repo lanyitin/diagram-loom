@@ -20,8 +20,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
-import { boundShapes, toXml } from '../lib/diagram'
-import type { Link } from '../lib/model'
+import { boundShapes, dim, toXml } from '../lib/diagram'
+import DiagramFilter from './DiagramFilter.vue'
+import type { Contract, Highlight, Link } from '../lib/model'
 
 const store = useProject()
 
@@ -39,6 +40,18 @@ const ready = ref(false)
 const status = ref('')
 const links = ref<Link[]>([])
 const drawing = ref(false)
+
+/** 篩選：勾了哪些契約、要不要只看有問題的。 */
+const picked = ref<string[]>([])
+const contracts = ref<Contract[]>([])
+const highlight = ref<Highlight | null>(null)
+const totalShapes = ref(0)
+
+/** 最後一次交給編輯器的 XML。調暗改的是它，不是重新產一張。 */
+const current = ref('')
+
+const filtering = computed(() => picked.value.length > 0 || store.onlyProblems)
+const litCount = computed(() => highlight.value?.shapes.length ?? 0)
 
 /**
  * 一條萬用字元連線是 N×M 條線——12 台連 12 台就是 144 條。
@@ -72,16 +85,53 @@ async function loadModel() {
     drawing.value = false
   }
 
-  send({
-    action: 'load',
-    xml: toXml(store.snapshot.project, env, links.value),
-    // 沒有 save 事件，所以靠 autosave 才知道使用者動了什麼。
-    autosave: 1,
-  })
+  current.value = toXml(store.snapshot.project, env, links.value)
+  // 沒有 save 事件，所以靠 autosave 才知道使用者動了什麼。
+  send({ action: 'load', xml: await painted(), autosave: 1 })
   // 排版交給 draw.io 內建的 ELK。只有 layered 處理得了巢狀節點，
   // 而我們的圖天生巢狀（站點 → 機器 → 落地）——見 docs/nested-layout.md。
   send({ action: 'layout', layouts: 'verticalFlow' })
   send({ action: 'fit', maxScale: 1.2 })
+}
+
+/**
+ * 去問 Rust「誰該亮」，然後把螢光筆塗上去。
+ *
+ * 「勾了這條契約，哪些東西算相關」跟 lint 是同一類判斷，所以在 Rust
+ * （`highlight.rs`）。在這裡自己算會養出第二套「什麼叫相關」。
+ */
+async function painted(): Promise<string> {
+  const env = environment.value
+  if (!env) return current.value
+
+  const res = await commands.diagramFocus(env.id, {
+    relationships: picked.value,
+    problems: store.onlyProblems,
+  })
+  if (res.status !== 'ok') {
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
+    return current.value
+  }
+
+  contracts.value = res.data.contracts
+  highlight.value = res.data.highlight
+  totalShapes.value = res.data.shapes
+
+  // 什麼都沒勾就不塗——全部塗成「亮」等於把使用者自己調的半透明洗掉。
+  if (!filtering.value) return current.value
+  const lit = new Set([...res.data.highlight.shapes, ...res.data.highlight.connections])
+  return dim(current.value, lit)
+}
+
+/**
+ * 只重塗，不重畫。
+ *
+ * 從模型重產會洗掉使用者手工排好的版面——按一下篩選，半小時的拖拉就沒了。
+ * 所以改的是編輯器最後給我們的那份 XML（座標都在裡面），只動 `opacity`。
+ */
+async function repaint() {
+  if (!ready.value || !current.value) return
+  send({ action: 'load', xml: await painted(), autosave: 1 })
 }
 
 function onMessage(event: MessageEvent) {
@@ -109,16 +159,18 @@ function onMessage(event: MessageEvent) {
       // 使用者動了圖。**這裡不自動寫回模型**——圖與模型誰都不是老大，
       // 要由人裁決（階段 7 的對帳面板）。現在只記下「有幾個形狀綁著」。
       if (message.xml) {
+        // 記住座標。下次套篩選要改的是這一份，不是從模型重產。
+        current.value = message.xml
         status.value = `圖上有 ${boundShapes(message.xml).length} 個綁定的形狀`
       }
       break
   }
 }
 
-watch(
-  () => [store.snapshot, environment.value?.id],
-  () => loadModel(),
-)
+watch(() => [store.snapshot, environment.value?.id], () => loadModel())
+
+// 換篩選只重塗，不重畫——重畫會洗掉手工排好的版面。
+watch(() => [picked.value, store.onlyProblems], () => repaint(), { deep: true })
 
 // 掛在 mounted 而不是 iframe 的 load：load 每重載一次就多掛一個，
 // 而多掛的那些不會壞掉，只會讓每則訊息被處理很多次——很難查。
@@ -145,11 +197,22 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
         <span class="muted small">{{ status }}</span>
         <button :disabled="!ready || drawing" @click="loadModel()">重畫</button>
       </div>
-      <iframe
-        ref="frame"
-        class="editor"
-        :src="`drawio://localhost/index.html?${PARAMS}`"
-      />
+      <div class="body">
+        <DiagramFilter
+          :contracts="contracts"
+          :picked="picked"
+          :problems="store.onlyProblems"
+          :lit="litCount"
+          :total="totalShapes"
+          @update:picked="picked = $event"
+          @update:problems="store.onlyProblems = $event"
+        />
+        <iframe
+          ref="frame"
+          class="editor"
+          :src="`drawio://localhost/index.html?${PARAMS}`"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -169,7 +232,8 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 .grow { flex: 1; }
 .small { font-size: 11.5px; }
 
-.editor { flex: 1; min-height: 0; border: 0; width: 100%; }
+.body { flex: 1; min-height: 0; display: flex; }
+.editor { flex: 1; min-width: 0; border: 0; }
 .warn { color: var(--broken); }
 
 .empty { padding: 40px 24px; text-align: center; max-width: 46ch; margin: 0 auto; line-height: 1.7; }

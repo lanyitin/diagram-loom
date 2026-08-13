@@ -35,6 +35,7 @@ use loom_core::batch::{self, BatchPlan, BatchSpec};
 use loom_core::connect::{self, Choice, Proposal};
 use loom_core::coverage::{self, Matrix};
 use loom_core::edit::{self, Edit, Fix, FixValue, Impact};
+use loom_core::highlight::{self, Focus, Highlight};
 use loom_core::history::History;
 use loom_core::importer;
 use loom_core::inventory::{self, Table};
@@ -139,6 +140,19 @@ pub struct Snapshot {
     /// 復原／重做選單要顯示的短標籤。`None` 表示按鈕要停用。
     pub undo_label: Option<String>,
     pub redo_label: Option<String>,
+}
+
+/// 篩選面板需要的一切。
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusView {
+    /// 可以勾的契約。
+    pub contracts: Vec<highlight::Contract>,
+    /// 照目前的勾選，誰該亮。
+    pub highlight: Highlight,
+    /// 這個環境總共幾個形狀。「亮了幾個 / 共幾個」的分母——
+    /// 少了它，使用者不知道自己篩掉了多少，也就不知道自己在看的是一小角。
+    pub shapes: u32,
 }
 
 fn lock_state<'a>(state: &'a State<'_>) -> Result<std::sync::MutexGuard<'a, Opened>, Failure> {
@@ -467,6 +481,29 @@ fn diagram_links(
     Ok(wiring::links(project, env))
 }
 
+/// 篩選面板要列的契約，以及照目前的勾選「誰該亮」。
+///
+/// 兩件事一次給：分開問的話，畫面會有一瞬間拿舊的清單配新的亮法。
+#[tauri::command]
+#[specta::specta]
+fn diagram_focus(
+    state: State<'_>,
+    environment: loom_core::id::Id,
+    focus: Focus,
+) -> Result<FocusView, Failure> {
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
+    let project = history.project();
+    let env = project.environment(&environment).ok_or_else(|| Failure {
+        message: format!("找不到環境 {environment}"),
+    })?;
+    Ok(FocusView {
+        contracts: highlight::contracts(project, &environment),
+        highlight: highlight::highlight(project, &environment, &focus),
+        shapes: highlight::shape_count(env),
+    })
+}
+
 /// 打開給 AI Agent 用的本機端點。
 ///
 /// 判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
@@ -590,6 +627,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         preview_batch,
         resource_tables,
         diagram_links,
+        diagram_focus,
         blank_resource,
         create_project,
         start_mcp,

@@ -23,6 +23,7 @@ pub mod connect;
 pub mod coverage;
 pub mod edit;
 pub mod environment;
+pub mod highlight;
 pub mod history;
 pub mod id;
 pub mod importer;

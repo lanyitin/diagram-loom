@@ -65,6 +65,12 @@ export const commands = {
 	 */
 	diagramLinks: (environment: Id) => typedError<Link[], Failure>(__TAURI_INVOKE("diagram_links", { environment })),
 	/**
+	 *  篩選面板要列的契約，以及照目前的勾選「誰該亮」。
+	 * 
+	 *  兩件事一次給：分開問的話，畫面會有一瞬間拿舊的清單配新的亮法。
+	 */
+	diagramFocus: (environment: Id, focus: Focus) => typedError<FocusView, Failure>(__TAURI_INVOKE("diagram_focus", { environment, focus })),
+	/**
 	 *  一個空白的新資源，給表單當起點。
 	 * 
 	 *  id 在這裡就發好，所以 `apply` 是決定性的——復原之後重做會得到
@@ -395,6 +401,20 @@ export type Container_Serialize = {
 	name: string,
 	system: Id,
 	endpoints?: EndpointDef[],
+};
+
+/**
+ *  這個環境裡有哪些契約可以勾，附上它現在有沒有問題。
+ * 
+ *  「哪些契約在這個環境有連線」要走一次 `serves` 分組，是模型知識。
+ */
+export type Contract = {
+	relationship: Id,
+	label: string,
+	/**  這個環境裡屬於它的連線數。0 表示契約在這裡沒被實現（L001 會叫）。 */
+	connections: number,
+	/**  這幾條連線裡有沒有 lint 叫過。 */
+	problems: boolean,
 };
 
 /**  機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。 */
@@ -1006,6 +1026,43 @@ export type Fix =
 
 /**  使用者在 [`Fix`] 的控制項裡填的東西。 */
 export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };
+
+/**
+ *  使用者勾了什麼。
+ * 
+ *  兩個條件是 **AND**，跟連線表上「搜尋 + 只看有問題」的組合方式一致——
+ *  同一個畫面裡兩種組合法會讓人算不準自己看到的是什麼。
+ */
+export type Focus = {
+	/**
+	 *  只留這幾條契約的。**空的表示不篩**，不是「一條都不要」——
+	 *  空的當成全暗的話，一打開篩選面板整張圖就會先黑掉。
+	 */
+	relationships?: Id[],
+	/**  只留 lint 有意見的。 */
+	problems?: boolean,
+};
+
+/**  篩選面板需要的一切。 */
+export type FocusView = {
+	/**  可以勾的契約。 */
+	contracts: Contract[],
+	/**  照目前的勾選，誰該亮。 */
+	highlight: Highlight,
+	/**
+	 *  這個環境總共幾個形狀。「亮了幾個 / 共幾個」的分母——
+	 *  少了它，使用者不知道自己篩掉了多少，也就不知道自己在看的是一小角。
+	 */
+	shapes: number,
+};
+
+/**  該亮的東西。沒被列到的就是要調暗的。 */
+export type Highlight = {
+	/**  該亮的形狀。含機器與站點——見 [`highlight`] 裡祖先那一段。 */
+	shapes: Id[],
+	/**  該亮的線（實際連線的 id）。 */
+	connections: Id[],
+};
 
 /**  元素的永久識別碼。建立後永不改變。 */
 export type Id = string;
