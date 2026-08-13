@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "stage0-drawio",
+  "version": "0.0.0",
+  "identifier": "dev.diagramloom.stage0",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "階段 0 · draw.io 內嵌驗證",
+        "width": 1400,
+        "height": 900
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src drawio: drawio://localhost; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

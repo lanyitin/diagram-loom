@@ -1,0 +1,13 @@
+{
+  "name": "stage0-drawio",
+  "private": true,
+  "version": "0.0.0",
+  "description": "可丟棄的原型：驗證 Tauri 能不能內嵌 draw.io",
+  "scripts": {
+    "probe": "tauri dev",
+    "probe:stub": "LOOM_STAGE0_TARGET=stub tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

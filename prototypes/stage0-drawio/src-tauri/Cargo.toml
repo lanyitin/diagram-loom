@@ -1,0 +1,19 @@
+# 刻意宣告成獨立的 workspace。
+#
+# 這一行就是「loom-core 的 Cargo.toml 不准出現 tauri」那條紀律的執行機制：
+# 原型雖然放在 source/ 底下，但根目錄的 `cargo test --workspace` 完全看不到它，
+# tauri 的相依樹也不會爬進 loom-core 的 Cargo.lock。
+[workspace]
+
+[package]
+name = "stage0-drawio"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }

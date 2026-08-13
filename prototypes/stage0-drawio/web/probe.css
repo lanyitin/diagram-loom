@@ -1,0 +1,68 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font: 13px/1.5 -apple-system, "PingFang TC", sans-serif;
+  background: #14181a;
+  color: #dfe6e4;
+}
+
+header {
+  padding: 10px 16px;
+  border-bottom: 1px solid #2a3234;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+header p  { margin: 0; color: #7f908c; font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; }
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 420px 1fr;
+}
+
+#results {
+  border-right: 1px solid #2a3234;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+
+#checks li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #1b2123;
+  border-left: 3px solid #3a4446;
+}
+
+#checks li.pass   { border-left-color: #1D9E75; }
+#checks li.fail   { border-left-color: #D85A30; }
+#checks li .mark  { font-family: ui-monospace, monospace; }
+#checks li.pass .mark { color: #1D9E75; }
+#checks li.fail .mark { color: #D85A30; }
+#checks li .detail { color: #7f908c; font-size: 11px; word-break: break-all; }
+
+#log {
+  margin: 0;
+  font: 11px/1.5 ui-monospace, "SF Mono", monospace;
+  color: #6d7d7a;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+#stage { min-width: 0; }
+#editor { width: 100%; height: 100%; border: 0; background: #fff; }
