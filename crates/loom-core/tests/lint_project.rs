@@ -72,6 +72,34 @@ fn 萬用字元沒填_expect_只是警告不是錯誤() {
 }
 
 #[test]
+fn 開頭就是萬用字元的樣式也要算對數量() {
+    // lint 內部為了效能，會先用「第一個 `*` 之前的字面前綴」二分搜出候選範圍，
+    // 再做完整比對。`*-01` 這種沒有前綴的樣式是那個最佳化唯一會踩空的地方，
+    // 所以特別釘住：它必須退回掃全部，而且算出來的數字要跟直覺一致。
+    //
+    // prod 有 api-01、redis-01、redis-02、redis-03，所以 `*-01` 應該是 2 個。
+    let mut project = healthy_project();
+
+    let prod = &mut project.environments[0];
+    if let Endpointing::Instance { target, .. } = &mut prod.connections[1].to
+        && let InstanceRef::Pattern {
+            slug_pattern,
+            expect,
+        } = target
+    {
+        *slug_pattern = "*-01".into();
+        *expect = Some(2);
+    }
+
+    let findings = lint(&project);
+    let 數量對不上: Vec<_> = findings.iter().filter(|f| f.rule == Rule::L004).collect();
+    assert!(
+        數量對不上.is_empty(),
+        "`*-01` 應該剛好符合 2 個，卻報了數量錯誤：{數量對不上:?}"
+    );
+}
+
+#[test]
 fn f5後面忘了接會被可達性檢查抓到() {
     let mut project = healthy_project();
 
