@@ -29,10 +29,16 @@ relationships:
   from: !container c-channel
   to: !container c-redis
   to_endpoint: e-redis
-- id: r-channel-連-common
-  slug: channel-連-common
-  purpose: 呼叫共通服務（經 API Gateway）
+- id: r-channel-連-apigw
+  slug: channel-連-apigw
+  purpose: 呼叫共通服務前先過 API Gateway
   from: !container c-channel
+  to: !container c-apigw
+  to_endpoint: e-apigw
+- id: r-apigw-連-common
+  slug: apigw-連-common
+  purpose: API Gateway 轉送給共通服務
+  from: !container c-apigw
   to: !container c-common
   to_endpoint: e-common
 - id: r-gateway-連-db

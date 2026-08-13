@@ -23,6 +23,14 @@ containers:
   - id: e-channel
     slug: http
     protocol: tcp
+- id: c-apigw
+  slug: apigw
+  name: API Gateway Service
+  system: s-通路
+  endpoints:
+  - id: e-apigw
+    slug: http
+    protocol: tcp
 - id: c-common
   slug: common
   name: 共通服務
