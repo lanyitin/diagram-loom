@@ -31,10 +31,20 @@ const store = useProject()
 /** 目前展開修法的那一項。用索引就好——清單每次 lint 都會重算。 */
 const 修改中 = ref<number | null>(null)
 
+/**
+ * 跳到這一項發現指的那幾列。
+ *
+ * 之前只切到「那個環境的有問題的列」，於是同一個環境裡連點兩項，
+ * 畫面一模一樣——看起來就像第二次點沒反應。現在會聚焦到那一項本身。
+ *
+ * 「這個 subject 對應到哪幾列」不在這裡判斷，由 Rust 的 `Row.subjects` 回答。
+ */
 function 跳過去(f: Finding) {
   store.檢視 = '連線表'
-  store.只看有問題 = true
   store.搜尋 = ''
+  store.只看有問題 = false
+  store.聚焦 = { subject: f.subject, label: `${f.rule} ${f.detail}` }
+  // 邏輯層的發現沒有環境，這時不要動環境勾選——它跟環境無關。
   if (f.environment) store.比對中的環境 = [f.environment]
 }
 </script>

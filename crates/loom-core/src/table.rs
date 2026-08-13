@@ -76,6 +76,16 @@ pub struct Row {
     /// 這一列自己的嚴重度。沒問題時是 `None`。
     pub severity: Option<Severity>,
     pub rules: Vec<Rule>,
+    /// 這一列牽涉到的所有模型元素 id：連線自己、它服務的契約、
+    /// 兩端解析出來的 Instance／設備／外部系統／人，以及用到的 Endpoint。
+    ///
+    /// # 為什麼需要它
+    ///
+    /// Lint 面板上點一項發現，要能跳到**那一列**。但發現的 `subject`
+    /// 不一定是連線 id——L006 指的是 Endpoint、L008 指的是 Instance。
+    /// 「這個 id 對應到哪幾列」得走一次萬用字元展開才知道，
+    /// 那跟 lint 是同一套邏輯，放前端就是寫第二遍。
+    pub subjects: Vec<Id>,
 }
 
 /// 算出所有環境的所有連線列，依環境、再依契約排好。
@@ -102,6 +112,13 @@ pub fn rows(project: &Project) -> Vec<Row> {
             let mut rules = 每條的問題.get(&conn.id).cloned().unwrap_or_default();
             rules.sort();
 
+            let mut subjects = vec![conn.id.clone(), conn.serves.clone()];
+            for side in [&conn.from, &conn.to] {
+                收集元素(&index, env, side, &mut subjects);
+            }
+            subjects.sort();
+            subjects.dedup();
+
             out.push(Row {
                 id: conn.id.clone(),
                 environment: env.id.clone(),
@@ -118,6 +135,7 @@ pub fn rows(project: &Project) -> Vec<Row> {
                 to: 解析(&index, env, &project.logical, &conn.to),
                 severity: rules.iter().map(|r| r.severity()).max(),
                 rules,
+                subjects,
             });
         }
     }
@@ -136,6 +154,54 @@ pub fn rows(project: &Project) -> Vec<Row> {
         ))
     });
     out
+}
+
+/// 這一端牽涉到哪些模型元素。給 [`Row::subjects`] 用。
+///
+/// 找不到的 id **也要收**——那正是 L003 的情況，使用者點那項發現時
+/// 需要跳到這一列看是哪個 id 壞了。
+fn 收集元素(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing, out: &mut Vec<Id>) {
+    /// 這個 Instance／落地上，對應某個 `EndpointDef` 的那個具體 Endpoint。
+    fn 端點(endpoints: &[crate::environment::Endpoint], def: Option<&Id>) -> Option<Id> {
+        endpoints
+            .iter()
+            .find(|e| def.is_some_and(|d| e.def.as_ref() == Some(d)))
+            .map(|e| e.id.clone())
+    }
+
+    match side {
+        Endpointing::Instance { target, endpoint } => match target {
+            InstanceRef::One(id) => {
+                out.push(id.clone());
+                if let Some(i) = index.instance(id) {
+                    out.extend(端點(&i.endpoints, endpoint.as_ref()));
+                }
+            }
+            InstanceRef::Pattern {
+                slug_pattern,
+                within,
+                ..
+            } => {
+                for i in index.matching_within(slug_pattern, within.as_ref()) {
+                    out.push(i.id.clone());
+                    out.extend(端點(&i.endpoints, endpoint.as_ref()));
+                }
+                out.extend(within.clone());
+            }
+        },
+        Endpointing::Infra { node, endpoint } => {
+            out.push(node.clone());
+            // 設備這端指的是具體 Endpoint，不是 EndpointDef，所以直接收。
+            out.extend(endpoint.clone());
+        }
+        Endpointing::System { instance, endpoint } => {
+            out.push(instance.clone());
+            if let Some(s) = env.system_instance(instance) {
+                out.extend(端點(&s.endpoints, endpoint.as_ref()));
+            }
+        }
+        Endpointing::Person { person } => out.push(person.clone()),
+    }
 }
 
 fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &Endpointing) -> Side {

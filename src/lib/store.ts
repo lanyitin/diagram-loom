@@ -25,10 +25,24 @@ interface State {
   比對中的環境: Id[]
   搜尋: string
   只看有問題: boolean
+  /**
+   * 從 lint 面板點過來時，只留跟這個元素有關的列。
+   *
+   * 是元素 id 而不是連線 id：發現的 subject 可能是 Endpoint（L006）
+   * 或 Instance（L008）。「這個 id 對應到哪幾列」由 Rust 的
+   * `Row.subjects` 回答，前端只做比對。
+   */
+  聚焦: 聚焦目標 | null
   忙碌中: boolean
   錯誤: string | null
   /** 使用者按了刪除、還沒確認的那一條。`null` 表示沒有對話框。 */
   刪除中: 待刪 | null
+}
+
+/** 從哪一項發現跳過來的。標籤是給畫面上那顆「取消聚焦」的膠囊用的。 */
+export interface 聚焦目標 {
+  subject: Id
+  label: string
 }
 
 /** 刪除確認框需要知道的：刪什麼，以及怎麼稱呼它。 */
@@ -47,6 +61,7 @@ export const useProject = defineStore('project', {
     比對中的環境: [],
     搜尋: '',
     只看有問題: false,
+    聚焦: null,
     忙碌中: false,
     錯誤: null,
     刪除中: null,
@@ -93,6 +108,9 @@ export const useProject = defineStore('project', {
 
       return this.列.filter((r) => {
         if (!環境們.has(r.environment)) return false
+        // 聚焦跟其他條件是 AND，不是取代。跳過去時會先把其他條件清乾淨，
+        // 所以當下只有它在作用；之後再搜尋就是在這幾列裡面再縮小，不會跳來跳去。
+        if (this.聚焦 && !r.subjects.includes(this.聚焦.subject)) return false
         if (this.只看有問題 && r.severity === null) return false
         if (!關鍵字) return true
         const 可搜尋 = [

@@ -18,7 +18,15 @@ const props = defineProps<{ finding: Finding; fix: Fix }>()
 const emit = defineEmits<{ done: [] }>()
 
 const store = useProject()
-const 草稿 = ref(props.fix.text?.current ?? String(props.fix.count?.suggestion ?? ''))
+
+/**
+ * 使用者填的東西。
+ *
+ * 型別是 `string | number` 而不是 `string`：Vue 的 `v-model` 綁在
+ * `<input type="number">` 上時會**自動轉成數字**，所以這裡拿到的不一定是字串。
+ * 之前寫死成字串，`.trim()` 在數字上炸掉，按下「套用」什麼都沒發生。
+ */
+const 草稿 = ref<string | number>(props.fix.text?.current ?? props.fix.count?.suggestion ?? '')
 const 輸入框 = ref<HTMLInputElement | null>(null)
 
 // 展開就把游標放進去。少一次點擊，使用者才願意一項一項修完。
@@ -28,12 +36,15 @@ onMounted(() => {
 })
 
 async function 送出() {
+  const 填了 = String(草稿.value).trim()
   let value: FixValue
   if (props.fix.text) {
-    value = { text: 草稿.value }
+    value = { text: 填了 }
   } else if (props.fix.count) {
-    const n = Number(草稿.value)
-    value = { count: 草稿.value.trim() === '' || Number.isNaN(n) ? null : n }
+    const n = Number(填了)
+    // 留空 = 拿掉 expect。那是合法的（會讓 L005 重新叫），
+    // 不是「什麼都沒填所以不要動」。
+    value = { count: 填了 === '' || Number.isNaN(n) ? null : n }
   } else {
     value = { toggle: true }
   }

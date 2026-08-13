@@ -87,6 +87,14 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
           只看有問題
         </label>
         <EnvPicker />
+
+        <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
+             表格漏了東西，所以它必須寫在畫面上，而且一鍵拿得掉。 -->
+        <button v-if="store.聚焦" class="focus" @click="store.聚焦 = null">
+          <span class="mono">{{ store.聚焦.label }}</span>
+          <span class="x">✕</span>
+        </button>
+
         <span class="grow" />
         <span class="muted count">
           <template v-if="store.檢視 === '覆蓋矩陣'">
@@ -97,6 +105,12 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
           </template>
         </span>
       </div>
+
+      <!-- 聚焦到一項邏輯層的發現時，連線表本來就不會有列。
+           留一片空白會讓人以為工具壞了，所以講清楚。 -->
+      <p v-if="store.聚焦 && store.檢視 === '連線表' && store.顯示的列.length === 0" class="notice">
+        這一項不對應到任何一條實際連線——它是邏輯層的問題，或是那個元素根本沒被任何連線碰到。
+      </p>
 
       <CoverageMatrix v-if="store.檢視 === '覆蓋矩陣'" />
       <ConnectionTable v-else />
@@ -169,6 +183,30 @@ header {
 }
 .seg button:last-child { border-right: 0; }
 .seg button.on { background: color-mix(in srgb, var(--warp) 12%, var(--surface)); color: var(--ink); font-weight: 600; }
+
+/* 從 lint 面板跳過來的聚焦。看得見、按一下就沒。 */
+.focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 42ch;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border-color: color-mix(in srgb, var(--warp) 45%, transparent);
+  background: color-mix(in srgb, var(--warp) 10%, var(--surface));
+}
+.focus .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus .x { color: var(--ink-3); }
+.focus:hover .x { color: var(--ink); }
+
+.notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
 
 .failure {
   margin: 0;

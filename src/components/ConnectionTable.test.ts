@@ -29,6 +29,7 @@ function 列(id: string, extra: Partial<Row> = {}): Row {
     kind: 'primary',
     severity: null,
     rules: [],
+    subjects: [id, 'r-cache'],
     ...extra,
   }
 }
@@ -158,16 +159,45 @@ describe('Lint 面板', () => {
     expect(w.findAll('.list tbody tr')).toHaveLength(2)
   })
 
-  it('點一項會跳到那個環境的連線表並只留有問題的列', () => {
+  it('點一項會跳到那個環境的連線表，並聚焦到那一項本身', () => {
     // 「知道有錯」到「看到那一列」之間不該需要自己找。
     store.面板展開 = true
     const w = mount(LintPanel)
     w.findAll('.list tbody .detail')[1]!.trigger('click')
 
     expect(store.檢視).toBe('連線表')
-    expect(store.只看有問題).toBe(true)
     expect(store.比對中的環境).toEqual(['env-dev'])
     expect(store.搜尋).toBe('')
+    expect(store.聚焦?.subject).toBe('conn-2')
+  })
+
+  it('連點兩項不同的發現，第二次也要有反應', () => {
+    // 這是真的踩過的：原本只切到「那個環境的有問題的列」，
+    // 同一個環境裡連點兩項，畫面一模一樣，看起來就像第二次點壞掉。
+    store.面板展開 = true
+    const w = mount(LintPanel)
+
+    w.findAll('.list tbody .detail')[0]!.trigger('click')
+    const 第一次 = store.聚焦?.subject
+
+    w.findAll('.list tbody .detail')[1]!.trigger('click')
+    expect(store.聚焦?.subject).not.toBe(第一次)
+  })
+
+  it('聚焦時只留跟那一項有關的列', () => {
+    store.snapshot = 假快照(
+      [列('c1'), 列('c2', { subjects: ['c2', 'r-cache'] })],
+      發現,
+    )
+    store.聚焦 = { subject: 'c2', label: 'x' }
+    expect(store.顯示的列.map((r) => r.id)).toEqual(['c2'])
+  })
+
+  it('聚焦到沒有對應列的東西時，得到的是空清單而不是全部', () => {
+    // 「篩不到就顯示全部」是最糟的：使用者以為那一項牽涉到每一條連線。
+    store.snapshot = 假快照([列('c1')], 發現)
+    store.聚焦 = { subject: '邏輯層的東西', label: 'x' }
+    expect(store.顯示的列).toEqual([])
   })
 
   it('修法的控制項完全由 Rust 送來的 fix 決定', async () => {
@@ -196,6 +226,52 @@ describe('Lint 面板', () => {
     await w.find('.editor form').trigger('submit')
 
     expect(修好).toHaveBeenCalledWith(發現[1], { text: '查快取' })
+  })
+
+  it('數字那種修法送出的是數字', async () => {
+    // 真的踩過：`<input type="number">` 的 v-model 會自動把值轉成數字，
+    // 送出時對它呼叫 .trim() 直接炸掉，按下「套用」完全沒反應。
+    // 只驗控制項長得對是不夠的——每一種修法都要真的送出一次。
+    store.面板展開 = true
+    const 修好 = vi.spyOn(store, '修好').mockResolvedValue(undefined)
+    const w = mount(LintPanel)
+
+    await w.findAll('.list .fix')[0]!.trigger('click')
+    await w.find('.editor input').setValue('4')
+    await w.find('.editor form').trigger('submit')
+
+    expect(修好).toHaveBeenCalledWith(發現[0], { count: 4 })
+  })
+
+  it('數字留空表示拿掉期望數量，不是不動它', async () => {
+    store.面板展開 = true
+    const 修好 = vi.spyOn(store, '修好').mockResolvedValue(undefined)
+    const w = mount(LintPanel)
+
+    await w.findAll('.list .fix')[0]!.trigger('click')
+    await w.find('.editor input').setValue('')
+    await w.find('.editor form').trigger('submit')
+
+    expect(修好).toHaveBeenCalledWith(發現[0], { count: null })
+  })
+
+  it('開關那種修法不需要輸入框', async () => {
+    store.snapshot = 假快照([列('c1')], [
+      {
+        rule: 'L008', severity: 'warning', environment: 'env-prod', subject: 'i-1',
+        detail: '沒人碰', fix: { toggle: { label: '刻意獨立（冷備機等）' } },
+      },
+    ])
+    store.面板展開 = true
+    const 修好 = vi.spyOn(store, '修好').mockResolvedValue(undefined)
+    const w = mount(LintPanel)
+
+    await w.find('.list .fix').trigger('click')
+    expect(w.find('.editor input').exists()).toBe(false)
+    expect(w.find('.editor').text()).toContain('刻意獨立')
+
+    await w.find('.editor form').trigger('submit')
+    expect(修好).toHaveBeenCalledWith(expect.objectContaining({ rule: 'L008' }), { toggle: true })
   })
 
   it('沒有單欄位修法的那幾條不放假按鈕', () => {

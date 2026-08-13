@@ -160,6 +160,28 @@ describe('視窗組裝', () => {
     expect(復原).not.toHaveBeenCalled()
   })
 
+  it('聚焦時工具列會說出來，而且按一下就沒', async () => {
+    // 看不見的篩選會讓使用者以為表格漏了東西。
+    store.snapshot = 假快照()
+    store.檢視 = '連線表'
+    store.聚焦 = { subject: 'conn-1', label: 'L006 redis-01／client-port 缺少位址' }
+    const w = mount(App)
+
+    expect(w.find('.focus').text()).toContain('缺少位址')
+    await w.find('.focus').trigger('click')
+    expect(store.聚焦).toBeNull()
+    expect(w.find('.focus').exists()).toBe(false)
+  })
+
+  it('聚焦到沒有對應列的東西時講一句話，不是留一片空白', () => {
+    store.snapshot = 假快照()
+    store.檢視 = '連線表'
+    store.聚焦 = { subject: '邏輯層的東西', label: 'L007 …' }
+    const w = mount(App)
+
+    expect(w.find('.notice').exists()).toBe(true)
+  })
+
   it('刪除確認框跟歡迎畫面互不影響', () => {
     // 跟匯入精靈同一個坑：它是疊在上層的對話框，不是 v-if 鏈的一環。
     store.snapshot = 假快照()
