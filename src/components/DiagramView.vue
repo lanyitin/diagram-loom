@@ -51,6 +51,8 @@ const totalShapes = ref(0)
 const current = ref('')
 
 const filtering = computed(() => picked.value.length > 0 || store.onlyProblems)
+/** 篩選面板打開了沒。關起來的時候一個像素都不佔——不然會擠到 draw.io 自己的面板。 */
+const filterOpen = ref(false)
 const litCount = computed(() => highlight.value?.shapes.length ?? 0)
 
 /**
@@ -71,6 +73,15 @@ const empty = computed(() => {
  */
 const TOO_MANY = 600
 const tooMany = computed(() => links.value.length > TOO_MANY)
+
+/** 排版跑多久算是沒回應。實測 2480 個節點是 6 秒（`docs/scale-limits.md`）。 */
+const LAYOUT_TIMEOUT = 15000
+/** 一連串改動之間隔多久算是停了。 */
+const SETTLE = 400
+/** 正在等排版跑完。等到了才縮放。 */
+const waiting = ref(false)
+let deadline = 0
+let settle = 0
 
 /**
  * 現在畫的是哪個環境。
@@ -113,10 +124,52 @@ async function loadModel() {
   current.value = toXml(store.snapshot.project, env, links.value)
   // 沒有 save 事件，所以靠 autosave 才知道使用者動了什麼。
   send({ action: 'load', xml: await painted(), autosave: 1 })
-  // 排版交給 draw.io 內建的 ELK。只有 layered 處理得了巢狀節點，
-  // 而我們的圖天生巢狀（站點 → 機器 → 落地）——見 docs/nested-layout.md。
+  relayout()
+}
+
+/**
+ * 排版，然後等它真的跑完才縮放。
+ *
+ * ⚠️ **`fit` 不可以緊接著 `layout` 送。** ELK 是非同步的（`executeLayoutSpec`
+ * 還會先等 ELK 那包載完），所以緊接著縮放的是**排版前**的畫面。
+ *
+ * ⚠️ 而且**排版失敗時沒有任何錯誤事件**（見 `docs/nested-layout.md`），
+ * 所以一定要有逾時，否則就是無聲地什麼都沒發生。
+ */
+function relayout() {
+  // 只有 layered 處理得了巢狀節點，而我們的圖天生巢狀（站點 → 機器 → 落地）。
   send({ action: 'layout', layouts: 'verticalFlow' })
-  send({ action: 'fit', maxScale: 1.2 })
+
+  waiting.value = true
+  clearTimeout(deadline)
+  deadline = window.setTimeout(() => {
+    if (!waiting.value) return
+    stopWaiting()
+    // 沒有錯誤事件，所以這句話是使用者唯一的線索。
+    status.value = '排版沒有回應，先照原樣顯示'
+    send({ action: 'fit', maxScale: 1.2 })
+  }, LAYOUT_TIMEOUT)
+}
+
+function stopWaiting() {
+  waiting.value = false
+  clearTimeout(deadline)
+  clearTimeout(settle)
+}
+
+/**
+ * 縮放到**這一連串改動的最後一筆**。
+ *
+ * `load` 自己也會送一次 `autosave`，而它比排版早到。認第一筆的話，
+ * 縮放的還是排版前的畫面——跟原本那個 bug 一模一樣，只是換個地方犯。
+ * 所以每來一筆就把計時器往後推，等真的安靜下來才縮放。
+ */
+function fitWhenSettled() {
+  clearTimeout(settle)
+  settle = window.setTimeout(() => {
+    stopWaiting()
+    send({ action: 'fit', maxScale: 1.2 })
+  }, SETTLE)
 }
 
 /**
@@ -188,6 +241,9 @@ function onMessage(event: MessageEvent) {
         current.value = message.xml
         status.value = `圖上有 ${boundShapes(message.xml).length} 個綁定的形狀`
       }
+      // 排版跑完會改動內容，於是送這個事件過來——但 `load` 自己也會送一次，
+      // 而且比排版早到。所以等安靜下來才縮放。
+      if (waiting.value) fitWhenSettled()
       break
   }
 }
@@ -200,7 +256,10 @@ watch(() => [picked.value, store.onlyProblems], () => repaint(), { deep: true })
 // 掛在 mounted 而不是 iframe 的 load：load 每重載一次就多掛一個，
 // 而多掛的那些不會壞掉，只會讓每則訊息被處理很多次——很難查。
 onMounted(() => window.addEventListener('message', onMessage))
-onUnmounted(() => window.removeEventListener('message', onMessage))
+onUnmounted(() => {
+  window.removeEventListener('message', onMessage)
+  stopWaiting()
+})
 </script>
 
 <template>
@@ -211,6 +270,9 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 
     <template v-else>
       <div class="bar">
+        <button class="filter" :class="{ on: filtering }" @click="filterOpen = !filterOpen">
+          篩選<span v-if="filtering" class="count">{{ litCount }}/{{ totalShapes }}</span>
+        </button>
         <select v-if="store.environments.length > 1" :value="environment.id" @change="chosen = ($event.target as HTMLSelectElement).value">
           <option v-for="e in store.environments" :key="e.id" :value="e.id">{{ e.slug }}</option>
         </select>
@@ -226,16 +288,18 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
         <button :disabled="!ready || drawing" @click="loadModel()">重畫</button>
       </div>
       <div class="body">
-        <DiagramFilter
-          :contracts="contracts"
-          :picked="picked"
-          :problems="store.onlyProblems"
-          :lit="litCount"
-          :total="totalShapes"
-          @update:picked="picked = $event"
-          @update:problems="store.onlyProblems = $event"
-        />
         <div class="canvas">
+          <DiagramFilter
+            v-if="filterOpen"
+            :contracts="contracts"
+            :picked="picked"
+            :problems="store.onlyProblems"
+            :lit="litCount"
+            :total="totalShapes"
+            @update:picked="picked = $event"
+            @update:problems="store.onlyProblems = $event"
+            @close="filterOpen = false"
+          />
           <!-- 空的部署圖跟壞掉的編輯器長得一樣，都是一片空白格線。
                不講的話使用者會以為是工具壞了。 -->
           <p v-if="empty" class="hint">
@@ -270,7 +334,16 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 .small { font-size: 11.5px; }
 
 .body { flex: 1; min-height: 0; display: flex; }
-.canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 篩選是浮在這上面的，所以要當定位的基準。 */
+.canvas { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+
+.filter.on { border-color: var(--warp); color: var(--warp); }
+.filter .count {
+  margin-left: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
 
 .editor {
   flex: 1;

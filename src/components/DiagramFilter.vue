@@ -1,6 +1,14 @@
 <script setup lang="ts">
 /**
- * 圖的篩選面板。
+ * 圖的篩選。做成**浮動的**，不是側邊欄。
+ *
+ * # 為什麼不佔一欄
+ *
+ * draw.io 自己就有兩片面板（左邊形狀庫、右邊格式）要佔位置。我們再站一欄，
+ * 畫布只剩中間一條——而且擠到它的面板就等於**把編輯器弄到不能操作**。
+ *
+ * 所以關起來的時候**一個像素都不佔**，打開才蓋在畫布上，關掉就還回去。
+ * draw.io 自己的 plugin 也是這樣做的（`plugins/props.js` 開一個浮動視窗）。
  *
  * # 這是螢光筆，不是剪刀
  *
@@ -13,7 +21,7 @@
  * 連線數 0 的契約留在清單裡（Rust 那邊也刻意這樣做）。它從清單消失的話
  * 就永遠不會被勾到，而「這個環境少了什麼」正是這工具存在的理由。
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { Contract } from '../lib/model'
 
 const props = defineProps<{
@@ -28,15 +36,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:picked', value: string[]): void
   (e: 'update:problems', value: boolean): void
+  (e: 'close'): void
 }>()
-
-/**
- * 收起來。draw.io 自己也有兩片面板要佔位置，三片一起擠的話畫布只剩中間一條。
- *
- * 收起來之後**篩選還在作用**，所以收合鈕上要標「還篩著幾條」——
- * 不然使用者會忘記自己篩過，然後以為圖上就只有這些東西。
- */
-const collapsed = ref(false)
 
 const filtering = computed(() => props.picked.length > 0 || props.problems)
 const broken = computed(() => props.contracts.filter((c) => c.problems).length)
@@ -50,17 +51,15 @@ function toggle(id: string) {
 </script>
 
 <template>
-  <!-- 收起來的樣子。還篩著的話要在這裡講，不然使用者會忘記自己篩過。 -->
-  <button v-if="collapsed" class="tab" :title="filtering ? '篩選還在作用' : '打開篩選'" @click="collapsed = false">
-    <span class="glyph">☰</span>
-    <span v-if="filtering" class="on">{{ lit }}/{{ total }}</span>
-  </button>
-
-  <aside v-else class="panel">
+  <div class="card" role="dialog" aria-label="篩選">
     <div class="top">
       <strong class="title">篩選</strong>
-      <button class="link" @click="collapsed = true">收起</button>
+      <button v-if="filtering" class="link" @click="emit('update:picked', []); emit('update:problems', false)">
+        全部取消
+      </button>
+      <button class="x" aria-label="關閉" @click="emit('close')">✕</button>
     </div>
+
     <label class="check lead">
       <input
         type="checkbox" :checked="problems"
@@ -69,11 +68,6 @@ function toggle(id: string) {
       只讓有問題的亮著
       <span v-if="broken" class="badge">{{ broken }}</span>
     </label>
-
-    <div class="head">
-      <span class="muted">連線契約</span>
-      <button v-if="picked.length" class="link" @click="emit('update:picked', [])">全部取消</button>
-    </div>
 
     <ul class="list">
       <li v-for="c in contracts" :key="c.relationship">
@@ -87,6 +81,7 @@ function toggle(id: string) {
           <span v-if="c.problems" class="dot" title="有 lint 叫過" />
         </label>
       </li>
+      <li v-if="!contracts.length" class="muted small">這個專案還沒有連線契約。</li>
     </ul>
 
     <p class="muted foot">
@@ -99,52 +94,34 @@ function toggle(id: string) {
         全部亮著。勾幾條契約，或勾上面那個，其他就會淡下去。
       </template>
     </p>
-  </aside>
+  </div>
 </template>
 
 <style scoped>
-.tab {
-  flex: none;
-  width: 34px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 0;
-  border: 0;
-  border-right: 1px solid var(--rule);
-  background: var(--surface-2);
-  cursor: pointer;
-  color: var(--ink-2);
-}
-.tab .glyph { font-size: 14px; }
-.tab .on {
-  writing-mode: vertical-rl;
-  font-size: 10.5px;
-  color: var(--warp);
-  font-variant-numeric: tabular-nums;
-}
-
-.top { display: flex; align-items: baseline; gap: 8px; }
-.title { flex: 1; font-size: 12.5px; }
-
-.panel {
-  width: 240px;
-  flex: none;
+.card {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 5;
+  width: 260px;
+  max-height: calc(100% - 20px);
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border-right: 1px solid var(--rule);
-  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px color-mix(in srgb, #000 22%, transparent);
   font-size: 12.5px;
-  min-height: 0;
 }
 
-.lead { padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.top { display: flex; align-items: center; gap: 8px; }
+.title { flex: 1; font-size: 12.5px; }
+.x { background: none; border: 0; padding: 0 2px; color: var(--ink-3); cursor: pointer; font-size: 12px; }
 
-.head { display: flex; align-items: baseline; gap: 8px; }
-.head .muted { flex: 1; font-size: 11.5px; }
+.lead { padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.small { font-size: 11.5px; }
 
 .list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 .list li + li { margin-top: 2px; }
