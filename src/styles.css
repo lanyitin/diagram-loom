@@ -64,7 +64,7 @@
 
 * { box-sizing: border-box; }
 
-html, body, #app {
+html, body {
   height: 100%;
   margin: 0;
 }
@@ -72,12 +72,17 @@ html, body, #app {
 #app {
   zoom: var(--zoom);
   /*
-   * `zoom` 會把 `height: 100%` 也一起放大，版面就會溢出視窗底部。
-   * 先除回去，放大之後剛好等於視窗高度。
+   * 用 `inset: 0` 貼滿視窗，**不要算高度**。
    *
-   * 同理，元件裡的 `vh` 也要除——見那些 `calc(… / var(--zoom))`。
+   * 踩過一次：原本寫 `height: calc(100% / var(--zoom))`，想說 zoom 會把它
+   * 乘回來。結果底下空出一條黑帶——**百分比不會被 zoom 放大，絕對長度才會**，
+   * 所以只有除、沒有乘。
+   *
+   * `inset: 0` 沒有這個問題：零乘上任何倍率都是零。不管 zoom 怎麼對待
+   * 長度，這個框都剛好是視窗那麼大。
    */
-  height: calc(100% / var(--zoom));
+  position: fixed;
+  inset: 0;
 }
 
 body {

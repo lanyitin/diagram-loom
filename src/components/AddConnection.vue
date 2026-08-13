@@ -184,7 +184,7 @@ async function create() {
 }
 .box {
   width: min(620px, 92vw);
-  max-height: calc(84vh / var(--zoom));
+  max-height: 84%;
   overflow: auto;
   padding: 18px 20px 14px;
   border: 1px solid var(--rule);

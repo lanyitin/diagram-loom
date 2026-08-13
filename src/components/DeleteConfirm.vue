@@ -84,7 +84,7 @@ watch(
 }
 .box {
   width: min(560px, 92vw);
-  max-height: calc(80vh / var(--zoom));
+  max-height: 80%;
   overflow: auto;
   padding: 18px 20px 14px;
   border: 1px solid var(--rule);
