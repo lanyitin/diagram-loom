@@ -368,15 +368,16 @@ export type Failure = {
 };
 
 /**
- *  一項發現。
+ *  一項發現，外加它的嚴重度。
  * 
- *  欄位順序即排序順序，讓 lint 的輸出穩定可比對。
+ *  `Rule::severity()` 在 Rust 是一個方法，序列化不會帶過去。若讓前端自己
+ *  抄一份「哪些規則算錯誤」的對照表，新增規則時那份一定會忘記更新，
+ *  而且是**靜靜地**算錯數字。所以在這裡攤平成欄位。
  */
-export type Finding = {
+export type FindingView = {
 	rule: Rule,
-	/**  發生在哪個環境；邏輯層本身的問題為 `None`。 */
+	severity: Severity,
 	environment: Id | null,
-	/**  出問題的元素。 */
 	subject: Id,
 	detail: string,
 };
@@ -594,6 +595,8 @@ export type Rule =
 /**  某 Instance 沒有被任何連線碰到。 */
 "L008";
 
+export type Severity = "info" | "warning" | "error";
+
 /**
  *  開一個專案之後，前端需要的所有東西一次給齊。
  * 
@@ -611,7 +614,7 @@ export type Snapshot = Snapshot_Serialize | Snapshot_Deserialize;
 export type Snapshot_Deserialize = {
 	root: string,
 	project: Project_Deserialize,
-	findings: Finding[],
+	findings: FindingView[],
 	matrix: Matrix,
 };
 
@@ -624,7 +627,7 @@ export type Snapshot_Deserialize = {
 export type Snapshot_Serialize = {
 	root: string,
 	project: Project_Serialize,
-	findings: Finding[],
+	findings: FindingView[],
 	matrix: Matrix,
 };
 

@@ -1,0 +1,102 @@
+id: env-prod
+slug: prod
+name: 正式環境
+nodes:
+- id: n-prod-api-01
+  slug: vm-api-01
+  kind: virtual-machine
+  instances:
+  - id: i-prod-api-01
+    slug: api-01
+    container: c-order-api
+    endpoints:
+    - id: ep-prod-api-01
+      slug: client-port
+      def: e-api-egress
+      protocol: tcp
+      address: 10.0.0.5:8080
+- id: n-prod-redis-01
+  slug: vm-redis-01
+  kind: virtual-machine
+  instances:
+  - id: i-prod-redis-01
+    slug: redis-01
+    container: c-redis
+    endpoints:
+    - id: ep-prod-redis-01
+      slug: client-port
+      def: e-redis-client
+      protocol: tcp
+      address: 10.0.1.11:6379
+- id: n-prod-redis-02
+  slug: vm-redis-02
+  kind: virtual-machine
+  instances:
+  - id: i-prod-redis-02
+    slug: redis-02
+    container: c-redis
+    endpoints:
+    - id: ep-prod-redis-02
+      slug: client-port
+      def: e-redis-client
+      protocol: tcp
+      address: 10.0.1.12:6379
+- id: n-prod-redis-03
+  slug: vm-redis-03
+  kind: virtual-machine
+  instances:
+  - id: i-prod-redis-03
+    slug: redis-03
+    container: c-redis
+    endpoints:
+    - id: ep-prod-redis-03
+      slug: client-port
+      def: e-redis-client
+      protocol: tcp
+      address: 10.0.1.13:6379
+infra:
+- id: f5-prod
+  slug: f5-vip
+  endpoints:
+  - id: ep-f5-redis
+    slug: vip-redis
+    protocol: tcp
+    address: 10.0.0.100:6379
+systems:
+- id: sys-prod-payment
+  slug: payment-gateway
+  system: s-payment
+  endpoints:
+  - id: ep-prod-payment
+    slug: https
+    def: e-pay-https
+    protocol: tcp
+    address: https://pay.example.com
+connections:
+- id: conn-prod-1
+  serves: r-api-快取
+  purpose: 訂單服務讀寫快取（第一段：到 F5）
+  from: !instance
+    target: !one i-prod-api-01
+  to: !infra
+    node: f5-prod
+    endpoint: ep-f5-redis
+- id: conn-prod-2
+  serves: r-api-快取
+  purpose: 訂單服務讀寫快取（第二段：F5 到後端）
+  from: !infra
+    node: f5-prod
+    endpoint: ep-f5-redis
+  to: !instance
+    target: !pattern
+      slug_pattern: redis-*
+      expect: 4
+    endpoint: e-redis-client
+- id: conn-prod-pay
+  serves: r-api-金流
+  purpose: 送出付款請求
+  from: !instance
+    target: !one i-prod-api-01
+  to: !system
+    instance: sys-prod-payment
+    endpoint: e-pay-https

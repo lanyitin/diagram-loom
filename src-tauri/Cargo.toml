@@ -8,6 +8,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
+# 這個 crate 有兩支 bin（App 與型別產生器），要說清楚 cargo run 該跑哪個。
+default-run = "diagram-loom"
 
 [lib]
 # Tauri 的行動平台支援需要 lib target；桌面版也照這個結構走。
@@ -23,4 +25,5 @@ serde = { version = "1", features = ["derive"] }
 specta = { version = "2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "0.0.12"
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }

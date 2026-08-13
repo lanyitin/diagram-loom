@@ -1,0 +1,7 @@
+id: p-shop
+slug: shop
+name: 網路商店（範例）
+environments:
+- prod
+- test
+- dev

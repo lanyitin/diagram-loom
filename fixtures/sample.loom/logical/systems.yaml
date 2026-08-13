@@ -1,0 +1,14 @@
+people: []
+systems:
+- id: s-shop
+  slug: shop
+  name: 網路商店
+  external: false
+- id: s-payment
+  slug: payment
+  name: 金流系統
+  external: true
+  endpoints:
+  - id: e-pay-https
+    slug: https
+    protocol: tcp

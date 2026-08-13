@@ -1,0 +1,39 @@
+id: env-dev
+slug: dev
+name: 開發環境
+nodes:
+- id: n-dev-api-01
+  slug: vm-api-01
+  kind: virtual-machine
+  instances:
+  - id: i-dev-api-01
+    slug: api-01
+    container: c-order-api
+    endpoints:
+    - id: ep-dev-api-01
+      slug: client-port
+      def: e-api-egress
+      protocol: tcp
+      address: 127.0.0.1:8080
+- id: n-dev-redis-01
+  slug: vm-redis-01
+  kind: virtual-machine
+  instances:
+  - id: i-dev-redis-01
+    slug: redis-01
+    container: c-redis
+    endpoints:
+    - id: ep-dev-redis-01
+      slug: client-port
+      def: e-redis-client
+      protocol: tcp
+      address: 127.0.0.1:6379
+connections:
+- id: conn-dev-1
+  serves: r-api-快取
+  purpose: 訂單服務讀寫快取
+  from: !instance
+    target: !one i-dev-api-01
+  to: !instance
+    target: !one i-dev-redis-01
+    endpoint: e-redis-client

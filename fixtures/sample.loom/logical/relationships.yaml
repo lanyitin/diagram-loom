@@ -1,0 +1,13 @@
+relationships:
+- id: r-api-快取
+  slug: api-連-redis
+  purpose: 訂單服務讀寫快取
+  from: !container c-order-api
+  to: !container c-redis
+  to_endpoint: e-redis-client
+- id: r-api-金流
+  slug: api-連-金流
+  purpose: 送出付款請求
+  from: !container c-order-api
+  to: !system s-payment
+  to_endpoint: e-pay-https

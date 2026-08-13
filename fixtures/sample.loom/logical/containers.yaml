@@ -1,0 +1,17 @@
+containers:
+- id: c-order-api
+  slug: order-api
+  name: 訂單 API
+  system: s-shop
+  endpoints:
+  - id: e-api-egress
+    slug: egress
+    protocol: tcp
+- id: c-redis
+  slug: redis
+  name: Redis 快取
+  system: s-shop
+  endpoints:
+  - id: e-redis-client
+    slug: client-port
+    protocol: tcp

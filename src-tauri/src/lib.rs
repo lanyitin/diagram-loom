@@ -25,7 +25,7 @@ use std::sync::Mutex;
 
 use loom_core::Project;
 use loom_core::coverage::{self, Matrix};
-use loom_core::lint::{self, Finding};
+use loom_core::lint::{self, Finding, Rule, Severity};
 use loom_core::repository;
 use serde::Serialize;
 use tauri::Manager;
@@ -58,6 +58,33 @@ impl<T: std::fmt::Display> From<T> for Failure {
     }
 }
 
+/// 一項發現，外加它的嚴重度。
+///
+/// `Rule::severity()` 在 Rust 是一個方法，序列化不會帶過去。若讓前端自己
+/// 抄一份「哪些規則算錯誤」的對照表，新增規則時那份一定會忘記更新，
+/// 而且是**靜靜地**算錯數字。所以在這裡攤平成欄位。
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingView {
+    pub rule: Rule,
+    pub severity: Severity,
+    pub environment: Option<loom_core::id::Id>,
+    pub subject: loom_core::id::Id,
+    pub detail: String,
+}
+
+impl From<&Finding> for FindingView {
+    fn from(f: &Finding) -> Self {
+        Self {
+            rule: f.rule,
+            severity: f.severity(),
+            environment: f.environment.clone(),
+            subject: f.subject.clone(),
+            detail: f.detail.clone(),
+        }
+    }
+}
+
 /// 開一個專案之後，前端需要的所有東西一次給齊。
 ///
 /// 分成三個 command 來回問會有中間狀態（模型換了但 lint 還是舊的），
@@ -67,14 +94,14 @@ impl<T: std::fmt::Display> From<T> for Failure {
 pub struct Snapshot {
     pub root: String,
     pub project: Project,
-    pub findings: Vec<Finding>,
+    pub findings: Vec<FindingView>,
     pub matrix: Matrix,
 }
 
 fn snapshot(root: &std::path::Path, project: Project) -> Snapshot {
     Snapshot {
         root: root.display().to_string(),
-        findings: lint::lint(&project),
+        findings: lint::lint(&project).iter().map(FindingView::from).collect(),
         matrix: coverage::coverage(&project),
         project,
     }
@@ -138,6 +165,7 @@ pub fn run() {
     let builder = builder();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

@@ -1,0 +1,108 @@
+/*
+ * 設計語彙。
+ *
+ * 這是一個「找漏洞」的工具，所以顏色是**語意**不是裝飾：
+ * 綠＝織布機的框（結構完整）、珊瑚＝緯線（穿錯的那條）。兩個都取自 logo。
+ *
+ * 最重要的一條規矩：**狀態不能只靠顏色**。
+ * 缺漏的格子要看起來是空的（虛線、無填色），壞掉的格子要有實心的色條。
+ * 色盲的人、印出來的黑白文件、瞄一眼的人，都要分得出來。
+ */
+
+:root {
+  --warp: #1D9E75;
+  --weft: #D85A30;
+
+  --ok: var(--warp);
+  --warn: #B07A0C;
+  --broken: var(--weft);
+  --missing: #A32C10;
+
+  --ink: #14201c;
+  --ink-2: #475852;
+  --ink-3: #7c8c86;
+  --ground: #f2f5f3;
+  --surface: #ffffff;
+  --surface-2: #f7faf8;
+  --rule: #d5ddd9;
+  --rule-2: #e8edeb;
+
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+
+  --row: 34px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --warp: #3fc294;
+    --weft: #ef7d52;
+    --warn: #d6a12c;
+    --missing: #f0664a;
+
+    --ink: #e2e9e6;
+    --ink-2: #a5b5af;
+    --ink-3: #72817c;
+    --ground: #0e1413;
+    --surface: #151e1c;
+    --surface-2: #1a2422;
+    --rule: #2a3633;
+    --rule-2: #202a28;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 14px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  /* 桌面應用不是網頁，選字與拖曳要收斂。 */
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 4px 11px;
+  cursor: default;
+}
+
+button:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+button:disabled { opacity: .45; }
+button:focus-visible { outline: 2px solid var(--warp); outline-offset: 1px; }
+
+button.primary {
+  background: var(--warp);
+  border-color: var(--warp);
+  color: #fff;
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.06); background: var(--warp); color: #fff; }
+
+input[type="search"], input[type="text"] {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 4px 9px;
+  user-select: text;
+}
+input:focus-visible { outline: 2px solid var(--warp); outline-offset: -1px; border-color: var(--warp); }
+
+/* 識別碼、位址、數字——它們是「值」不是「文案」，用等寬字比較好對齊比較。 */
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.num  { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
