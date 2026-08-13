@@ -50,7 +50,7 @@ export const commands = {
 	/**
 	 *  資源清單：每種資源一張表。
 	 * 
-	 *  欄位與格子都是 Rust 算好的——「這個服務在各環境幾台」要走一次落地比對，
+	 *  欄位與格子都是 Rust 算好的——「這個服務在各環境幾台」要走一次實體比對，
 	 *  那是模型知識，放前端就是把 `coverage` 再寫一遍。
 	 */
 	resourceTables: (environment: string | null) => typedError<Table_Serialize[], Failure>(__TAURI_INVOKE("resource_tables", { environment })),
@@ -342,7 +342,7 @@ export type Connection_Serialize = {
 export type Container = Container_Serialize | Container_Deserialize;
 
 /**
- *  邏輯 Container 在此環境的一份落地。C4 的 `Container Instance`。
+ *  邏輯 Container 在此環境的一份服務實體。C4 的 `Container Instance`。
  * 
  *  叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
  *  就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
@@ -350,7 +350,7 @@ export type Container = Container_Serialize | Container_Deserialize;
 export type ContainerInstance = ContainerInstance_Serialize | ContainerInstance_Deserialize;
 
 /**
- *  邏輯 Container 在此環境的一份落地。C4 的 `Container Instance`。
+ *  邏輯 Container 在此環境的一份服務實體。C4 的 `Container Instance`。
  * 
  *  叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
  *  就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
@@ -368,7 +368,7 @@ export type ContainerInstance_Deserialize = {
 };
 
 /**
- *  邏輯 Container 在此環境的一份落地。C4 的 `Container Instance`。
+ *  邏輯 Container 在此環境的一份服務實體。C4 的 `Container Instance`。
  * 
  *  叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
  *  就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
@@ -448,7 +448,7 @@ export type Edit_Deserialize =
 /**
  *  L006 的修法：補上某個 Endpoint 的實際位址。
  * 
- *  Endpoint 可能掛在 Instance、設備或外部系統落地上，所以只給 id，
+ *  Endpoint 可能掛在 Instance、設備或外部系統實體上，所以只給 id，
  *  由 [`apply`] 自己找。前端不需要知道它住在哪一層。
  */
 ({ setAddress: {
@@ -480,7 +480,7 @@ export type Edit_Deserialize =
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
-	/**  Instance 或外部系統落地的 id。 */
+	/**  Instance 或外部系統實體的 id。 */
 	subject: Id,
 	standalone: boolean,
 } }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
@@ -510,7 +510,7 @@ export type Edit_Deserialize =
 	to: Endpointing_Deserialize,
 } }) & { addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
- *  批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+ *  批次建立機器與服務實體：L001「這個服務一台都還沒建」的修法。
  * 
  *  `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
  *  這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
@@ -553,7 +553,7 @@ export type Edit_Serialize =
 /**
  *  L006 的修法：補上某個 Endpoint 的實際位址。
  * 
- *  Endpoint 可能掛在 Instance、設備或外部系統落地上，所以只給 id，
+ *  Endpoint 可能掛在 Instance、設備或外部系統實體上，所以只給 id，
  *  由 [`apply`] 自己找。前端不需要知道它住在哪一層。
  */
 ({ setAddress: {
@@ -585,7 +585,7 @@ export type Edit_Serialize =
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
-	/**  Instance 或外部系統落地的 id。 */
+	/**  Instance 或外部系統實體的 id。 */
 	subject: Id,
 	standalone: boolean,
 } }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
@@ -615,7 +615,7 @@ export type Edit_Serialize =
 	to: Endpointing_Serialize,
 } }) & { addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
- *  批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+ *  批次建立機器與服務實體：L001「這個服務一台都還沒建」的修法。
  * 
  *  `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
  *  這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
@@ -779,7 +779,7 @@ export type Endpointing_Deserialize = ({ instance: {
 	 */
 	endpoint?: Id | null,
 } }) & { instance?: never; person?: never; system?: never } | 
-/**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。 */
+/**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個實體。 */
 ({ system: {
 	instance: Id,
 	/**
@@ -791,7 +791,7 @@ export type Endpointing_Deserialize = ({ instance: {
 /**
  *  真人。只會出現在**來源端**——使用者是流量的起點。
  * 
- *  人沒有落地也沒有位址，所以這一端只指向邏輯層的
+ *  人沒有實體也沒有位址，所以這一端只指向邏輯層的
  *  [`Person`](crate::logical::Person)，沒有 endpoint。
  *  「使用者從哪裡連過來」不是我們配置得到的東西。
  */
@@ -841,7 +841,7 @@ export type Endpointing_Serialize = ({ instance: {
 	 */
 	endpoint?: Id | null,
 } }) & { instance?: never; person?: never; system?: never } | 
-/**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。 */
+/**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個實體。 */
 ({ system: {
 	instance: Id,
 	/**
@@ -853,7 +853,7 @@ export type Endpointing_Serialize = ({ instance: {
 /**
  *  真人。只會出現在**來源端**——使用者是流量的起點。
  * 
- *  人沒有落地也沒有位址，所以這一端只指向邏輯層的
+ *  人沒有實體也沒有位址，所以這一端只指向邏輯層的
  *  [`Person`](crate::logical::Person)，沒有 endpoint。
  *  「使用者從哪裡連過來」不是我們配置得到的東西。
  */
@@ -871,7 +871,7 @@ export type Environment_Deserialize = {
 	name: string,
 	nodes?: DeploymentNode_Deserialize[],
 	infra?: InfrastructureNode_Deserialize[],
-	/**  外部系統在此環境的落地。不在 `nodes` 底下，因為那些機器不是我們的。 */
+	/**  外部系統在此環境的實體。不在 `nodes` 底下，因為那些機器不是我們的。 */
 	systems?: SoftwareSystemInstance_Deserialize[],
 	connections?: Connection_Deserialize[],
 };
@@ -883,7 +883,7 @@ export type Environment_Serialize = {
 	name: string,
 	nodes?: DeploymentNode_Serialize[],
 	infra?: InfrastructureNode_Serialize[],
-	/**  外部系統在此環境的落地。不在 `nodes` 底下，因為那些機器不是我們的。 */
+	/**  外部系統在此環境的實體。不在 `nodes` 底下，因為那些機器不是我們的。 */
 	systems?: SoftwareSystemInstance_Serialize[],
 	connections?: Connection_Serialize[],
 };
@@ -1342,7 +1342,7 @@ export type Proposal_Deserialize = {
 	id: Id,
 	serves: Id,
 	purpose: string,
-	/**  擬不出來時是 `None`（例如來源在這個環境根本沒落地）。 */
+	/**  擬不出來時是 `None`（例如來源在這個環境根本沒有實體）。 */
 	from: Endpointing_Deserialize | null,
 	to: Endpointing_Deserialize | null,
 	/**  這份提案做了哪些假設、哪裡擬不出來。**一定要顯示給使用者看。** */
@@ -1360,7 +1360,7 @@ export type Proposal_Serialize = {
 	id: Id,
 	serves: Id,
 	purpose: string,
-	/**  擬不出來時是 `None`（例如來源在這個環境根本沒落地）。 */
+	/**  擬不出來時是 `None`（例如來源在這個環境根本沒有實體）。 */
 	from: Endpointing_Serialize | null,
 	to: Endpointing_Serialize | null,
 	/**  這份提案做了哪些假設、哪裡擬不出來。**一定要顯示給使用者看。** */
@@ -1408,7 +1408,7 @@ export type RelationshipEnd = ({ container: Id }) & { person?: never; system?: n
  *  真人。**只該出現在來源端**——「使用者連上系統」是 C4 Context 圖
  *  最常見的關係，沒有它整條進入點的流量就少了最前面那一段。
  * 
- *  人不需要被部署，所以 L001 不會要求它在每個環境都有落地。
+ *  人不需要被部署，所以 L001 不會要求它在每個環境都有實體。
  */
 ({ person: Id }) & { container?: never; system?: never };
 
@@ -1494,9 +1494,9 @@ export type Resource_Deserialize = ({ person: Person }) & { container?: never; e
 	endpoint: Endpoint_Deserialize,
 } }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**
- *  一個服務在某台機器上的落地。**位址就住在這裡。**
+ *  一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
  * 
- *  `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+ *  `node` 是它跑在哪台機器上。服務實體不能離開機器獨立存在——
  *  「東西跑在哪裡」正是部署圖唯一要回答的問題。
  */
 ({ instance: {
@@ -1504,7 +1504,7 @@ export type Resource_Deserialize = ({ person: Person }) & { container?: never; e
 	node: Id,
 	instance: ContainerInstance_Deserialize,
 } }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
-/**  外部系統在這個環境的落地。 */
+/**  外部系統在這個環境的實體。 */
 ({ systemInstance: {
 	environment: Id,
 	instance: SoftwareSystemInstance_Deserialize,
@@ -1540,9 +1540,9 @@ export type Resource_Serialize = ({ person: Person }) & { container?: never; end
 	endpoint: Endpoint_Serialize,
 } }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**
- *  一個服務在某台機器上的落地。**位址就住在這裡。**
+ *  一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
  * 
- *  `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+ *  `node` 是它跑在哪台機器上。服務實體不能離開機器獨立存在——
  *  「東西跑在哪裡」正是部署圖唯一要回答的問題。
  */
 ({ instance: {
@@ -1550,7 +1550,7 @@ export type Resource_Serialize = ({ person: Person }) & { container?: never; end
 	node: Id,
 	instance: ContainerInstance_Serialize,
 } }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
-/**  外部系統在這個環境的落地。 */
+/**  外部系統在這個環境的實體。 */
 ({ systemInstance: {
 	environment: Id,
 	instance: SoftwareSystemInstance_Serialize,
@@ -1613,9 +1613,9 @@ export type Rule =
  *  # 為什麼需要一條獨立的規則
  * 
  *  L003 管的是「**連線**指到不存在的東西」。但元素之間也互相指：
- *  落地指著服務、契約指著服務與接點、接點指著接點定義。
+ *  服務實體指著服務、契約指著服務與接點、接點指著接點定義。
  * 
- *  沒有這條的話，刪掉一個服務會**安靜地**留下一批指著空氣的落地——
+ *  沒有這條的話，刪掉一個服務會**安靜地**留下一批指著空氣的服務實體——
  *  lint 一句話都不說，而那正是這個工具存在要抓的東西。
  *  所以它是「可以刪除邏輯層元素」的前置條件，不是加分項。
  * 
@@ -1642,11 +1642,11 @@ export type Side = {
 
 /**  連線的一端指向什麼。畫面上用不同的圖示區分。 */
 export type SideKind = 
-/**  一台或一群服務落地。 */
+/**  一台或一群服務實體。 */
 "instance" | 
 /**  F5 這類設備。 */
 "infra" | 
-/**  外部系統的落地。 */
+/**  外部系統的實體。 */
 "system" | 
 /**  真人。只會出現在來源端。 */
 "person";
@@ -1703,7 +1703,7 @@ export type Snapshot_Serialize = {
 export type SoftwareSystem = SoftwareSystem_Serialize | SoftwareSystem_Deserialize;
 
 /**
- *  外部系統在此環境的落地。C4 的 `Software System Instance`。
+ *  外部系統在此環境的實體。C4 的 `Software System Instance`。
  * 
  *  例如金流系統：prod 用正式閘道，test 用 sandbox。
  *  它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
@@ -1711,7 +1711,7 @@ export type SoftwareSystem = SoftwareSystem_Serialize | SoftwareSystem_Deseriali
 export type SoftwareSystemInstance = SoftwareSystemInstance_Serialize | SoftwareSystemInstance_Deserialize;
 
 /**
- *  外部系統在此環境的落地。C4 的 `Software System Instance`。
+ *  外部系統在此環境的實體。C4 的 `Software System Instance`。
  * 
  *  例如金流系統：prod 用正式閘道，test 用 sandbox。
  *  它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
@@ -1726,7 +1726,7 @@ export type SoftwareSystemInstance_Deserialize = {
 };
 
 /**
- *  外部系統在此環境的落地。C4 的 `Software System Instance`。
+ *  外部系統在此環境的實體。C4 的 `Software System Instance`。
  * 
  *  例如金流系統：prod 用正式閘道，test 用 sandbox。
  *  它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
@@ -1746,7 +1746,7 @@ export type SoftwareSystem_Deserialize = {
 	slug: string,
 	name: string,
 	/**
-	 *  外部系統不由我們部署，但仍需在每個環境指定它的落地位址
+	 *  外部系統不由我們部署，但仍需在每個環境指定它的位址
 	 *  （例如測試環境用金流 sandbox）。
 	 */
 	external: boolean,
@@ -1766,7 +1766,7 @@ export type SoftwareSystem_Serialize = {
 	slug: string,
 	name: string,
 	/**
-	 *  外部系統不由我們部署，但仍需在每個環境指定它的落地位址
+	 *  外部系統不由我們部署，但仍需在每個環境指定它的位址
 	 *  （例如測試環境用金流 sandbox）。
 	 */
 	external: boolean,

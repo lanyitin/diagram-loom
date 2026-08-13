@@ -33,7 +33,7 @@ watch(
   { immediate: true },
 )
 
-/** 這個環境裡所有的機器，攤平成一串（含站點底下的）。落地要選一台。 */
+/** 這個環境裡所有的機器，攤平成一串（含站點底下的）。服務實體要選一台。 */
 const machines = computed(() => {
   const envId = (draft.value as { instance?: { environment: Id } })?.instance?.environment
   const env = store.environments.find((e) => e.id === envId)
@@ -53,7 +53,7 @@ function kindLabel(kind: string): string {
 }
 
 /**
- * 落地的接點。**IP 與 port 就填在這裡。**
+ * 服務實體的接點。**IP 與 port 就填在這裡。**
  *
  * `def` 指向邏輯層的接點定義——填了之後 lint 才知道「這台的 client-port
  * 對應到契約上的哪一個」。沒填也可以，只是那條連線接不上。
@@ -63,7 +63,7 @@ const instanceEndpoints = computed(() => {
   return (inst?.endpoints ?? []) as { id: Id; slug: string; def: Id | null; protocol: string; address: string | null }[]
 })
 
-/** 這個落地對應的服務上，定義了哪些接點。 */
+/** 這個服務實體對應的服務上，定義了哪些接點。 */
 const defsOfContainer = computed(() => {
   const inst = (draft.value as { instance?: { instance: { container: Id } } })?.instance?.instance
   const c = containers.value.find((x) => x.id === inst?.container)
@@ -279,7 +279,7 @@ function write(path: string, v: unknown) {
         <label>位址<input :value="read('infraEndpoint.endpoint.address')" class="mono" placeholder="10.0.0.100:6379" @input="write('infraEndpoint.endpoint.address', ($event.target as HTMLInputElement).value || null)"></label>
       </template>
 
-      <!-- 落地：位址就住在這裡 -->
+      <!-- 服務實體：位址就住在這裡 -->
       <template v-else-if="'instance' in draft">
         <label>名稱<input :value="read('instance.instance.slug')" class="mono" placeholder="redis-01" @input="write('instance.instance.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>哪個服務
@@ -330,7 +330,7 @@ function write(path: string, v: unknown) {
         </label>
       </template>
 
-      <!-- 外部系統落地 -->
+      <!-- 外部系統實體 -->
       <template v-else-if="'systemInstance' in draft">
         <label>名稱<input :value="read('systemInstance.instance.slug')" class="mono" @input="write('systemInstance.instance.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>對應哪個外部系統

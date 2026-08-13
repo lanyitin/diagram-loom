@@ -125,7 +125,7 @@ fn an_environment_that_realises_no_contract() {
     prod.connections.clear();
 
     let found = summarize(&project);
-    // 兩條邏輯連線都沒實現（L001），且所有落地都沒被碰到（L008）。
+    // 兩條邏輯連線都沒實現（L001），且所有服務實體都沒被碰到（L008）。
     assert_eq!(
         found,
         vec![
@@ -269,7 +269,7 @@ fn an_external_system_with_no_landing_in_one_environment() {
     assert_eq!(
         found,
         vec![
-            // 外部系統本身沒落地
+            // 外部系統本身沒有實體
             "L001 env-test s-payment",
             // 連帶那條邏輯連線也沒東西可指
             "L003 env-test conn-test-pay",

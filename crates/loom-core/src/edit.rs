@@ -47,7 +47,7 @@ use crate::resource::Resource;
 pub enum Edit {
     /// L006 的修法：補上某個 Endpoint 的實際位址。
     ///
-    /// Endpoint 可能掛在 Instance、設備或外部系統落地上，所以只給 id，
+    /// Endpoint 可能掛在 Instance、設備或外部系統實體上，所以只給 id，
     /// 由 [`apply`] 自己找。前端不需要知道它住在哪一層。
     SetAddress {
         environment: Id,
@@ -74,7 +74,7 @@ pub enum Edit {
     /// L008 的修法：標記「刻意獨立」，例如冷備機。
     SetStandalone {
         environment: Id,
-        /// Instance 或外部系統落地的 id。
+        /// Instance 或外部系統實體的 id。
         subject: Id,
         standalone: bool,
     },
@@ -101,7 +101,7 @@ pub enum Edit {
         from: Endpointing,
         to: Endpointing,
     },
-    /// 批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+    /// 批次建立機器與服務實體：L001「這個服務一台都還沒建」的修法。
     ///
     /// `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
     /// 這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
@@ -641,7 +641,7 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
                 container: finding.subject.clone(),
             })
         }
-        // 剩下的 L001 是外部系統沒指定落地位址，那還沒做。
+        // 剩下的 L001 是外部系統沒指定位址，那還沒做。
         Rule::L001 | Rule::L002 => None,
         // L003 要改既有連線的接法、L012 要改元素之間的指向——
         // 兩者都不是填一格或新增一個，留給之後的「改接」功能。

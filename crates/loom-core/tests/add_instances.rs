@@ -53,7 +53,7 @@ fn l001_container_with_no_nodes_is_fixed_by_batch_creation() {
         lint(&project)
             .iter()
             .any(|f| f.rule == Rule::L001 && f.subject == Id::new(REDIS)),
-        "素材應該要有「服務沒落地」的 L001"
+        "素材應該要有「服務沒有實體」的 L001"
     );
 
     let env = project.environments[2].clone();
@@ -69,7 +69,7 @@ fn l001_container_with_no_nodes_is_fixed_by_batch_creation() {
     )
     .unwrap();
 
-    // 機器建好了，服務落地的那條 L001 就消失了。
+    // 機器建好了，服務實體的那條 L001 就消失了。
     // 剩下的是「還沒接線」——那是補連線的事，另一個修法。
     let remaining: Vec<Rule> = lint(&project).iter().map(|f| f.rule).collect();
     assert!(
@@ -130,7 +130,7 @@ fn a_slug_clash_rejects_the_whole_batch() {
     let project = healthy_project(); // dev 已經有一台 redis-01
     let env = &project.environments[2];
 
-    // 機器名先撞到（dev 那台叫 vm-redis-01），落地名也會撞，
+    // 機器名先撞到（dev 那台叫 vm-redis-01），服務實體名也會撞，
     // 兩者都足以擋下整批。
     let err = loom_core::batch::plan(&project, env, &spec(3)).unwrap_err();
     assert_eq!(
@@ -209,7 +209,7 @@ fn can_be_created_under_a_site() {
         .find(|n| n.slug == "dc-main")
         .unwrap();
     assert_eq!(site.children.len(), 2);
-    // 巢狀底下的落地一樣算得到，萬用字元才數得對。
+    // 巢狀底下的服務實體一樣算得到，萬用字元才數得對。
     assert_eq!(
         project.environments[2].instances_matching("redis-*").len(),
         2
@@ -290,7 +290,7 @@ fn l001_on_a_container_offers_creating_nodes() {
     let container_findings = lint(&project)
         .into_iter()
         .find(|f| f.rule == Rule::L001 && f.subject == Id::new(REDIS))
-        .expect("應該要有服務沒落地的 L001");
+        .expect("應該要有服務沒有實體的 L001");
     assert_eq!(
         edit::fix_for(&project, &container_findings),
         Some(Fix::AddInstances {

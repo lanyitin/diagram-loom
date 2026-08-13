@@ -2,7 +2,7 @@
 //!
 //! # 這條是「可以刪除」的前置條件
 //!
-//! 在有這條之前，把一個服務從邏輯層刪掉，指著它的那批落地會**安靜地**
+//! 在有這條之前，把一個服務從邏輯層刪掉，指著它的那批服務實體會**安靜地**
 //! 留在專案裡指著空氣——lint 一句話都不說。對一個賣點是「怕漏」的工具，
 //! 那是最不能出的錯：資料壞了，而唯一該發現的機制沒發現。
 //!
@@ -48,7 +48,10 @@ fn deleting_a_container_flags_the_instances_pointing_at_it() {
     // prod 三台、test 兩台、dev 一台，每一台都要點名——
     // 只說「有東西壞了」而不說是哪幾台，使用者還是得自己找。
     assert_eq!(
-        complaints.iter().filter(|d| d.starts_with("落地")).count(),
+        complaints
+            .iter()
+            .filter(|d| d.starts_with("服務實體"))
+            .count(),
         6
     );
 }
@@ -136,7 +139,7 @@ fn deleting_an_endpoint_def_flags_the_instances_using_it() {
         complaints
             .iter()
             .any(|d| d.contains("指向不存在的接點定義")),
-        "落地上的 endpoint 還指著被刪掉的定義：{complaints:?}"
+        "服務實體上的 endpoint 還指著被刪掉的定義：{complaints:?}"
     );
     assert!(
         complaints
@@ -172,7 +175,7 @@ fn a_system_instance_pointing_at_a_missing_system() {
         complaints
             .iter()
             .any(|d| d.contains("指向不存在的外部系統")),
-        "外部系統被刪掉，落地卻沒被叫出來：{complaints:?}"
+        "外部系統被刪掉，它的實體卻沒被叫出來：{complaints:?}"
     );
 }
 

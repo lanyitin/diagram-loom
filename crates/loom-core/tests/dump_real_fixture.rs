@@ -37,7 +37,7 @@ fn dump_real_fixture() {
 
     println!("\n已寫出 {}", destination.display());
     println!(
-        "{} 個服務／{} 條契約／{} 個落地／{} 條連線",
+        "{} 個服務／{} 條契約／{} 個服務實體／{} 條連線",
         project.logical.containers.len(),
         project.logical.relationships.len(),
         instance_count,

@@ -103,7 +103,7 @@ describe('模型畫成圖', () => {
   })
 
   it('人刻意沒有 loomId', () => {
-    // 人住邏輯層、沒有落地，不在 reconcile::model_elements 裡。
+    // 人住邏輯層、沒有實體，不在 reconcile::model_elements 裡。
     // 給了 loomId 對帳就會說「圖上有這個、模型沒有」——一個假的缺漏。
     const [actor] = peopleOf(project(), [link({ from: 'per-1', fromPerson: true })])
     expect(actor!.id).toBe('per-1')
@@ -122,7 +122,7 @@ describe('模型畫成圖', () => {
   })
 
   it('巢狀關係畫成巢狀', () => {
-    // 站點 → 機器 → 落地。攤平的話這張圖就看不出「東西跑在哪裡」，
+    // 站點 → 機器 → 服務實體。攤平的話這張圖就看不出「東西跑在哪裡」，
     // 而那正是 Deployment 圖唯一要回答的問題。
     const shapes = shapesOf(project(), environment())
     const byId = Object.fromEntries(shapes.map((s) => [s.loomId, s]))
@@ -131,7 +131,7 @@ describe('模型畫成圖', () => {
     expect(byId['i-redis']!.parent).toBe('n-vm')
   })
 
-  it('落地上畫出位址', () => {
+  it('服務實體上畫出位址', () => {
     // 這張圖最常被拿去做的事就是核對 IP。
     const shapes = shapesOf(project(), environment())
     expect(shapes.find((s) => s.loomId === 'i-redis')!.detail).toBe('10.0.1.11:6379')

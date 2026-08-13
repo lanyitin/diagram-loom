@@ -58,7 +58,7 @@ pub fn list() -> Value {
   3. endpoint_def  接點定義。契約要指定連到哪一個
   4. relationship  契約：誰連誰。這是母版，每個環境都必須實現
   5. environment   環境（prod / uat / dev…）
-  6. node / infra / system_instance   環境裡的機器、F5、外部系統落地
+  6. node / infra / system_instance   環境裡的機器、F5、外部系統實體
 
 各種 kind 要填的欄位：
   system            slug, name, external(bool)
@@ -101,7 +101,7 @@ pub fn list() -> Value {
                     "environment": {"type": "string", "description": "環境的 slug"},
                     "container": {"type": "string", "description": "服務的 slug"},
                     "count": {"type": "integer", "minimum": 1},
-                    "name_template": {"type": "string", "description": "落地名稱，預設 `<服務>-{n}`"},
+                    "name_template": {"type": "string", "description": "服務實體名稱，預設 `<服務>-{n}`"},
                     "node_template": {"type": "string", "description": "機器名稱，預設 `vm-<服務>-{n}`"},
                     "address_template": {"type": "string", "description": "例如 `10.0.1.{ip}:6379`"},
                     "endpoint": {"type": "string", "description": "用服務身上的哪個接點定義。只有一個時可省略"},
@@ -136,7 +136,7 @@ pub fn list() -> Value {
   redis-* @ dc-main     限定在某個站點底下的那一群
   f5-01 : vip-redis     設備上的某個 VIP
   person:customer       人（只能當來源）
-  system:payment        外部系統的落地
+  system:payment        外部系統的實體
 
 兩個都省略的話就照提案建（直達的一段）。
 

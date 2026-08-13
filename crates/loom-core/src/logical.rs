@@ -1,7 +1,7 @@
 //! 邏輯層：母版，整個專案定義一次。
 //!
 //! 這一層只說「有哪些東西、誰要連誰」，不含任何 IP、port 或機器。
-//! 具體的落地在 [`crate::environment`]。
+//! 具體的服務實體在 [`crate::environment`]。
 //!
 //! 命名對齊 C4 Model：這裡的 `Container` 是**服務**（Redis、Consul、App），
 //! 不是機器。機器叫 `DeploymentNode`，在環境層。
@@ -56,7 +56,7 @@ pub struct SoftwareSystem {
     pub id: Id,
     pub slug: String,
     pub name: String,
-    /// 外部系統不由我們部署，但仍需在每個環境指定它的落地位址
+    /// 外部系統不由我們部署，但仍需在每個環境指定它的位址
     /// （例如測試環境用金流 sandbox）。
     pub external: bool,
     /// 外部系統對外的接點定義。
@@ -136,7 +136,7 @@ pub enum RelationshipEnd {
     /// 真人。**只該出現在來源端**——「使用者連上系統」是 C4 Context 圖
     /// 最常見的關係，沒有它整條進入點的流量就少了最前面那一段。
     ///
-    /// 人不需要被部署，所以 L001 不會要求它在每個環境都有落地。
+    /// 人不需要被部署，所以 L001 不會要求它在每個環境都有實體。
     Person(Id),
 }
 
@@ -163,9 +163,9 @@ impl Logical {
         self.systems.iter().find(|s| &s.id == id)
     }
 
-    /// 需要在每個環境落地的外部系統。
+    /// 需要在每個環境都有實體的外部系統。
     ///
-    /// 自家系統不列入：它是靠自己的 [`Container`] 落地的，
+    /// 自家系統不列入：它是靠自己的 [`Container`] 部署的，
     /// 沒有獨立的「系統實例」。
     pub fn external_systems(&self) -> impl Iterator<Item = &SoftwareSystem> {
         self.systems.iter().filter(|s| s.external)

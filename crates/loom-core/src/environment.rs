@@ -1,4 +1,4 @@
-//! 環境層：邏輯層母版在某個環境的落地。
+//! 環境層：邏輯層母版在某個環境的實體。
 //!
 //! prod / test / dev 各是一個 [`Environment`]，種類開放不限這三種。
 //! 同一個邏輯服務在不同環境的 IP、port、節點數都可以不同。
@@ -51,7 +51,7 @@ pub struct Endpoint {
     pub address: Option<String>,
 }
 
-/// 邏輯 Container 在此環境的一份落地。C4 的 `Container Instance`。
+/// 邏輯 Container 在此環境的一份服務實體。C4 的 `Container Instance`。
 ///
 /// 叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
 /// 就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
@@ -94,7 +94,7 @@ impl DeploymentNode {
     }
 }
 
-/// 外部系統在此環境的落地。C4 的 `Software System Instance`。
+/// 外部系統在此環境的實體。C4 的 `Software System Instance`。
 ///
 /// 例如金流系統：prod 用正式閘道，test 用 sandbox。
 /// 它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
@@ -229,7 +229,7 @@ pub enum Endpointing {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         endpoint: Option<Id>,
     },
-    /// 外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。
+    /// 外部系統。不支援萬用字元——一個外部系統在一個環境就是一個實體。
     System {
         instance: Id,
         /// 同 Instance 端，指向邏輯層的 `EndpointDef`（掛在
@@ -239,7 +239,7 @@ pub enum Endpointing {
     },
     /// 真人。只會出現在**來源端**——使用者是流量的起點。
     ///
-    /// 人沒有落地也沒有位址，所以這一端只指向邏輯層的
+    /// 人沒有實體也沒有位址，所以這一端只指向邏輯層的
     /// [`Person`](crate::logical::Person)，沒有 endpoint。
     /// 「使用者從哪裡連過來」不是我們配置得到的東西。
     Person { person: Id },
@@ -298,7 +298,7 @@ pub struct Environment {
     pub nodes: Vec<DeploymentNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub infra: Vec<InfrastructureNode>,
-    /// 外部系統在此環境的落地。不在 `nodes` 底下，因為那些機器不是我們的。
+    /// 外部系統在此環境的實體。不在 `nodes` 底下，因為那些機器不是我們的。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub systems: Vec<SoftwareSystemInstance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

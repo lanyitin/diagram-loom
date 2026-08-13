@@ -64,7 +64,7 @@ pub struct Proposal {
     pub id: Id,
     pub serves: Id,
     pub purpose: String,
-    /// 擬不出來時是 `None`（例如來源在這個環境根本沒落地）。
+    /// 擬不出來時是 `None`（例如來源在這個環境根本沒有實體）。
     pub from: Option<Endpointing>,
     pub to: Option<Endpointing>,
     /// 這份提案做了哪些假設、哪裡擬不出來。**一定要顯示給使用者看。**
@@ -136,7 +136,7 @@ fn resolve_end(
             match instance_of.as_slice() {
                 [] => {
                     notes.push(format!(
-                        "{which_end}的外部系統在 {} 沒有指定落地位址，要先補上。",
+                        "{which_end}的外部系統在 {} 沒有指定位址，要先補上。",
                         env.slug
                     ));
                     None
@@ -146,9 +146,9 @@ fn resolve_end(
                     endpoint: endpoint.cloned(),
                 }),
                 many => {
-                    // 一個外部系統在一個環境就是一個落地，多個代表資料有問題。
+                    // 一個外部系統在一個環境就是一個實體，多個代表資料有問題。
                     notes.push(format!(
-                        "{which_end}的外部系統在 {} 有 {} 個落地，先挑了第一個。",
+                        "{which_end}的外部系統在 {} 有 {} 個服務實體，先挑了第一個。",
                         env.slug,
                         many.len()
                     ));

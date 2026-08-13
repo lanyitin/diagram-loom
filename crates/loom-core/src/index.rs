@@ -32,7 +32,7 @@ pub(crate) struct EnvIndex<'a> {
     serving: HashMap<&'a Id, Vec<&'a Connection>>,
     /// 邏輯連線的 id，用來認出「指向不存在的契約」的連線。
     known_relationships: HashSet<&'a Id>,
-    /// 邏輯層的人。人沒有落地，只能確認「這個 id 真的存在」。
+    /// 邏輯層的人。人沒有實體，只能確認「這個 id 真的存在」。
     known_people: HashSet<&'a Id>,
     /// 每個 Instance 落在哪些 DeploymentNode 底下（含所有祖先）。
     /// `within` 要用它判斷「這台在不在指定的站點裡」。

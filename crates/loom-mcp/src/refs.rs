@@ -16,14 +16,14 @@
 //!
 //! | 寫法 | 意思 |
 //! | --- | --- |
-//! | `redis-01` | 那一台落地 |
+//! | `redis-01` | 那一台服務實體 |
 //! | `redis-*` | 一整群（會自動帶上 `expect`） |
 //! | `redis-* @ dc-main` | 限定在某個站點底下的那一群 |
 //! | `f5-01 : vip-redis` | 設備上的某個 VIP |
 //! | `person:customer` | 人（只能當來源） |
-//! | `system:payment` | 外部系統的落地 |
+//! | `system:payment` | 外部系統的實體 |
 //!
-//! 沒有前綴時依序找落地、設備、外部系統落地——名字撞在一起本來就是
+//! 沒有前綴時依序找服務實體、設備、外部系統實體——名字撞在一起本來就是
 //! 該被 lint 抓的問題，這裡不替它遮掩。
 
 use loom_core::Project;
@@ -32,7 +32,7 @@ use loom_core::id::Id;
 
 /// 解析一個參照。
 ///
-/// `endpoint_def` 是契約指定的接點定義；落地與外部系統那端會用到它，
+/// `endpoint_def` 是契約指定的接點定義；服務實體與外部系統那端會用到它，
 /// 設備不用（設備指的是具體的 VIP，不是邏輯定義）。
 pub fn resolve(
     project: &Project,
@@ -76,7 +76,7 @@ pub fn resolve(
             })
             .ok_or_else(|| {
                 nearby(
-                    "這個環境裡找不到外部系統落地",
+                    "這個環境裡找不到外部系統實體",
                     slug,
                     env.systems.iter().map(|s| &s.slug),
                 )
@@ -124,7 +124,7 @@ pub fn resolve(
         let matched = matching(env, pattern, within.as_ref());
         if matched == 0 {
             return Err(format!(
-                "樣式 {pattern} 在 {} 一台都沒對到。已經有的落地：{}",
+                "樣式 {pattern} 在 {} 一台都沒對到。已經有的服務實體：{}",
                 env.slug,
                 list(env.instances().iter().map(|i| &i.slug))
             ));
@@ -147,7 +147,7 @@ pub fn resolve(
             endpoint: endpoint_def.cloned(),
         });
     }
-    // 設備與外部系統落地不加前綴也認得——名字通常已經夠獨特了。
+    // 設備與外部系統實體不加前綴也認得——名字通常已經夠獨特了。
     if let Some(node) = env.infra.iter().find(|n| n.slug == pattern) {
         return Ok(Endpointing::Infra {
             node: node.id.clone(),

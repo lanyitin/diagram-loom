@@ -37,7 +37,7 @@ fn every_drawable_model_element_is_listed() {
         k
     };
 
-    // prod 有：機器、服務落地、F5、外部系統落地、連線
+    // prod 有：機器、服務實體、F5、外部系統實體、連線
     assert_eq!(
         kinds,
         vec![
@@ -92,7 +92,7 @@ fn a_node_deleted_on_the_diagram_is_reported_without_confusing_model_additions()
     let mut diagram = drawn_from_the_model(prod);
     let base = settled_snapshot(&model, &diagram);
 
-    // 使用者從圖上刪掉一個 Redis 落地
+    // 使用者從圖上刪掉一個 Redis 服務實體
     let deleted = model
         .iter()
         .find(|m| m.label == "redis-01")

@@ -471,7 +471,7 @@ fn every_change_reports_what_it_broke() {
         "environment",
         json!({"slug": "prod", "name": "正式"}),
     );
-    // 建了環境之後，那個沒落地的服務就變成一個問題了。
+    // 建了環境之後，那個沒有實體的服務就變成一個問題了。
     let out = create(
         &mut ws,
         "container",
@@ -479,7 +479,7 @@ fn every_change_reports_what_it_broke() {
     );
     assert!(
         out.contains("但多出"),
-        "建了一個沒落地的服務卻說沒事：{out}"
+        "建了一個沒有實體的服務卻說沒事：{out}"
     );
     assert!(out.contains("L001"), "{out}");
 }

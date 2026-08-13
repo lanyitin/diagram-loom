@@ -473,7 +473,7 @@ fn status(running: Option<&Running>, config: &AgentConfig) -> McpStatus {
 
 /// 每次啟用都換一個新的。
 ///
-/// 不落地是刻意的：token 存進設定檔的話，它會活得比使用者的意圖久——
+/// 不服務實體是刻意的：token 存進設定檔的話，它會活得比使用者的意圖久——
 /// 他關掉 App 就該預期這個門關了。
 fn new_token() -> String {
     // 借用 UUID 的隨機來源，不另外拉一個 rand。兩個 UUID 去掉連字號

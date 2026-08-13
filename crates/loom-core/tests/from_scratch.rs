@@ -113,7 +113,7 @@ fn a_clean_project_can_be_built_from_zero_with_edits_alone() {
     });
     assert!(!relationship_id.to_string().is_empty());
 
-    // ⑤ 建了環境，lint 才終於有話說：兩個服務沒落地、契約沒實現。
+    // ⑤ 建了環境，lint 才終於有話說：兩個服務沒有實體、契約沒實現。
     let prod = create(&mut h, blank(Kind::Environment, None, None), |r| {
         let Resource::Environment(e) = r else {
             unreachable!()
@@ -125,7 +125,7 @@ fn a_clean_project_can_be_built_from_zero_with_edits_alone() {
     let now_complaining = rules(&h);
     assert!(
         now_complaining.iter().filter(|r| **r == Rule::L001).count() >= 3,
-        "建了環境之後 lint 應該要說「這些東西都還沒落地」，實際：{now_complaining:?}"
+        "建了環境之後 lint 應該要說「這些東西都還沒有實體」，實際：{now_complaining:?}"
     );
 
     // ⑥ 照著 lint 說的建機器（走既有的批次功能），再補連線。
@@ -172,15 +172,15 @@ fn a_clean_project_can_be_built_from_zero_with_edits_alone() {
     });
     assert!(!node.to_string().is_empty());
 
-    // 到這裡 redis 有落地了，api 還沒——lint 應該只剩 api 那一組。
+    // 到這裡 redis 有實體了，api 還沒——lint 應該只剩 api 那一組。
     let remaining = lint(h.project());
     assert!(
         remaining.iter().any(|f| f.subject == api),
-        "api 還沒落地，lint 應該還在叫：{remaining:?}"
+        "api 還沒有實體，lint 應該還在叫：{remaining:?}"
     );
     assert!(
         !remaining.iter().any(|f| f.subject == redis),
-        "redis 已經有落地了，不該還在叫：{remaining:?}"
+        "redis 已經有實體了，不該還在叫：{remaining:?}"
     );
 
     // ⑦ 整個過程都可以復原。
@@ -320,7 +320,7 @@ fn deleting_a_container_keeps_its_instances_but_l012_flags_them() {
     })
     .unwrap();
 
-    // 刪掉服務。兩台落地還在，但 L012 要點名它們。
+    // 刪掉服務。兩個服務實體還在，但 L012 要點名它們。
     let that_container = h.project().logical.container(&redis).unwrap().clone();
     h.edit(&Edit::DeleteResource(Resource::Container(that_container)))
         .unwrap();
@@ -328,13 +328,13 @@ fn deleting_a_container_keeps_its_instances_but_l012_flags_them() {
     assert_eq!(
         h.project().environments[0].instances().len(),
         2,
-        "連帶刪掉了落地——那不是選的策略"
+        "連帶刪掉了服務實體——那不是選的策略"
     );
     let dangling: Vec<_> = lint(h.project())
         .into_iter()
         .filter(|f| f.rule == Rule::L012)
         .collect();
-    assert_eq!(dangling.len(), 2, "兩台落地都要被點名：{dangling:?}");
+    assert_eq!(dangling.len(), 2, "兩個服務實體都要被點名：{dangling:?}");
 
     // 刪錯了退得回來。
     assert!(h.undo());
@@ -519,9 +519,9 @@ fn set_slug(r: &mut Resource, slug: &str) {
     }
 }
 
-/// 落地：**位址就住在這裡**，所以它必須自己建得起來、改得動。
+/// 服務實體：**位址就住在這裡**，所以它必須自己建得起來、改得動。
 ///
-/// 在它成為一個 `Resource` 之前，落地只能靠「批次建機器」順便產生，
+/// 在它成為一個 `Resource` 之前，服務實體只能靠「批次建機器」順便產生，
 /// 而位址只能等 L006 叫了才改得到。也就是說「我知道這台的 IP，
 /// 我現在就想填進去」這件事在畫面上**沒有地方可以做**。
 mod instances {
@@ -579,7 +579,7 @@ mod instances {
         h.edit(&Edit::AddResource(instance_on(
             &env, &node, &container, "redis-01",
         )))
-        .expect("落地建不起來");
+        .expect("服務實體建不起來");
 
         let e = h.project().environment(&env).unwrap();
         assert_eq!(e.instances().len(), 1);
@@ -681,7 +681,7 @@ mod instances {
 
     #[test]
     fn deleting_an_instance_reaches_into_nested_machines() {
-        // 落地住在樹裡（站點 → 機器 → 落地）。只掃最上層的話，
+        // 服務實體住在樹裡（站點 → 機器 → 服務實體）。只掃最上層的話，
         // 站點底下的那些會刪不掉，而畫面上按鈕按了沒反應。
         let (mut h, env, site, container) = ready();
         let inner = create(
@@ -717,7 +717,7 @@ mod adding_a_connection {
     use super::*;
     use loom_core::environment::{Endpointing, InstanceRef};
 
-    /// 環境、兩台落地、一條契約。
+    /// 環境、兩個服務實體、一條契約。
     fn ready() -> (History, Id, Id, Id, Id) {
         let mut h = History::opened(empty_project());
         let system = create(&mut h, blank(Kind::System, None, None), |r| {

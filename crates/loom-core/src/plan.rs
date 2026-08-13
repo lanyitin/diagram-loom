@@ -248,7 +248,7 @@ fn node_list(out: &mut Inventory, env: &str, node: &crate::environment::Deployme
 
     for inst in &node.instances {
         out.insert(
-            format!("環境/{env}/落地/{}", inst.slug),
+            format!("環境/{env}/服務實體/{}", inst.slug),
             (
                 Element::ContainerInstance,
                 format!("{env}／{}", inst.slug),
@@ -257,7 +257,7 @@ fn node_list(out: &mut Inventory, env: &str, node: &crate::environment::Deployme
         );
         for ep in &inst.endpoints {
             out.insert(
-                format!("環境/{env}/落地/{}/位址/{}", inst.slug, ep.slug),
+                format!("環境/{env}/服務實體/{}/位址/{}", inst.slug, ep.slug),
                 (
                     Element::Address,
                     format!("{env}／{}／{}", inst.slug, ep.slug),

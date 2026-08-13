@@ -39,7 +39,7 @@ interface Shape {
   /**
    * 綁到哪個模型元素。**只有環境層的元素有**。
    *
-   * 「人」沒有落地，不在 `reconcile::model_elements` 裡；給它 `loomId`
+   * 「人」沒有實體，不在 `reconcile::model_elements` 裡；給它 `loomId`
    * 的話對帳會說「圖上有這個、模型沒有」——一個假的缺漏。
    */
   loomId?: string
@@ -80,7 +80,7 @@ function esc(s: string): string {
 /**
  * 「人」的形狀。
  *
- * 只畫**真的被這個環境的連線用到的**人。人住在邏輯層、沒有落地，
+ * 只畫**真的被這個環境的連線用到的**人。人住在邏輯層、沒有實體，
  * 所以不能無條件全部畫上去——那會在部署圖上出現一堆跟這個環境無關的角色。
  *
  * 刻意**不給 `loomId`**：人不在 `reconcile::model_elements` 裡，

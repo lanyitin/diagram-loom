@@ -28,11 +28,11 @@ use crate::logical::Logical;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SideKind {
-    /// 一台或一群服務落地。
+    /// 一台或一群服務實體。
     Instance,
     /// F5 這類設備。
     Infra,
-    /// 外部系統的落地。
+    /// 外部系統的實體。
     System,
     /// 真人。只會出現在來源端。
     Person,
@@ -169,7 +169,7 @@ fn collect_elements(
     side: &Endpointing,
     out: &mut Vec<Id>,
 ) {
-    /// 這個 Instance／落地上，對應某個 `EndpointDef` 的那個具體 Endpoint。
+    /// 這個 Instance／服務實體上，對應某個 `EndpointDef` 的那個具體 Endpoint。
     fn endpoint_id(endpoints: &[crate::environment::Endpoint], def: Option<&Id>) -> Option<Id> {
         endpoints
             .iter()
@@ -293,7 +293,7 @@ fn resolve_side(
                 expect: None,
             }
         }
-        // 人沒有落地、沒有位址、也沒有數量——只有一個名字。
+        // 人沒有實體、沒有位址、也沒有數量——只有一個名字。
         Endpointing::Person { person } => Side {
             kind: SideKind::Person,
             label: logical

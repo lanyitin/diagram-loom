@@ -34,10 +34,10 @@ const kindName: Record<Element, string> = {
   endpointDef: '接點定義',
   relationship: '連線契約',
   deploymentNode: '機器',
-  containerInstance: '服務落地',
+  containerInstance: '服務實體',
   address: '位址',
   infrastructureNode: '設備',
-  softwareSystemInstance: '外部系統落地',
+  softwareSystemInstance: '外部系統實體',
   connection: '連線',
 }
 

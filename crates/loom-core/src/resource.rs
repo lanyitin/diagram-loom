@@ -17,7 +17,7 @@
 //!
 //! # 刪除允許留下懸空的參照
 //!
-//! 刪一個服務不會連帶刪掉它的落地與契約——那可能一次消失幾十個東西，
+//! 刪一個服務不會連帶刪掉它的服務實體與契約——那可能一次消失幾十個東西，
 //! 而這工具的重點就是「怕漏」。改成**讓它懸空，由 L012 叫出來**
 //! （見 `lint::Rule::L012` 與 `docs/decisions.md`）。
 //!
@@ -72,16 +72,16 @@ pub enum Resource {
         node: Id,
         endpoint: Endpoint,
     },
-    /// 一個服務在某台機器上的落地。**位址就住在這裡。**
+    /// 一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
     ///
-    /// `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+    /// `node` 是它跑在哪台機器上。服務實體不能離開機器獨立存在——
     /// 「東西跑在哪裡」正是部署圖唯一要回答的問題。
     Instance {
         environment: Id,
         node: Id,
         instance: ContainerInstance,
     },
-    /// 外部系統在這個環境的落地。
+    /// 外部系統在這個環境的實體。
     SystemInstance {
         environment: Id,
         instance: SoftwareSystemInstance,
@@ -118,8 +118,8 @@ impl Resource {
             Resource::Node { .. } => "機器",
             Resource::Infra { .. } => "設備",
             Resource::InfraEndpoint { .. } => "設備接點",
-            Resource::Instance { .. } => "落地",
-            Resource::SystemInstance { .. } => "外部系統落地",
+            Resource::Instance { .. } => "服務實體",
+            Resource::SystemInstance { .. } => "外部系統實體",
         }
     }
 
@@ -159,7 +159,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             id,
             slug: String::new(),
             name: String::new(),
-            // 預設是外部系統：自家系統靠自己的 Container 落地，
+            // 預設是外部系統：自家系統靠自己的 Container 部署，
             // 而使用者手動新增「系統」時，多半是在記一個對外的相依。
             external: true,
             endpoints: vec![],
@@ -286,8 +286,8 @@ impl Resource {
             ("新增", Resource::Node { .. }) => "新增機器",
             ("新增", Resource::Infra { .. }) => "新增設備",
             ("新增", Resource::InfraEndpoint { .. }) => "新增設備接點",
-            ("新增", Resource::Instance { .. }) => "新增落地",
-            ("新增", Resource::SystemInstance { .. }) => "新增外部系統落地",
+            ("新增", Resource::Instance { .. }) => "新增服務實體",
+            ("新增", Resource::SystemInstance { .. }) => "新增外部系統實體",
             ("刪除", Resource::Person(_)) => "刪除人",
             ("刪除", Resource::System(_)) => "刪除系統",
             ("刪除", Resource::Container(_)) => "刪除服務",
@@ -297,8 +297,8 @@ impl Resource {
             ("刪除", Resource::Node { .. }) => "刪除機器",
             ("刪除", Resource::Infra { .. }) => "刪除設備",
             ("刪除", Resource::InfraEndpoint { .. }) => "刪除設備接點",
-            ("刪除", Resource::Instance { .. }) => "刪除落地",
-            ("刪除", Resource::SystemInstance { .. }) => "刪除外部系統落地",
+            ("刪除", Resource::Instance { .. }) => "刪除服務實體",
+            ("刪除", Resource::SystemInstance { .. }) => "刪除外部系統實體",
             (_, Resource::Person(_)) => "修改人",
             (_, Resource::System(_)) => "修改系統",
             (_, Resource::Container(_)) => "修改服務",
@@ -308,8 +308,8 @@ impl Resource {
             (_, Resource::Node { .. }) => "修改機器",
             (_, Resource::Infra { .. }) => "修改設備",
             (_, Resource::InfraEndpoint { .. }) => "修改設備接點",
-            (_, Resource::Instance { .. }) => "修改落地",
-            (_, Resource::SystemInstance { .. }) => "修改外部系統落地",
+            (_, Resource::Instance { .. }) => "修改服務實體",
+            (_, Resource::SystemInstance { .. }) => "修改外部系統實體",
         }
     }
 }
@@ -510,7 +510,7 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
         } => {
             let env = find_env(project, environment)?;
             check_slug_unique(all_nodes(&env.nodes), r)?;
-            // 改的時候只動這個節點自己的欄位，不要連子節點與落地一起換掉。
+            // 改的時候只動這個節點自己的欄位，不要連子節點與服務實體一起換掉。
             if let Some(existing) = find_node(&mut env.nodes, &node.id) {
                 existing.slug = node.slug.clone();
                 existing.kind = node.kind;
@@ -532,7 +532,7 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             instance,
         } => {
             let env = find_env(project, environment)?;
-            // 落地的名字在**整個環境**裡唯一，不是只在那台機器上。
+            // 服務實體的名字在**整個環境**裡唯一，不是只在那台機器上。
             // 萬用字元比對的就是它，兩台同名會讓 `expect` 數錯——
             // 而使用者會以為那是兩台不同的機器。
             check_slug_unique(
@@ -542,7 +542,7 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
                 r,
             )?;
 
-            // 先從舊的那台移走。使用者可以把落地搬到別台機器上，不移走的話
+            // 先從舊的那台移走。使用者可以把服務實體搬到別台機器上，不移走的話
             // 會變成兩份，而萬用字元會把它數成兩台。
             //
             // ⚠️ 不能用 `replace_or_push`：它在「找不到」時是**安靜地什麼都不做**，
@@ -718,9 +718,9 @@ pub fn new_project(name: &str) -> Project {
     }
 }
 
-/// 把一個落地從部署樹裡拿走，回傳它。找不到就是 `None`。
+/// 把一個服務實體從部署樹裡拿走，回傳它。找不到就是 `None`。
 ///
-/// 修改時也會用到：使用者可以把落地搬到別台機器上，那就得先從舊的那台移走，
+/// 修改時也會用到：使用者可以把服務實體搬到別台機器上，那就得先從舊的那台移走，
 /// 否則會變成兩份——而萬用字元會把它數成兩台。
 fn take_instance(nodes: &mut [DeploymentNode], id: &Id) -> Option<ContainerInstance> {
     for node in nodes.iter_mut() {

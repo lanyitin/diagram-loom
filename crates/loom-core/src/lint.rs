@@ -49,9 +49,9 @@ pub enum Rule {
     /// # 為什麼需要一條獨立的規則
     ///
     /// L003 管的是「**連線**指到不存在的東西」。但元素之間也互相指：
-    /// 落地指著服務、契約指著服務與接點、接點指著接點定義。
+    /// 服務實體指著服務、契約指著服務與接點、接點指著接點定義。
     ///
-    /// 沒有這條的話，刪掉一個服務會**安靜地**留下一批指著空氣的落地——
+    /// 沒有這條的話，刪掉一個服務會**安靜地**留下一批指著空氣的服務實體——
     /// lint 一句話都不說，而那正是這個工具存在要抓的東西。
     /// 所以它是「可以刪除邏輯層元素」的前置條件，不是加分項。
     ///
@@ -258,7 +258,7 @@ fn target_has_endpoint(
     }
 }
 
-/// L012（環境層）：落地與接點指到的邏輯層元素要真的存在。
+/// L012（環境層）：服務實體與接點指到的邏輯層元素要真的存在。
 fn check_environment_references(project: &Project, env: &Environment, findings: &mut Vec<Finding>) {
     let logical = &project.logical;
 
@@ -271,7 +271,7 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
                 subject: instance.id.clone(),
                 end: None,
                 detail: format!(
-                    "落地 {} 指向不存在的服務 {}",
+                    "服務實體 {} 指向不存在的服務 {}",
                     instance.slug, instance.container
                 ),
             });
@@ -295,7 +295,7 @@ fn check_environment_references(project: &Project, env: &Environment, findings: 
                 environment: Some(env.id.clone()),
                 subject: si.id.clone(),
                 end: None,
-                detail: format!("落地 {} 指向不存在的外部系統 {}", si.slug, si.system),
+                detail: format!("服務實體 {} 指向不存在的外部系統 {}", si.slug, si.system),
             });
         }
         for ep in &si.endpoints {
@@ -333,11 +333,11 @@ fn check_endpoint_def(
     }
 }
 
-/// L001：邏輯層的東西在每個環境都要落地。
+/// L001：邏輯層的東西在每個環境都要服務實體。
 ///
 /// - 每個 Container 至少要有一個 ContainerInstance
 /// - 每個**外部** SoftwareSystem 至少要有一個 SoftwareSystemInstance
-///   （自家系統靠自己的 Container 落地，不另外檢查）
+///   （自家系統靠自己的 Container 服務實體，不另外檢查）
 ///
 /// 判定是「至少一個」而非「數量相同」：prod 12 台、test 6 台本來就正常，
 /// 數量的把關交給 `expect`（L004）。
@@ -369,10 +369,7 @@ fn check_logical_realized(
                 environment: Some(env.id.clone()),
                 subject: system.id.clone(),
                 end: None,
-                detail: format!(
-                    "外部系統 {} 在環境 {} 沒有指定落地位址",
-                    system.slug, env.slug
-                ),
+                detail: format!("外部系統 {} 在環境 {} 沒有指定位址", system.slug, env.slug),
             });
         }
     }
@@ -539,7 +536,7 @@ fn check_endpointing(
                 }
             }
         },
-        // 人沒有落地也沒有位址，能檢查的只有「這個 Person 真的存在」——
+        // 人沒有實體也沒有位址，能檢查的只有「這個 Person 真的存在」——
         // 那要看邏輯層，`check_endpointing` 手上只有環境，所以放在
         // `check_connections` 裡做。這裡什麼都不用查。
         Endpointing::Person { .. } => {}
@@ -549,7 +546,7 @@ fn check_endpointing(
                 environment: env_id,
                 subject: conn_id,
                 end,
-                detail: format!("連線指向不存在的外部系統落地 {instance}"),
+                detail: format!("連線指向不存在的外部系統實體 {instance}"),
             }),
             Some(found) => {
                 if let Some(want) = endpoint
@@ -705,7 +702,7 @@ fn check_relationships_reachable(
     }
 }
 
-/// 把**邏輯連線的一端**展開成圖上的點：該服務／外部系統在此環境的所有落地。
+/// 把**邏輯連線的一端**展開成圖上的點：該服務／外部系統在此環境的所有服務實體。
 fn ends_to_nodes(
     env: &Environment,
     instances: &[&ContainerInstance],
@@ -723,7 +720,7 @@ fn ends_to_nodes(
             .filter(|s| &s.system == sid)
             .map(|s| GraphNode::System(s.id.clone()))
             .collect(),
-        // 人不需要落地，所以不必去環境裡找——它本身就是圖上的一個點。
+        // 人不需要服務實體，所以不必去環境裡找——它本身就是圖上的一個點。
         RelationshipEnd::Person(pid) => vec![GraphNode::Person(pid.clone())],
     }
 }

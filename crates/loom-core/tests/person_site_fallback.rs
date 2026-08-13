@@ -75,14 +75,14 @@ fn a_person_needs_no_deployment() {
         .collect();
     assert!(
         person_complaints.is_empty(),
-        "不該要求人有落地：{person_complaints:?}"
+        "不該要求人有實體：{person_complaints:?}"
     );
 }
 
 #[test]
 fn a_missing_person_hop_is_caught() {
     // 反過來說，契約本身還是要在每個環境實現——只是實現的方式是
-    // 「有一條從人出發的連線」，而不是「人要有落地」。
+    // 「有一條從人出發的連線」，而不是「人要有服務實體」。
     let mut project = project_with_a_person();
     project.environments[2]
         .connections

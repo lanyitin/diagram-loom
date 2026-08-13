@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn a_person_end_is_flagged_because_people_do_not_live_in_the_environment() {
-        // 人沒有落地。圖上不另外補一個形狀的話，這條線會指向不存在的東西。
+        // 人沒有實體。圖上不另外補一個形狀的話，這條線會指向不存在的東西。
         let e = env(
             vec![node("vm", vec![instance("a-01")])],
             vec![conn(

@@ -137,7 +137,7 @@ async function loadModel() {
  * 所以一定要有逾時，否則就是無聲地什麼都沒發生。
  */
 function relayout() {
-  // 只有 layered 處理得了巢狀節點，而我們的圖天生巢狀（站點 → 機器 → 落地）。
+  // 只有 layered 處理得了巢狀節點，而我們的圖天生巢狀（站點 → 機器 → 服務實體）。
   send({ action: 'layout', layouts: 'verticalFlow' })
 
   waiting.value = true
@@ -305,7 +305,7 @@ onUnmounted(() => {
           <p v-if="empty" class="hint">
             <strong>{{ environment.slug }} 還沒有任何機器。</strong>
             部署圖畫的是「東西跑在哪裡」，所以要先到<strong>資源</strong>那一頁
-            建機器與落地，這裡才畫得出東西。
+            建機器與服務實體，這裡才畫得出東西。
           </p>
           <iframe
             ref="frame"

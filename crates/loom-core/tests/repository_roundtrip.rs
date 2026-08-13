@@ -205,7 +205,7 @@ fn the_whole_file_list_is_verifiable_without_touching_disk() {
 
 #[test]
 fn the_files_to_be_written_can_be_inspected_first() {
-    // 記憶體儲存體也能拿來做「先算出結果、讓使用者確認再落地」。
+    // 記憶體儲存體也能拿來做「先算出結果、讓使用者確認再服務實體」。
     use loom_core::repository::save;
     use loom_core::store::MemoryStore;
 
@@ -237,7 +237,7 @@ fn an_unsafe_environment_slug_writes_nothing_to_the_store() {
 
 #[test]
 fn the_real_architecture_fixture_round_trips() {
-    // 照一個真實系統的架構建的（28 個落地、兩層巢狀站點、一台 VM 跑兩個服務、
+    // 照一個真實系統的架構建的（28 個服務實體、兩層巢狀站點、一台 VM 跑兩個服務、
     // 同站優先加跨站備援）。假素材通常太乾淨，這份用來確認 YAML 佈局
     // 撐得住現實的形狀。
     //
@@ -264,7 +264,7 @@ fn the_real_architecture_fixture_round_trips() {
         .sum();
     assert_eq!(
         instance_count, 28,
-        "prod 應該有 28 個落地（含兩層巢狀站點底下的）"
+        "prod 應該有 28 個服務實體（含兩層巢狀站點底下的）"
     );
 
     // 順便釘住 lint 的結果：哪天改了模型讓這份樣本的結論變了，

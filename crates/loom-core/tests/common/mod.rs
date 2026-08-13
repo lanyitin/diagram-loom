@@ -14,7 +14,7 @@
 //! | `dev`  | 訂單 API → Redis **1 台**，直連；金流走本機 mock |
 //!
 //! 涵蓋了設計上最容易出錯的幾件事：經過設備的多段路徑、叢集扇出、
-//! 同一條邏輯連線在不同環境展開成不同數量，以及外部系統在各環境的不同落地。
+//! 同一條邏輯連線在不同環境展開成不同數量，以及外部系統在各環境的不同實體。
 
 // 每個整合測試各自是一個 crate，只用得到這裡的一部分，
 // 所以「沒被用到」不代表沒用。
@@ -145,7 +145,7 @@ pub fn instance(
     }
 }
 
-/// 金流系統在某環境的落地。
+/// 金流系統在某環境的實體。
 pub fn payment(env: &str, slug: &str, address: &str) -> SoftwareSystemInstance {
     SoftwareSystemInstance {
         id: Id::new(format!("sys-{env}-payment")),

@@ -3,7 +3,7 @@
 //! # 為什麼欄位是 Rust 決定的
 //!
 //! 「服務那張表要顯示幾個接點、在各環境幾台」不是排版選擇，是**模型知識**——
-//! 那些數字要走一次落地比對才算得出來。放前端就是把 `coverage` 的邏輯
+//! 那些數字要走一次實體比對才算得出來。放前端就是把 `coverage` 的邏輯
 //! 再寫一遍，然後慢慢漂移。
 //!
 //! 所以這裡吐的是**已經算好的字串格子**，前端只負責畫成表格。
@@ -332,7 +332,7 @@ fn environments_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
             "名稱".into(),
             "顯示名".into(),
             "機器".into(),
-            "落地".into(),
+            "服務實體".into(),
             "連線".into(),
         ],
         environment: None,
@@ -412,9 +412,9 @@ fn nodes_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -
     }
 }
 
-/// 落地：一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
+/// 服務實體：一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
 ///
-/// 在它之前，落地只能靠「批次建機器」產生，而位址只能等 L006 叫了才改得到。
+/// 在它之前，服務實體只能靠「批次建機器」產生，而位址只能等 L006 叫了才改得到。
 /// 也就是說「我知道這台的 IP，我想現在填進去」這件事**沒有地方可以做**。
 fn instances_table(
     project: &Project,
@@ -459,7 +459,7 @@ fn instances_table(
 
     Table {
         kind: Kind::Instance,
-        title: "落地".into(),
+        title: "服務實體".into(),
         columns: vec![
             "名稱".into(),
             "哪個服務".into(),
@@ -467,14 +467,14 @@ fn instances_table(
             "位址".into(),
         ],
         environment: Some(env.id.clone()),
-        empty_hint: "落地是「某個服務在某台機器上跑起來的那一份」，IP 與 port 就填在這裡。\
-                     12 台 Redis 就是 12 個落地。要一次建很多台的話，用機器那一頁的批次建立。"
+        empty_hint: "服務實體是「某個服務在某台機器上跑起來的那一份」，IP 與 port 就填在這裡。\
+                     12 台 Redis 就是 12 個服務實體。要一次建很多台的話，用機器那一頁的批次建立。"
             .into(),
         rows,
     }
 }
 
-/// 落地上所有接點的位址，攤成一行。沒填的用「—」佔位，
+/// 服務實體上所有接點的位址，攤成一行。沒填的用「—」佔位，
 /// 這樣一眼就看得出「有這個接點但還沒有位址」，而不是「沒有這個接點」。
 fn addresses_of(i: &crate::environment::ContainerInstance) -> String {
     if i.endpoints.is_empty() {
@@ -534,7 +534,7 @@ fn system_instances_table(
 ) -> Table {
     Table {
         kind: Kind::SystemInstance,
-        title: "外部系統落地".into(),
+        title: "外部系統實體".into(),
         columns: vec!["名稱".into(), "對應系統".into(), "位址".into()],
         environment: Some(env.id.clone()),
         empty_hint:
