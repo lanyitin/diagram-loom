@@ -39,6 +39,21 @@ const 修改中 = ref<number | null>(null)
  *
  * 「這個 subject 對應到哪幾列」不在這裡判斷，由 Rust 的 `Row.subjects` 回答。
  */
+/**
+ * 開「補一條連線」的表單。
+ *
+ * 要補哪條契約寫在 `fix.addConnection` 裡（Rust 決定的），
+ * 這裡只負責把它遞出去——同樣不認得規則代號。
+ */
+function 補連線(f: Finding) {
+  if (!f.fix?.addConnection || !f.environment) return
+  store.新增連線中 = {
+    environment: f.environment,
+    relationship: f.fix.addConnection.relationship,
+    label: f.detail,
+  }
+}
+
 function 跳過去(f: Finding) {
   store.檢視 = '連線表'
   store.搜尋 = ''
@@ -76,19 +91,24 @@ function 跳過去(f: Finding) {
               <td class="mono subject">{{ f.subject }}</td>
               <td class="detail" @click="跳過去(f)">{{ f.detail }}</td>
               <td class="act">
+                <!-- 補連線要開一張表單，不是就地填一格，所以走另一顆鈕。 -->
                 <button
-                  v-if="f.fix" class="fix" :disabled="store.忙碌中"
+                  v-if="f.fix?.addConnection" class="fix" :disabled="store.忙碌中"
+                  @click="補連線(f)"
+                >補連線…</button>
+                <button
+                  v-else-if="f.fix" class="fix" :disabled="store.忙碌中"
                   @click="修改中 = 修改中 === i ? null : i"
                 >
                   {{ 修改中 === i ? '取消' : '修…' }}
                 </button>
-                <!-- 沒有單欄位修法的（L001／L002／L003）不放假按鈕。
+                <!-- 剩下沒有修法的（L003：指到了不存在的東西）不放假按鈕。
                      一個按下去只會跳「這個還沒做」的按鈕，比沒有按鈕更糟。 -->
-                <span v-else class="muted hint">要改連線</span>
+                <span v-else class="muted hint">要改接</span>
               </td>
             </tr>
 
-            <tr v-if="修改中 === i && f.fix" class="editor">
+            <tr v-if="修改中 === i && f.fix && !f.fix.addConnection" class="editor">
               <td colspan="5">
                 <FixEditor :finding="f" :fix="f.fix" @done="修改中 = null" />
               </td>

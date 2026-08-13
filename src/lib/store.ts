@@ -37,6 +37,15 @@ interface State {
   錯誤: string | null
   /** 使用者按了刪除、還沒確認的那一條。`null` 表示沒有對話框。 */
   刪除中: 待刪 | null
+  /** 使用者要補一條連線給哪個環境的哪條契約。 */
+  新增連線中: 待建 | null
+}
+
+/** 新增連線的表單需要知道的：補給誰，以及怎麼稱呼它。 */
+export interface 待建 {
+  environment: Id
+  relationship: Id
+  label: string
 }
 
 /** 從哪一項發現跳過來的。標籤是給畫面上那顆「取消聚焦」的膠囊用的。 */
@@ -65,6 +74,7 @@ export const useProject = defineStore('project', {
     忙碌中: false,
     錯誤: null,
     刪除中: null,
+    新增連線中: null,
   }),
 
   getters: {

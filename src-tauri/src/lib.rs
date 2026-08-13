@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use loom_core::Project;
+use loom_core::connect::{self, Choice, Proposal};
 use loom_core::coverage::{self, Matrix};
 use loom_core::edit::{self, Edit, Fix, FixValue, Impact};
 use loom_core::history::History;
@@ -225,6 +226,45 @@ fn apply_fix(state: State<'_>, finding: Finding, value: FixValue) -> Result<Snap
     Ok(snapshot(root, history))
 }
 
+/// 照契約擬一條「這個環境應該要有」的連線。**不改動任何東西。**
+///
+/// L001／L002 的修法。判斷全在 `loom_core::connect`——
+/// 哪幾台機器算數、多台要不要收成萬用字元，都是模型知識。
+#[tauri::command]
+#[specta::specta]
+fn propose_connection(
+    state: State<'_>,
+    environment: loom_core::id::Id,
+    relationship: loom_core::id::Id,
+) -> Result<Proposal, Failure> {
+    let mut opened = 鎖(&state)?;
+    let (_, history) = 開著的(&mut opened)?;
+    let project = history.project();
+    let env = project.environment(&environment).ok_or_else(|| Failure {
+        message: format!("找不到環境 {environment}"),
+    })?;
+    connect::propose(project, env, &relationship).ok_or_else(|| Failure {
+        message: format!("找不到邏輯連線 {relationship}"),
+    })
+}
+
+/// 這個環境裡，某一端接得上的所有地方。
+#[tauri::command]
+#[specta::specta]
+fn connection_choices(
+    state: State<'_>,
+    environment: loom_core::id::Id,
+    end: loom_core::environment::ConnectionEnd,
+) -> Result<Vec<Choice>, Failure> {
+    let mut opened = 鎖(&state)?;
+    let (_, history) = 開著的(&mut opened)?;
+    let project = history.project();
+    let env = project.environment(&environment).ok_or_else(|| Failure {
+        message: format!("找不到環境 {environment}"),
+    })?;
+    Ok(connect::choices(project, env, end))
+}
+
 /// 退回上一步。已經到底了就原樣回傳——這不是錯誤，
 /// 使用者多按一次 Cmd+Z 不該看到紅字。
 #[tauri::command]
@@ -323,6 +363,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         cancel_import,
         preview_edit,
         apply_edit,
+        propose_connection,
+        connection_choices,
         apply_fix,
         undo,
         redo

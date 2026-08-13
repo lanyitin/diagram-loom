@@ -30,8 +30,17 @@ export const commands = {
 	 * 
 	 *  刪除之前一定要先問這個。判斷不在這裡——這一層只是轉接。
 	 */
-	previewEdit: (edit: Edit) => typedError<Impact_Serialize, Failure>(__TAURI_INVOKE("preview_edit", { edit })),
-	applyEdit: (edit: Edit) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_edit", { edit })),
+	previewEdit: (edit: Edit_Deserialize) => typedError<Impact_Serialize, Failure>(__TAURI_INVOKE("preview_edit", { edit })),
+	applyEdit: (edit: Edit_Deserialize) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_edit", { edit })),
+	/**
+	 *  照契約擬一條「這個環境應該要有」的連線。**不改動任何東西。**
+	 * 
+	 *  L001／L002 的修法。判斷全在 `loom_core::connect`——
+	 *  哪幾台機器算數、多台要不要收成萬用字元，都是模型知識。
+	 */
+	proposeConnection: (environment: Id, relationship: Id) => typedError<Proposal_Serialize, Failure>(__TAURI_INVOKE("propose_connection", { environment, relationship })),
+	/**  這個環境裡，某一端接得上的所有地方。 */
+	connectionChoices: (environment: Id, end: ConnectionEnd) => typedError<Choice_Serialize[], Failure>(__TAURI_INVOKE("connection_choices", { environment, end })),
 	/**
 	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
 	 * 
@@ -78,6 +87,43 @@ export type Change = {
 };
 
 export type ChangeKind = "added" | "updated";
+
+/**  這個環境裡，連線可以接上去的一個地方。 */
+export type Choice = Choice_Serialize | Choice_Deserialize;
+
+/**  這個環境裡，連線可以接上去的一個地方。 */
+export type Choice_Deserialize = {
+	kind: SideKind,
+	/**  「redis-01 : client-port」 */
+	label: string,
+	/**  下拉選單分組用：「服務」「服務（整群）」「設備」「外部系統」「人」。 */
+	group: string,
+	/**
+	 *  直接可以塞進 [`crate::edit::Edit::AddConnection`] 的東西。
+	 * 
+	 *  前端**把它當不透明值原樣帶回來**，不需要看懂裡面是什麼。
+	 *  這是「規則在 Rust」的同一條線：哪些東西接得上、接上去長什麼樣，
+	 *  是模型知識，不是畫面知識。
+	 */
+	endpointing: Endpointing_Deserialize,
+};
+
+/**  這個環境裡，連線可以接上去的一個地方。 */
+export type Choice_Serialize = {
+	kind: SideKind,
+	/**  「redis-01 : client-port」 */
+	label: string,
+	/**  下拉選單分組用：「服務」「服務（整群）」「設備」「外部系統」「人」。 */
+	group: string,
+	/**
+	 *  直接可以塞進 [`crate::edit::Edit::AddConnection`] 的東西。
+	 * 
+	 *  前端**把它當不透明值原樣帶回來**，不需要看懂裡面是什麼。
+	 *  這是「規則在 Rust」的同一條線：哪些東西接得上、接上去長什麼樣，
+	 *  是模型知識，不是畫面知識。
+	 */
+	endpointing: Endpointing_Serialize,
+};
 
 /**
  *  環境層的一條實際連線。
@@ -248,7 +294,10 @@ export type DeploymentNode_Serialize = {
 };
 
 /**  對專案的一次修改。 */
-export type Edit = 
+export type Edit = Edit_Serialize | Edit_Deserialize;
+
+/**  對專案的一次修改。 */
+export type Edit_Deserialize = 
 /**
  *  L006 的修法：補上某個 Endpoint 的實際位址。
  * 
@@ -263,7 +312,7 @@ export type Edit =
 	 *  那正是「我還不知道位址」該有的狀態。
 	 */
 	address: string | null,
-} }) & { deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  L007 的修法：填上用途。
  * 
@@ -273,27 +322,46 @@ export type Edit =
 	environment: Id | null,
 	subject: Id,
 	purpose: string,
-} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
 /**  L004 / L005 的修法：萬用字元的期望數量。 */
 ({ setExpect: {
 	environment: Id,
 	connection: Id,
 	side: ConnectionEnd,
 	expect: number | null,
-} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
 	/**  Instance 或外部系統落地的 id。 */
 	subject: Id,
 	standalone: boolean,
-} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
 /**  改成正常路徑或備援路徑。 */
 ({ setConnectionKind: {
 	environment: Id,
 	connection: Id,
 	kind: ConnectionKind,
-} }) & { deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  L001／L002 的修法：新增一條環境層連線。
+ * 
+ *  `id` 由 [`crate::connect::propose`] 先發好，不是在這裡產生——
+ *  這樣 `apply` 是決定性的：預覽算出來的就是套用後真正的樣子，
+ *  復原重做也會重播出同一條連線，而不是每次換一個 UUID。
+ * 
+ *  兩端是完整的 [`Endpointing`]，由 [`crate::connect::choices`] 提供，
+ *  前端當不透明值原樣帶回來。
+ */
+({ addConnection: {
+	environment: Id,
+	id: Id,
+	serves: Id,
+	purpose: string,
+	kind: ConnectionKind,
+	from: Endpointing_Deserialize,
+	to: Endpointing_Deserialize,
+} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  刪掉一條環境層連線。
  * 
@@ -303,7 +371,84 @@ export type Edit =
 ({ deleteConnection: {
 	environment: Id,
 	connection: Id,
-} }) & { setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
+} }) & { addConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
+
+/**  對專案的一次修改。 */
+export type Edit_Serialize = 
+/**
+ *  L006 的修法：補上某個 Endpoint 的實際位址。
+ * 
+ *  Endpoint 可能掛在 Instance、設備或外部系統落地上，所以只給 id，
+ *  由 [`apply`] 自己找。前端不需要知道它住在哪一層。
+ */
+({ setAddress: {
+	environment: Id,
+	endpoint: Id,
+	/**
+	 *  `None` 表示清空。清空是合法操作——它會讓 L006 重新叫，
+	 *  那正是「我還不知道位址」該有的狀態。
+	 */
+	address: string | null,
+} }) & { addConnection?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  L007 的修法：填上用途。
+ * 
+ *  `environment` 為 `None` 時指的是邏輯層的 Relationship。
+ */
+({ setPurpose: {
+	environment: Id | null,
+	subject: Id,
+	purpose: string,
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
+/**  L004 / L005 的修法：萬用字元的期望數量。 */
+({ setExpect: {
+	environment: Id,
+	connection: Id,
+	side: ConnectionEnd,
+	expect: number | null,
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
+/**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
+({ setStandalone: {
+	environment: Id,
+	/**  Instance 或外部系統落地的 id。 */
+	subject: Id,
+	standalone: boolean,
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
+/**  改成正常路徑或備援路徑。 */
+({ setConnectionKind: {
+	environment: Id,
+	connection: Id,
+	kind: ConnectionKind,
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  L001／L002 的修法：新增一條環境層連線。
+ * 
+ *  `id` 由 [`crate::connect::propose`] 先發好，不是在這裡產生——
+ *  這樣 `apply` 是決定性的：預覽算出來的就是套用後真正的樣子，
+ *  復原重做也會重播出同一條連線，而不是每次換一個 UUID。
+ * 
+ *  兩端是完整的 [`Endpointing`]，由 [`crate::connect::choices`] 提供，
+ *  前端當不透明值原樣帶回來。
+ */
+({ addConnection: {
+	environment: Id,
+	id: Id,
+	serves: Id,
+	purpose: string,
+	kind: ConnectionKind,
+	from: Endpointing_Serialize,
+	to: Endpointing_Serialize,
+} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  刪掉一條環境層連線。
+ * 
+ *  這是目前唯一的刪除操作，而且刪除一定要先看 [`preview`]——
+ *  少一條連線正是本工具存在要抓的東西。
+ */
+({ deleteConnection: {
+	environment: Id,
+	connection: Id,
+} }) & { addConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
 
 /**  動到的是什麼東西。畫面上用來分組。 */
 export type Element = "environment" | 
@@ -642,15 +787,24 @@ export type Fix =
 	/**  欄位提示，例如「10.0.1.11:6379」。 */
 	hint: string,
 	current: string | null,
-} }) & { count?: never; toggle?: never } | 
+} }) & { addConnection?: never; count?: never; toggle?: never } | 
 /**  填一個數字（expect）。附上實際符合的數量當預設值。 */
 ({ count: {
 	suggestion: number | null,
-} }) & { text?: never; toggle?: never } | 
+} }) & { addConnection?: never; text?: never; toggle?: never } | 
 /**  一個開關（standalone）。 */
 ({ toggle: {
 	label: string,
-} }) & { count?: never; text?: never };
+} }) & { addConnection?: never; count?: never; text?: never } | 
+/**
+ *  開一張「新增連線」的表單。**這個沒辦法在 lint 面板上填一格解決**，
+ *  但它仍然是個修法——所以它有值，不是 `None`。
+ * 
+ *  `relationship` 是要補的那條契約，前端拿它去問 `propose_connection`。
+ */
+({ addConnection: {
+	relationship: Id,
+} }) & { count?: never; text?: never; toggle?: never };
 
 /**  使用者在 [`Fix`] 的控制項裡填的東西。 */
 export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };
@@ -874,6 +1028,45 @@ export type Project_Serialize = {
 	name: string,
 	logical: Logical_Serialize,
 	environments: Environment_Serialize[],
+};
+
+/**  照契約擬一條連線。 */
+export type Proposal = Proposal_Serialize | Proposal_Deserialize;
+
+/**  照契約擬一條連線。 */
+export type Proposal_Deserialize = {
+	/**
+	 *  先在這裡發好 id，套用時就不必再產一個。
+	 * 
+	 *  這樣 `apply` 是決定性的：預覽算出來的結果跟真正套用的完全一樣，
+	 *  復原重做也會重播出同一條連線而不是每次換一個 UUID。
+	 */
+	id: Id,
+	serves: Id,
+	purpose: string,
+	/**  擬不出來時是 `None`（例如來源在這個環境根本沒落地）。 */
+	from: Endpointing_Deserialize | null,
+	to: Endpointing_Deserialize | null,
+	/**  這份提案做了哪些假設、哪裡擬不出來。**一定要顯示給使用者看。** */
+	notes: string[],
+};
+
+/**  照契約擬一條連線。 */
+export type Proposal_Serialize = {
+	/**
+	 *  先在這裡發好 id，套用時就不必再產一個。
+	 * 
+	 *  這樣 `apply` 是決定性的：預覽算出來的結果跟真正套用的完全一樣，
+	 *  復原重做也會重播出同一條連線而不是每次換一個 UUID。
+	 */
+	id: Id,
+	serves: Id,
+	purpose: string,
+	/**  擬不出來時是 `None`（例如來源在這個環境根本沒落地）。 */
+	from: Endpointing_Serialize | null,
+	to: Endpointing_Serialize | null,
+	/**  這份提案做了哪些假設、哪裡擬不出來。**一定要顯示給使用者看。** */
+	notes: string[],
 };
 
 /**

@@ -295,9 +295,8 @@ fn 每一項會叫的發現都要有辦法修() {
     for f in &findings {
         let fix = edit::fix_for(&project, f);
         match f.rule {
-            Rule::L001 | Rule::L002 | Rule::L003 => {
-                assert!(fix.is_none(), "{:?} 不該有單欄位修法", f.rule)
-            }
+            // L003 是「指到了不存在的東西」，要改既有連線的接法，還沒做。
+            Rule::L003 => assert!(fix.is_none(), "L003 目前不該有修法"),
             _ => assert!(fix.is_some(), "{f:?} 會叫，卻沒有任何修法"),
         }
     }
@@ -345,6 +344,8 @@ fn 照著修法填一格_就能把一個壞掉的專案修乾淨() {
             Fix::Text { .. } => FixValue::Text("補上去了".into()),
             Fix::Count { suggestion } => FixValue::Count(suggestion),
             Fix::Toggle { .. } => FixValue::Toggle(true),
+            // 新增連線走另一條路（要開表單），不在這個「填一格」的迴圈裡。
+            Fix::AddConnection { .. } => unreachable!("這份素材不該有 L001／L002"),
         };
         let e = edit::edit_for(&f, &填什麼).expect("交不出 Edit");
         edit::apply(&mut project, &e).expect("套用失敗");

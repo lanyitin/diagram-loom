@@ -274,16 +274,55 @@ describe('Lint 面板', () => {
     expect(修好).toHaveBeenCalledWith(expect.objectContaining({ rule: 'L008' }), { toggle: true })
   })
 
-  it('沒有單欄位修法的那幾條不放假按鈕', () => {
+  it('完全沒有修法的那幾條不放假按鈕', () => {
     // 按下去只會說「這個還沒做」的按鈕，比沒有按鈕更糟。
     store.snapshot = 假快照([列('c1')], [
-      { rule: 'L002', severity: 'error', environment: 'env-prod', subject: 'r-1', end: null, detail: '走不通', fix: null },
+      { rule: 'L003', severity: 'error', environment: 'env-prod', subject: 'conn-9', end: null, detail: '指向不存在的機器', fix: null },
     ])
     store.面板展開 = true
     const w = mount(LintPanel)
 
     expect(w.find('.list .fix').exists()).toBe(false)
-    expect(w.find('.list .act').text()).toContain('要改連線')
+    expect(w.find('.list .act').text()).toContain('要改接')
+  })
+
+  it('L001／L002 走的是「補連線」表單，不是就地填一格', () => {
+    // 這兩條是 lint 裡最重要的，之前畫面上只寫「要改連線」——
+    // 工具指著問題叫，卻沒給任何辦法。
+    store.snapshot = 假快照([列('c1')], [
+      {
+        rule: 'L002', severity: 'error', environment: 'env-prod', subject: 'r-cache',
+        end: null, detail: '從 api 走不到 redis',
+        fix: { addConnection: { relationship: 'r-cache' } },
+      },
+    ])
+    store.面板展開 = true
+    const w = mount(LintPanel)
+
+    expect(w.find('.list .fix').text()).toBe('補連線…')
+
+    w.find('.list .fix').trigger('click')
+    expect(store.新增連線中).toEqual({
+      environment: 'env-prod',
+      relationship: 'r-cache',
+      label: '從 api 走不到 redis',
+    })
+  })
+
+  it('補連線不會就地展開輸入框', () => {
+    // 它要開的是一張表單，不是一格。兩個都跑出來就是兩套 UI 在打架。
+    store.snapshot = 假快照([列('c1')], [
+      {
+        rule: 'L001', severity: 'error', environment: 'env-prod', subject: 'r-cache',
+        end: null, detail: '沒有任何實際連線',
+        fix: { addConnection: { relationship: 'r-cache' } },
+      },
+    ])
+    store.面板展開 = true
+    const w = mount(LintPanel)
+
+    w.find('.list .fix').trigger('click')
+    expect(w.find('.editor').exists()).toBe(false)
   })
 
   it('沒問題時說一句話而不是空清單', () => {

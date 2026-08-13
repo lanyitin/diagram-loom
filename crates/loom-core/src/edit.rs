@@ -83,6 +83,23 @@ pub enum Edit {
         connection: Id,
         kind: ConnectionKind,
     },
+    /// L001／L002 的修法：新增一條環境層連線。
+    ///
+    /// `id` 由 [`crate::connect::propose`] 先發好，不是在這裡產生——
+    /// 這樣 `apply` 是決定性的：預覽算出來的就是套用後真正的樣子，
+    /// 復原重做也會重播出同一條連線，而不是每次換一個 UUID。
+    ///
+    /// 兩端是完整的 [`Endpointing`]，由 [`crate::connect::choices`] 提供，
+    /// 前端當不透明值原樣帶回來。
+    AddConnection {
+        environment: Id,
+        id: Id,
+        serves: Id,
+        purpose: String,
+        kind: ConnectionKind,
+        from: Endpointing,
+        to: Endpointing,
+    },
     /// 刪掉一條環境層連線。
     ///
     /// 這是目前唯一的刪除操作，而且刪除一定要先看 [`preview`]——
@@ -99,6 +116,7 @@ impl Edit {
             Edit::SetExpect { .. } => "修改期望數量",
             Edit::SetStandalone { .. } => "標記刻意獨立",
             Edit::SetConnectionKind { .. } => "修改連線種類",
+            Edit::AddConnection { .. } => "新增連線",
             Edit::DeleteConnection { .. } => "刪除連線",
         }
     }
@@ -118,6 +136,8 @@ pub enum EditError {
     },
     /// 這條規則沒有「填一格就好」的修法。
     NoFix(Rule),
+    /// 這個 id 已經有一條連線了。
+    AlreadyExists(Id),
 }
 
 impl fmt::Display for EditError {
@@ -132,6 +152,7 @@ impl fmt::Display for EditError {
                 f,
                 "連線 {connection} 的{side}端不是萬用字元，沒有期望數量可以設定"
             ),
+            EditError::AlreadyExists(id) => write!(f, "{id} 這條連線已經存在"),
             EditError::NoFix(rule) => {
                 write!(f, "{} 沒有填一格就能解決的修法", rule.code())
             }
@@ -256,6 +277,32 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             Ok(())
         }
 
+        Edit::AddConnection {
+            environment,
+            id,
+            serves,
+            purpose,
+            kind,
+            from,
+            to,
+        } => {
+            let env = 找環境(project, environment)?;
+            // 同一個 id 不能加兩次。會走到這裡多半是重播（復原後又重做），
+            // 安靜地加第二條就會變成兩條一模一樣的連線。
+            if env.connections.iter().any(|c| &c.id == id) {
+                return Err(EditError::AlreadyExists(id.clone()));
+            }
+            env.connections.push(crate::environment::Connection {
+                id: id.clone(),
+                serves: serves.clone(),
+                purpose: purpose.trim().to_string(),
+                kind: *kind,
+                from: from.clone(),
+                to: to.clone(),
+            });
+            Ok(())
+        }
+
         Edit::DeleteConnection {
             environment,
             connection,
@@ -330,6 +377,11 @@ pub enum Fix {
     Count { suggestion: Option<u32> },
     /// 一個開關（standalone）。
     Toggle { label: String },
+    /// 開一張「新增連線」的表單。**這個沒辦法在 lint 面板上填一格解決**，
+    /// 但它仍然是個修法——所以它有值，不是 `None`。
+    ///
+    /// `relationship` 是要補的那條契約，前端拿它去問 `propose_connection`。
+    AddConnection { relationship: Id },
 }
 
 /// 使用者在 [`Fix`] 的控制項裡填的東西。
@@ -411,8 +463,27 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
         Rule::L008 => Some(Fix::Toggle {
             label: "刻意獨立（冷備機等）".into(),
         }),
-        Rule::L001 | Rule::L002 | Rule::L003 => None,
+        // L001／L002 的 subject 就是那條契約，補一條連線就修好了。
+        // 它跟其他四種的差別只在「要開一張表單」，不是「沒救」。
+        Rule::L001 | Rule::L002 => {
+            是契約嗎(project, &finding.subject).then(|| Fix::AddConnection {
+                relationship: finding.subject.clone(),
+            })
+        }
+        // L003 是「指到了不存在的東西」，要改的是既有連線的接法，
+        // 不是新增一條。留給之後的「改接」功能。
+        Rule::L003 => None,
     }
+}
+
+/// L001 也會報在 Container 與外部系統上（「這個服務在 prod 一台都沒建」），
+/// 那種要建機器，不是補連線。
+fn 是契約嗎(project: &Project, subject: &Id) -> bool {
+    project
+        .logical
+        .relationships
+        .iter()
+        .any(|r| &r.id == subject)
 }
 
 /// L004 的 detail 裡已經有「實際符合 N 個」，但那是給人看的字串。

@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
+import AddConnection from './components/AddConnection.vue'
 import CloseGuard from './components/CloseGuard.vue'
 import DeleteConfirm from './components/DeleteConfirm.vue'
 import EnvPicker from './components/EnvPicker.vue'
@@ -132,6 +133,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
     </section>
 
     <ImportWizard v-if="store.匯入中" />
+    <AddConnection />
     <DeleteConfirm />
     <CloseGuard />
   </div>

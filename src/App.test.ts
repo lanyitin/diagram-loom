@@ -15,6 +15,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import App from './App.vue'
 import { useProject } from './lib/store'
+import { commands } from './lib/bindings'
 import type { Snapshot } from './lib/model'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
@@ -37,6 +38,8 @@ vi.mock('./lib/bindings', () => ({
     applyFix: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
+    proposeConnection: vi.fn(),
+    connectionChoices: vi.fn(),
   },
 }))
 
@@ -186,6 +189,19 @@ describe('視窗組裝', () => {
     const w = mount(App)
 
     expect(w.find('.notice').exists()).toBe(true)
+  })
+
+  it('補連線的表單跟歡迎畫面互不影響', () => {
+    store.snapshot = 假快照()
+    vi.mocked(commands.proposeConnection).mockResolvedValue({
+      status: 'ok',
+      data: { id: 'c', serves: 'r-1', purpose: '', from: null, to: null, notes: [] },
+    } as never)
+    vi.mocked(commands.connectionChoices).mockResolvedValue({ status: 'ok', data: [] } as never)
+    store.新增連線中 = { environment: 'env-prod', relationship: 'r-1', label: 'x' }
+    const w = mount(App)
+    expect(w.find('.welcome').exists()).toBe(false)
+    expect(w.findComponent({ name: 'AddConnection' }).exists()).toBe(true)
   })
 
   it('刪除確認框跟歡迎畫面互不影響', () => {
