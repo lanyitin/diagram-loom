@@ -161,13 +161,16 @@ describe('視窗組裝', () => {
     expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
   })
 
-  it('切到連線表時矩陣要收起來', () => {
+  it('連線是資源底下的一個分頁，不是另一個檢視', () => {
+    // 連線跟其他資源一樣是「這個專案裡有什麼」。分兩個地方放
+    // 只是讓人多記一件事，所以它住在資源檢視裡面。
     store.snapshot = fakeSnapshot()
-    store.view = '連線表'
+    store.view = '資源'
+    store.resourceTab = '連線'
     const w = mount(App)
     expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
+    expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
     expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(true)
-    expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(false)
   })
 
   it('沒開專案時不能按儲存與匯入', () => {
@@ -270,7 +273,8 @@ describe('視窗組裝', () => {
   it('聚焦時工具列會說出來，而且按一下就沒', async () => {
     // 看不見的篩選會讓使用者以為表格漏了東西。
     store.snapshot = fakeSnapshot()
-    store.view = '連線表'
+    store.view = '資源'
+    store.resourceTab = '連線'
     store.focus = { subject: 'conn-1', label: 'L006 redis-01／client-port 缺少位址' }
     const w = mount(App)
 
@@ -282,7 +286,8 @@ describe('視窗組裝', () => {
 
   it('聚焦到沒有對應列的東西時講一句話，不是留一片空白', () => {
     store.snapshot = fakeSnapshot()
-    store.view = '連線表'
+    store.view = '資源'
+    store.resourceTab = '連線'
     store.focus = { subject: '邏輯層的東西', label: 'L007 …' }
     const w = mount(App)
 

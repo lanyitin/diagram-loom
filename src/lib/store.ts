@@ -15,11 +15,17 @@ import type {
   Snapshot,
 } from './model'
 
-type view = '覆蓋矩陣' | '連線表' | '資源' | '圖'
+type view = '覆蓋矩陣' | '資源' | '圖'
 
 interface State {
   snapshot: Snapshot | null
   view: view
+  /**
+   * 資源檢視停在哪一個分頁（分頁的標題）。
+   *
+   * 記在 store 而不是元件裡，因為 **lint 面板要能指定跳到「連線」那一頁**。
+   */
+  resourceTab: string | null
   panelOpen: boolean
   importing: boolean
   /** 使用者勾選要比對哪幾個環境。空陣列代表「全部」。 */
@@ -101,6 +107,7 @@ export const useProject = defineStore('project', {
   state: (): State => ({
     snapshot: null,
     view: '覆蓋矩陣',
+    resourceTab: null,
     panelOpen: false,
     importing: false,
     selectedEnvironments: [],

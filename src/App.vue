@@ -6,7 +6,6 @@ import { useProject } from './lib/store'
 import { SCALES, apply as applyScale, load as loadScale, type Scale } from './lib/ui'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import DiagramView from './components/DiagramView.vue'
-import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
 import AddInstances from './components/AddInstances.vue'
 import AgentPanel from './components/AgentPanel.vue'
@@ -146,7 +145,7 @@ onUnmounted(() => {
       <div class="toolbar">
         <div class="seg">
           <button
-            v-for="v in (['覆蓋矩陣', '連線表', '資源', '圖'] as const)" :key="v"
+            v-for="v in (['覆蓋矩陣', '資源', '圖'] as const)" :key="v"
             :class="{ on: store.view === v }"
             @click="store.view = v"
           >{{ v }}</button>
@@ -154,7 +153,7 @@ onUnmounted(() => {
         <!-- 搜尋與篩選是表格的東西。圖上沒有「列」可以篩，留著只會讓人
              以為打了字圖會跟著變。 -->
         <template v-if="store.view !== '圖'">
-          <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
+          <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋名稱、位址或用途…'">
           <label class="toggle">
             <input v-model="store.onlyProblems" type="checkbox">
             只看有問題
@@ -164,7 +163,7 @@ onUnmounted(() => {
 
         <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
              表格漏了東西，所以它必須寫在畫面上，而且一鍵拿得掉。 -->
-        <button v-if="store.focus && store.view === '連線表'" class="focus" @click="store.focus = null">
+        <button v-if="store.focus && store.view === '資源'" class="focus" @click="store.focus = null">
           <span class="mono">{{ store.focus.label }}</span>
           <span class="x">✕</span>
         </button>
@@ -176,7 +175,7 @@ onUnmounted(() => {
           </template>
           <!-- 圖是一個環境一張，數「幾條連線」在這裡沒有意義。 -->
           <template v-else-if="store.view === '圖'">一張圖只畫一個環境</template>
-          <template v-else>
+          <template v-else-if="store.resourceTab === '連線'">
             {{ store.visibleRows.length }} / {{ store.rows.length }} 條連線
           </template>
         </span>
@@ -184,12 +183,11 @@ onUnmounted(() => {
 
       <!-- 聚焦到一項邏輯層的發現時，連線表本來就不會有列。
            留一片空白會讓人以為工具壞了，所以講清楚。 -->
-      <p v-if="store.focus && store.view === '連線表' && store.visibleRows.length === 0" class="notice">
+      <p v-if="store.focus && store.view === '資源' && store.resourceTab === '連線' && store.visibleRows.length === 0" class="notice">
         這一項不對應到任何一條實際連線——它是邏輯層的問題，或是那個元素根本沒被任何連線碰到。
       </p>
 
       <CoverageMatrix v-if="store.view === '覆蓋矩陣'" />
-      <ConnectionTable v-else-if="store.view === '連線表'" />
       <DiagramView v-else-if="store.view === '圖'" />
       <ResourceView v-else />
 

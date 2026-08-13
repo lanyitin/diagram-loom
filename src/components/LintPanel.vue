@@ -8,7 +8,7 @@
  * # 為什麼可以點
  *
  * 「L004 萬用字元期望 4 個」告訴你有問題，但沒告訴你在哪。
- * 點一下就跳到那個環境的連線表並且只留有問題的列——
+ * 點一下就跳到那個環境的連線分頁並且只留有問題的列——
  * 從「知道有錯」到「看到那一列」不該需要自己找。
  *
  * # 為什麼可以就地修
@@ -65,7 +65,8 @@ function openAddInstances(f: Finding) {
 }
 
 function jumpTo(f: Finding) {
-  store.view = '連線表'
+  store.view = '資源'
+  store.resourceTab = '連線'
   store.search = ''
   store.onlyProblems = false
   store.focus = { subject: f.subject, label: `${f.rule} ${f.detail}` }

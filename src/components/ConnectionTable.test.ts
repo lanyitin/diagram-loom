@@ -159,13 +159,14 @@ describe('Lint 面板', () => {
     expect(w.findAll('.list tbody tr')).toHaveLength(2)
   })
 
-  it('點一項會跳到那個環境的連線表，並聚焦到那一項本身', () => {
+  it('點一項會跳到那個環境的連線分頁，並聚焦到那一項本身', () => {
     // 「知道有錯」到「看到那一列」之間不該需要自己找。
     store.panelOpen = true
     const w = mount(LintPanel)
     w.findAll('.list tbody .detail')[1]!.trigger('click')
 
-    expect(store.view).toBe('連線表')
+    expect(store.view).toBe('資源')
+    expect(store.resourceTab).toBe('連線')
     expect(store.selectedEnvironments).toEqual(['env-dev'])
     expect(store.search).toBe('')
     expect(store.focus?.subject).toBe('conn-2')

@@ -171,3 +171,133 @@ describe('資源檢視', () => {
     expect(commands.resourceTables).toHaveBeenCalled()
   })
 })
+
+describe('排序與搜尋', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    vi.mocked(commands.resourceTables).mockResolvedValue({
+      status: 'ok', data: [containerTable, nodeTable],
+    } as never)
+  })
+
+  async function openIt() {
+    const w = mount(ResourceView)
+    await flushPromises()
+    return w
+  }
+
+  const firstColumn = (w: ReturnType<typeof mount>) =>
+    w.findAll('tbody tr').map((r) => r.findAll('td')[1]!.text())
+
+  it('點欄位標題會排序', async () => {
+    const w = await openIt()
+    expect(firstColumn(w)).toEqual(['redis', 'order-api'])
+
+    await w.findAll('thead th.sortable')[0]!.trigger('click')
+    expect(firstColumn(w)).toEqual(['order-api', 'redis'])
+  })
+
+  it('再點一次倒過來，第三次回到原始順序', async () => {
+    // 一定要有辦法回到原始順序：Rust 給的順序是有意義的。
+    const w = await openIt()
+    const header = () => w.findAll('thead th.sortable')[0]!
+
+    await header().trigger('click')
+    await header().trigger('click')
+    expect(firstColumn(w)).toEqual(['redis', 'order-api'])
+    await header().trigger('click')
+    expect(firstColumn(w)).toEqual(['redis', 'order-api'])
+    expect(header().attributes('aria-sort')).toBe('none')
+  })
+
+  it('排序狀態讓螢幕閱讀器讀得到，而不是只有一個箭頭', async () => {
+    const w = await openIt()
+    await w.findAll('thead th.sortable')[0]!.trigger('click')
+    expect(w.findAll('thead th.sortable')[0]!.attributes('aria-sort')).toBe('ascending')
+  })
+
+  it('換一頁就把排序重設', async () => {
+    // 欄位不一樣，沿用上一頁的「第幾欄」沒有意義。
+    const w = await openIt()
+    await w.findAll('thead th.sortable')[0]!.trigger('click')
+    await w.findAll('.tabs button')[1]!.trigger('click')
+    expect(w.findAll('thead th.sortable')[0]!.attributes('aria-sort')).toBe('none')
+  })
+
+  it('上面那個搜尋框對資源也有效', async () => {
+    store.search = 'order'
+    const w = await openIt()
+    expect(firstColumn(w)).toEqual(['order-api'])
+  })
+
+  it('篩到一列都不剩時，說清楚不是東西不見了', async () => {
+    // 「本來就是空的」跟「被你篩掉了」是兩件事。混在一起會讓人以為資料掉了。
+    store.search = '沒有這種東西'
+    const w = await openIt()
+    expect(w.find('.empty').text()).toContain('本來有 2 列')
+  })
+})
+
+/** 分頁列裡也有「＋ 新增」那顆，所以要照名字挑，不能用位置。 */
+function connectionTab(w: ReturnType<typeof mount>) {
+  return w.findAll('.tabs > button').find((b) => b.text().startsWith('連線'))!
+}
+
+describe('連線分頁', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    vi.mocked(commands.resourceTables).mockResolvedValue({
+      status: 'ok', data: [containerTable, nodeTable],
+    } as never)
+  })
+
+  async function openIt() {
+    const w = mount(ResourceView)
+    await flushPromises()
+    return w
+  }
+
+  it('連線是最後一個分頁', async () => {
+    const w = await openIt()
+    expect(connectionTab(w).exists()).toBe(true)
+  })
+
+  it('預設不是停在連線那一頁', async () => {
+    // 從零開始的人要先建服務與契約，連線是後面的事。
+    const w = await openIt()
+    expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(false)
+  })
+
+  it('新增連線先問是實現哪一條契約', async () => {
+    // 沒有契約的連線 lint 會叫（L011），所以這裡不給「不選」這個選項。
+    store.snapshot!.project.logical.relationships = [
+      { id: 'r-1', slug: 'app-連-redis' },
+    ] as never
+    const w = await openIt()
+    await connectionTab(w).trigger('click')
+    await w.find('button.add').trigger('click')
+
+    expect(w.find('[role="dialog"]').exists()).toBe(true)
+    await w.find('.box .primary').trigger('click')
+    expect(store.addingConnection).toEqual({
+      environment: 'env-prod', relationship: 'r-1', label: 'app-連-redis',
+    })
+  })
+
+  it('一條契約都沒有時，說要先去哪裡建', async () => {
+    // 給一個空下拉選單等於讓人卡住，而且看不出卡在哪。
+    const w = await openIt()
+    await connectionTab(w).trigger('click')
+    await w.find('button.add').trigger('click')
+    expect(w.find('.box').text()).toContain('還沒有')
+    expect(w.find('.box .primary').exists()).toBe(false)
+  })
+})
