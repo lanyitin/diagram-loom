@@ -1,0 +1,6 @@
+id: p-通路系統
+slug: 通路系統
+name: 網路通路系統
+environments:
+- prod
+- test

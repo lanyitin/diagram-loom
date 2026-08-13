@@ -1,0 +1,55 @@
+relationships:
+- id: r-apache-連-gateway
+  slug: apache-連-gateway
+  purpose: 反向代理轉送請求
+  from: !container c-apache
+  to: !container c-gateway
+  to_endpoint: e-gateway
+- id: r-gateway-連-channel
+  slug: gateway-連-channel
+  purpose: 解析後把 payload 轉給通路服務
+  from: !container c-gateway
+  to: !container c-channel
+  to_endpoint: e-channel
+- id: r-gateway-連-consul
+  slug: gateway-連-consul
+  purpose: 服務探索：查詢 Channel Service 位置
+  from: !container c-gateway
+  to: !container c-consul
+  to_endpoint: e-consul
+- id: r-channel-連-consul
+  slug: channel-連-consul
+  purpose: 服務註冊
+  from: !container c-channel
+  to: !container c-consul
+  to_endpoint: e-consul
+- id: r-channel-連-redis
+  slug: channel-連-redis
+  purpose: Session 存取
+  from: !container c-channel
+  to: !container c-redis
+  to_endpoint: e-redis
+- id: r-channel-連-common
+  slug: channel-連-common
+  purpose: 呼叫共通服務（經 API Gateway）
+  from: !container c-channel
+  to: !container c-common
+  to_endpoint: e-common
+- id: r-gateway-連-db
+  slug: gateway-連-db
+  purpose: 讀寫資料庫
+  from: !container c-gateway
+  to: !container c-db
+  to_endpoint: e-db
+- id: r-channel-連-db
+  slug: channel-連-db
+  purpose: 讀寫資料庫
+  from: !container c-channel
+  to: !container c-db
+  to_endpoint: e-db
+- id: r-common-連-db
+  slug: common-連-db
+  purpose: 讀寫資料庫
+  from: !container c-common
+  to: !container c-db
+  to_endpoint: e-db

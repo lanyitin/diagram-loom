@@ -1,0 +1,9 @@
+people:
+- id: p-使用者
+  slug: end-user
+  name: End User
+systems:
+- id: s-通路
+  slug: 通路系統
+  name: 網路通路系統
+  external: false

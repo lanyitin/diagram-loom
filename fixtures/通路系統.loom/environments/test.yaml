@@ -1,0 +1,183 @@
+id: env-test
+slug: test
+name: 測試環境
+nodes:
+- id: n-test-dc-測試機房
+  slug: dc-測試機房
+  kind: physical
+  children:
+  - id: n-test-vm-t-b01
+    slug: vm-t-b01
+    kind: virtual-machine
+    instances:
+    - id: i-test-apache-01
+      slug: apache-01
+      container: c-apache
+      endpoints:
+      - id: ep-test-apache-01
+        slug: http
+        def: e-apache
+        protocol: tcp
+        address: 10.9.1.11:8080
+  - id: n-test-vm-t-c01
+    slug: vm-t-c01
+    kind: virtual-machine
+    instances:
+    - id: i-test-gateway-01
+      slug: gateway-01
+      container: c-gateway
+      endpoints:
+      - id: ep-test-gateway-01
+        slug: http
+        def: e-gateway
+        protocol: tcp
+        address: 10.9.2.11:8080
+  - id: n-test-vm-t-d01
+    slug: vm-t-d01
+    kind: virtual-machine
+    instances:
+    - id: i-test-channel-01
+      slug: channel-01
+      container: c-channel
+      endpoints:
+      - id: ep-test-channel-01
+        slug: http
+        def: e-channel
+        protocol: tcp
+        address: 10.9.3.11:8080
+  - id: n-test-vm-t-f01
+    slug: vm-t-f01
+    kind: virtual-machine
+    instances:
+    - id: i-test-common-01
+      slug: common-01
+      container: c-common
+      endpoints:
+      - id: ep-test-common-01
+        slug: http
+        def: e-common
+        protocol: tcp
+        address: 10.9.4.11:8080
+  - id: n-test-vm-t-g01
+    slug: vm-t-g01
+    kind: virtual-machine
+    instances:
+    - id: i-test-consul-main-01
+      slug: consul-main-01
+      container: c-consul
+      endpoints:
+      - id: ep-test-consul-main-01
+        slug: http-api
+        def: e-consul
+        protocol: tcp
+        address: 10.9.5.11:8500
+  - id: n-test-vm-t-h
+    slug: vm-t-h
+    kind: virtual-machine
+    instances:
+    - id: i-test-db-01
+      slug: db-01
+      container: c-db
+      endpoints:
+      - id: ep-test-db-01
+        slug: jdbc
+        def: e-db
+        protocol: jdbc
+        address: jdbc:postgresql://10.9.9.10:5432/channel
+connections:
+- id: conn-test-01
+  serves: r-apache-連-gateway
+  purpose: 反向代理轉送給 Gateway
+  from: !instance
+    target: !pattern
+      slug_pattern: apache-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: gateway-*
+      expect: 1
+    endpoint: e-gateway
+- id: conn-test-02
+  serves: r-gateway-連-consul
+  purpose: 查詢 Channel Service 的位置
+  from: !instance
+    target: !pattern
+      slug_pattern: gateway-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: consul-*
+      expect: 1
+    endpoint: e-consul
+- id: conn-test-03
+  serves: r-channel-連-consul
+  purpose: 啟動時註冊自己
+  from: !instance
+    target: !pattern
+      slug_pattern: channel-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: consul-*
+      expect: 1
+    endpoint: e-consul
+- id: conn-test-04
+  serves: r-gateway-連-channel
+  purpose: 轉送解析後的 payload
+  from: !instance
+    target: !pattern
+      slug_pattern: gateway-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: channel-*
+      expect: 1
+    endpoint: e-channel
+- id: conn-test-05
+  serves: r-channel-連-common
+  purpose: 呼叫共通服務
+  from: !instance
+    target: !pattern
+      slug_pattern: channel-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: common-*
+      expect: 2
+    endpoint: e-common
+- id: conn-test-06
+  serves: r-gateway-連-db
+  purpose: 讀寫資料庫
+  from: !instance
+    target: !pattern
+      slug_pattern: gateway-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: db-*
+      expect: 1
+    endpoint: e-db
+- id: conn-test-07
+  serves: r-channel-連-db
+  purpose: 讀寫資料庫
+  from: !instance
+    target: !pattern
+      slug_pattern: channel-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: db-*
+      expect: 1
+    endpoint: e-db
+- id: conn-test-08
+  serves: r-common-連-db
+  purpose: 讀寫資料庫
+  from: !instance
+    target: !pattern
+      slug_pattern: common-*
+      expect: 1
+  to: !instance
+    target: !pattern
+      slug_pattern: db-*
+      expect: 1
+    endpoint: e-db

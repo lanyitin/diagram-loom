@@ -1,0 +1,57 @@
+containers:
+- id: c-apache
+  slug: apache
+  name: Apache 反向代理
+  system: s-通路
+  endpoints:
+  - id: e-apache
+    slug: http
+    protocol: tcp
+- id: c-gateway
+  slug: gateway
+  name: Gateway Service
+  system: s-通路
+  endpoints:
+  - id: e-gateway
+    slug: http
+    protocol: tcp
+- id: c-channel
+  slug: channel
+  name: Channel Service
+  system: s-通路
+  endpoints:
+  - id: e-channel
+    slug: http
+    protocol: tcp
+- id: c-common
+  slug: common
+  name: 共通服務
+  system: s-通路
+  endpoints:
+  - id: e-common
+    slug: http
+    protocol: tcp
+- id: c-consul
+  slug: consul
+  name: Consul
+  system: s-通路
+  endpoints:
+  - id: e-consul
+    slug: http-api
+    protocol: tcp
+- id: c-redis
+  slug: redis
+  name: Redis
+  system: s-通路
+  endpoints:
+  - id: e-redis
+    slug: client-port
+    protocol: tcp
+- id: c-db
+  slug: db
+  name: 資料庫
+  system: s-通路
+  endpoints:
+  - id: e-db
+    slug: jdbc
+    protocol: jdbc

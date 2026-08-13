@@ -228,3 +228,46 @@ fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
         store.paths()
     );
 }
+
+#[test]
+fn 真實架構樣本可以完整讀回來() {
+    // `fixtures/通路系統.loom` 是照一個真實系統的架構建的（31 個落地、19 條連線、
+    // 兩層巢狀站點、一台 VM 跑兩個服務）。假素材通常太乾淨，這份用來確認
+    // YAML 佈局撐得住現實的形狀。
+    //
+    // 順便釘住它的內容：如果哪天改了模型讓這份樣本的 lint 結果變了，
+    // 這裡會提醒你那是不是預期中的。
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/通路系統.loom");
+    if !root.exists() {
+        // 樣本沒產生過就跳過——它不是編譯產物，靠 mise run fixture:real 生成。
+        return;
+    }
+
+    let project = loom_core::repository::load_from_dir(&root).expect("讀得回來");
+
+    assert_eq!(project.logical.containers.len(), 7);
+    assert_eq!(project.logical.relationships.len(), 9);
+    assert_eq!(project.environments.len(), 2);
+
+    let 落地數: usize = project.environments[0]
+        .nodes
+        .iter()
+        .map(|n| n.instances_recursive().len())
+        .sum();
+    assert_eq!(落地數, 25, "prod 應該有 25 個落地（含兩層巢狀站點底下的）");
+
+    let found: Vec<String> = loom_core::lint::lint(&project)
+        .iter()
+        .map(|f| format!("{} {}", f.rule.code(), f.subject))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "L001 c-redis".to_string(),
+            "L001 r-channel-連-redis".to_string(),
+            "L004 conn-test-05".to_string(),
+        ],
+        "prod 必須完全乾淨，只有 test 環境刻意留的三個洞"
+    );
+}
