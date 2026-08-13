@@ -1,4 +1,10 @@
 relationships:
+- id: r-使用者-連-apache
+  slug: 使用者-連-apache
+  purpose: 使用者從瀏覽器連進系統
+  from: !person p-使用者
+  to: !container c-apache
+  to_endpoint: e-apache
 - id: r-apache-連-gateway
   slug: apache-連-gateway
   purpose: 反向代理轉送請求

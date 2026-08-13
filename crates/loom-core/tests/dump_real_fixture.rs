@@ -34,8 +34,8 @@
 
 use loom_core::Project;
 use loom_core::environment::{
-    Connection, ContainerInstance, DeploymentNode, Endpoint, Endpointing, Environment,
-    InfrastructureNode, InstanceRef, NodeKind, SoftwareSystemInstance,
+    Connection, ConnectionKind, ContainerInstance, DeploymentNode, Endpoint, Endpointing,
+    Environment, InfrastructureNode, InstanceRef, NodeKind, SoftwareSystemInstance,
 };
 use loom_core::id::Id;
 use loom_core::logical::{
@@ -99,11 +99,6 @@ fn logical() -> Logical {
     };
 
     Logical {
-        // ⚠️ 限制 A：Person 宣告得出來，但接不上任何連線。
-        //
-        // `RelationshipEnd` 只有 `Container` 與 `System`，所以
-        // 「使用者 → Apache 反向代理」這條在 C4 裡再正常不過的關係，
-        // 這個模型表達不出來。進入點的流量只能從 F5 開始畫。
         people: vec![Person {
             id: Id::new("p-使用者"),
             slug: "end-user".into(),
@@ -118,6 +113,16 @@ fn logical() -> Logical {
         }],
         containers,
         relationships: vec![
+            // 使用者是流量的起點。這條在 C4 Context 圖上最常見，
+            // 有了 `RelationshipEnd::Person` 才表達得出來。
+            Relationship {
+                id: 契約("使用者-連-apache"),
+                slug: "使用者-連-apache".into(),
+                purpose: "使用者從瀏覽器連進系統".into(),
+                from: RelationshipEnd::Person(Id::new("p-使用者")),
+                to: RelationshipEnd::Container(Id::new("c-apache")),
+                to_endpoint: 接點("apache"),
+            },
             連("apache-連-gateway", "反向代理轉送請求", "apache", "gateway"),
             連(
                 "gateway-連-channel",
@@ -181,15 +186,12 @@ fn 機器(env: &str, slug: &str, instances: Vec<ContainerInstance>) -> Deploymen
     }
 }
 
-/// ⚠️ 限制 B：`NodeKind` 沒有「站點／機房」。
-///
-/// 主中心與異地是站點，不是實體機、不是 VM、也不是容器。只能勉強標成
-/// `Physical`，畫成 Deployment 圖時會被當成一台實體機。
+/// 機房。`NodeKind::Site` 是裝別的節點用的，本身不跑東西。
 fn 站點(env: &str, slug: &str, 機器們: Vec<DeploymentNode>) -> DeploymentNode {
     DeploymentNode {
         id: Id::new(format!("n-{env}-{slug}")),
         slug: slug.into(),
-        kind: NodeKind::Physical,
+        kind: NodeKind::Site,
         children: 機器們,
         instances: vec![],
     }
@@ -239,11 +241,23 @@ impl 連線表 {
     }
 
     fn 加(&mut self, serves: &str, purpose: &str, from: Endpointing, to: Endpointing) {
+        self.加種類(serves, purpose, ConnectionKind::Primary, from, to);
+    }
+
+    fn 加種類(
+        &mut self,
+        serves: &str,
+        purpose: &str,
+        kind: ConnectionKind,
+        from: Endpointing,
+        to: Endpointing,
+    ) {
         self.n += 1;
         self.out.push(Connection {
             id: Id::new(format!("conn-{}-{:02}", self.env, self.n)),
             serves: 契約(serves),
             purpose: purpose.into(),
+            kind,
             from,
             to,
         });
@@ -266,15 +280,18 @@ impl 連線表 {
             從群(&format!("{來源}-dr-*"), 異),
             群(&format!("{目標}-dr-*"), 異, 目標),
         );
-        self.加(
+        // 標成 Fallback：一樣要建立、防火牆一樣要開，只是畫面上會區分開來。
+        self.加種類(
             serves,
             "跨中心備援：主中心 → 異地",
+            ConnectionKind::Fallback,
             從群(&format!("{來源}-main-*"), 主),
             群(&format!("{目標}-dr-*"), 異, 目標),
         );
-        self.加(
+        self.加種類(
             serves,
             "跨中心備援：異地 → 主中心",
+            ConnectionKind::Fallback,
             從群(&format!("{來源}-dr-*"), 異),
             群(&format!("{目標}-main-*"), 主, 目標),
         );
@@ -456,7 +473,15 @@ fn prod() -> Environment {
     let mut c = 連線表::new(e);
 
     c.加(
-        "apache-連-gateway",
+        "使用者-連-apache",
+        "使用者連上對外的 VIP",
+        Endpointing::Person {
+            person: Id::new("p-使用者"),
+        },
+        設備("f5-前台", Some("ep-f5-前台")),
+    );
+    c.加(
+        "使用者-連-apache",
         "F5 分流到反向代理",
         設備("f5-前台", Some("ep-f5-前台")),
         群("apache-*", 3, "apache"),
@@ -599,6 +624,14 @@ fn test_env() -> Environment {
     );
 
     let mut c = 連線表::new(e);
+    c.加(
+        "使用者-連-apache",
+        "使用者直接連反向代理（測試環境沒有 F5）",
+        Endpointing::Person {
+            person: Id::new("p-使用者"),
+        },
+        群("apache-*", 1, "apache"),
+    );
     c.加(
         "apache-連-gateway",
         "反向代理轉送給 Gateway",

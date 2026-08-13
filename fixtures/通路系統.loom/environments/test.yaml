@@ -4,7 +4,7 @@ name: 測試環境
 nodes:
 - id: n-test-dc-測試機房
   slug: dc-測試機房
-  kind: physical
+  kind: site
   children:
   - id: n-test-vm-t-b01
     slug: vm-t-b01
@@ -99,6 +99,16 @@ nodes:
         address: jdbc:postgresql://10.9.9.10:5432/channel
 connections:
 - id: conn-test-01
+  serves: r-使用者-連-apache
+  purpose: 使用者直接連反向代理（測試環境沒有 F5）
+  from: !person
+    person: p-使用者
+  to: !instance
+    target: !pattern
+      slug_pattern: apache-*
+      expect: 1
+    endpoint: e-apache
+- id: conn-test-02
   serves: r-apache-連-gateway
   purpose: 反向代理轉送給 Gateway
   from: !instance
@@ -110,7 +120,7 @@ connections:
       slug_pattern: gateway-*
       expect: 1
     endpoint: e-gateway
-- id: conn-test-02
+- id: conn-test-03
   serves: r-gateway-連-consul
   purpose: 查詢 Channel Service 的位置
   from: !instance
@@ -122,7 +132,7 @@ connections:
       slug_pattern: consul-*
       expect: 1
     endpoint: e-consul
-- id: conn-test-03
+- id: conn-test-04
   serves: r-channel-連-consul
   purpose: 啟動時註冊自己
   from: !instance
@@ -134,7 +144,7 @@ connections:
       slug_pattern: consul-*
       expect: 1
     endpoint: e-consul
-- id: conn-test-04
+- id: conn-test-05
   serves: r-gateway-連-channel
   purpose: 轉送解析後的 payload
   from: !instance
@@ -146,7 +156,7 @@ connections:
       slug_pattern: channel-*
       expect: 1
     endpoint: e-channel
-- id: conn-test-05
+- id: conn-test-06
   serves: r-channel-連-apigw
   purpose: 呼叫 API Gateway
   from: !instance
@@ -158,7 +168,7 @@ connections:
       slug_pattern: apigw-*
       expect: 1
     endpoint: e-apigw
-- id: conn-test-06
+- id: conn-test-07
   serves: r-apigw-連-common
   purpose: 轉送給共通服務
   from: !instance
@@ -170,7 +180,7 @@ connections:
       slug_pattern: common-*
       expect: 2
     endpoint: e-common
-- id: conn-test-07
+- id: conn-test-08
   serves: r-gateway-連-db
   purpose: 讀寫資料庫
   from: !instance
@@ -182,7 +192,7 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
-- id: conn-test-08
+- id: conn-test-09
   serves: r-channel-連-db
   purpose: 讀寫資料庫
   from: !instance
@@ -194,7 +204,7 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
-- id: conn-test-09
+- id: conn-test-10
   serves: r-common-連-db
   purpose: 讀寫資料庫
   from: !instance

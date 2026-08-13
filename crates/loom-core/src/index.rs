@@ -32,6 +32,8 @@ pub(crate) struct EnvIndex<'a> {
     serving: HashMap<&'a Id, Vec<&'a Connection>>,
     /// 邏輯連線的 id，用來認出「指向不存在的契約」的連線。
     known_relationships: HashSet<&'a Id>,
+    /// 邏輯層的人。人沒有落地，只能確認「這個 id 真的存在」。
+    known_people: HashSet<&'a Id>,
 }
 
 impl<'a> EnvIndex<'a> {
@@ -58,6 +60,7 @@ impl<'a> EnvIndex<'a> {
                 .iter()
                 .map(|r| &r.id)
                 .collect(),
+            known_people: project.logical.people.iter().map(|p| &p.id).collect(),
         }
     }
 
@@ -67,6 +70,10 @@ impl<'a> EnvIndex<'a> {
 
     pub fn knows_relationship(&self, id: &Id) -> bool {
         self.known_relationships.contains(id)
+    }
+
+    pub fn knows_person(&self, id: &Id) -> bool {
+        self.known_people.contains(id)
     }
 
     /// 服務某條邏輯連線的所有實際連線。

@@ -208,5 +208,7 @@ fn 目標規模(index: &EnvIndex<'_>, to: &Endpointing) -> (u32, Option<u32>) {
             } => (index.matching(slug_pattern).len() as u32, *expect),
         },
         Endpointing::Infra { .. } | Endpointing::System { .. } => (1, None),
+        // 人不是「幾台」，數量對它沒有意義。
+        Endpointing::Person { .. } => (0, None),
     }
 }

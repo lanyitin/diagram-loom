@@ -13,6 +13,11 @@ use crate::logical::Protocol;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum NodeKind {
+    /// 機房、園區、可用區——**裝別的節點用的**，本身不跑東西。
+    ///
+    /// C4 的 Deployment Node 本來就可巢狀，站點是它最常見的外層用法。
+    /// 沒有這個種類的話，「主中心」只能勉強標成實體機，畫出來會變成一台機器。
+    Site,
     Physical,
     VirtualMachine,
     LinuxContainer,
@@ -177,6 +182,12 @@ pub enum Endpointing {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         endpoint: Option<Id>,
     },
+    /// 真人。只會出現在**來源端**——使用者是流量的起點。
+    ///
+    /// 人沒有落地也沒有位址，所以這一端只指向邏輯層的
+    /// [`Person`](crate::logical::Person)，沒有 endpoint。
+    /// 「使用者從哪裡連過來」不是我們配置得到的東西。
+    Person { person: Id },
 }
 
 /// 環境層的一條實際連線。
@@ -190,8 +201,35 @@ pub struct Connection {
     pub serves: Id,
     /// 用途說明。空白會觸發 L007。
     pub purpose: String,
+    /// 這是平常走的路，還是只在故障時走的。
+    ///
+    /// 「同中心優先、某中心出問題才交叉」這種安排會讓一條契約長出四條連線，
+    /// 其中兩條是備援。沒有這個欄位的話四條看起來一樣重，圖上會很吵，
+    /// 讀的人也分不出平常的資料流是哪幾條。
+    #[serde(default, skip_serializing_if = "ConnectionKind::is_primary")]
+    pub kind: ConnectionKind,
     pub from: Endpointing,
     pub to: Endpointing,
+}
+
+/// 連線是正常路徑還是備援路徑。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionKind {
+    /// 平常就在走的路。預設。
+    #[default]
+    Primary,
+    /// 只在故障時才走。**它一樣要被建立、防火牆一樣要開**——
+    /// 所以 lint 對它的要求跟正常路徑完全相同，差別只在畫面上的呈現。
+    Fallback,
+}
+
+impl ConnectionKind {
+    /// `skip_serializing_if` 用：預設值不必寫進 YAML。
+    fn is_primary(&self) -> bool {
+        matches!(self, ConnectionKind::Primary)
+    }
 }
 
 /// 一個部署環境。

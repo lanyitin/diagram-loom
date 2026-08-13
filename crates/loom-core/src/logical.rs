@@ -109,7 +109,7 @@ pub struct Relationship {
     pub to_endpoint: Id,
 }
 
-/// 邏輯連線的一端：自家的服務，或一整個外部系統。
+/// 邏輯連線的一端：自家的服務、一整個外部系統，或一個真人。
 ///
 /// 外部系統不拆成 Container，所以它整個就是一端。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +118,11 @@ pub struct Relationship {
 pub enum RelationshipEnd {
     Container(Id),
     System(Id),
+    /// 真人。**只該出現在來源端**——「使用者連上系統」是 C4 Context 圖
+    /// 最常見的關係，沒有它整條進入點的流量就少了最前面那一段。
+    ///
+    /// 人不需要被部署，所以 L001 不會要求它在每個環境都有落地。
+    Person(Id),
 }
 
 /// 邏輯層的全部內容。

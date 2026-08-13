@@ -4,7 +4,7 @@ name: 正式環境
 nodes:
 - id: n-prod-dc-主中心
   slug: dc-主中心
-  kind: physical
+  kind: site
   children:
   - id: n-prod-vm-b01
     slug: vm-b01
@@ -217,7 +217,7 @@ nodes:
         address: jdbc:postgresql://10.1.9.10:5432/channel
 - id: n-prod-dc-異地
   slug: dc-異地
-  kind: physical
+  kind: site
   children:
   - id: n-prod-vm-b03
     slug: vm-b03
@@ -367,7 +367,15 @@ infra:
     address: 10.1.0.20:8443
 connections:
 - id: conn-prod-01
-  serves: r-apache-連-gateway
+  serves: r-使用者-連-apache
+  purpose: 使用者連上對外的 VIP
+  from: !person
+    person: p-使用者
+  to: !infra
+    node: f5-前台
+    endpoint: ep-f5-前台
+- id: conn-prod-02
+  serves: r-使用者-連-apache
   purpose: F5 分流到反向代理
   from: !infra
     node: f5-前台
@@ -377,7 +385,7 @@ connections:
       slug_pattern: apache-*
       expect: 3
     endpoint: e-apache
-- id: conn-prod-02
+- id: conn-prod-03
   serves: r-apache-連-gateway
   purpose: 反向代理轉送給 Gateway
   from: !instance
@@ -389,7 +397,7 @@ connections:
       slug_pattern: gateway-*
       expect: 3
     endpoint: e-gateway
-- id: conn-prod-03
+- id: conn-prod-04
   serves: r-gateway-連-consul
   purpose: 查詢 Channel Service 的位置
   from: !instance
@@ -401,7 +409,7 @@ connections:
       slug_pattern: consul-*
       expect: 6
     endpoint: e-consul
-- id: conn-prod-04
+- id: conn-prod-05
   serves: r-channel-連-consul
   purpose: 啟動時註冊自己
   from: !instance
@@ -413,7 +421,7 @@ connections:
       slug_pattern: consul-*
       expect: 6
     endpoint: e-consul
-- id: conn-prod-05
+- id: conn-prod-06
   serves: r-gateway-連-channel
   purpose: 同中心優先（主中心）
   from: !instance
@@ -425,7 +433,7 @@ connections:
       slug_pattern: channel-main-*
       expect: 2
     endpoint: e-channel
-- id: conn-prod-06
+- id: conn-prod-07
   serves: r-gateway-連-channel
   purpose: 同中心優先（異地）
   from: !instance
@@ -437,9 +445,10 @@ connections:
       slug_pattern: channel-dr-*
       expect: 1
     endpoint: e-channel
-- id: conn-prod-07
+- id: conn-prod-08
   serves: r-gateway-連-channel
   purpose: 跨中心備援：主中心 → 異地
+  kind: fallback
   from: !instance
     target: !pattern
       slug_pattern: gateway-main-*
@@ -449,9 +458,10 @@ connections:
       slug_pattern: channel-dr-*
       expect: 1
     endpoint: e-channel
-- id: conn-prod-08
+- id: conn-prod-09
   serves: r-gateway-連-channel
   purpose: 跨中心備援：異地 → 主中心
+  kind: fallback
   from: !instance
     target: !pattern
       slug_pattern: gateway-dr-*
@@ -461,7 +471,7 @@ connections:
       slug_pattern: channel-main-*
       expect: 2
     endpoint: e-channel
-- id: conn-prod-09
+- id: conn-prod-10
   serves: r-channel-連-redis
   purpose: 讀寫 Session
   from: !instance
@@ -473,7 +483,7 @@ connections:
       slug_pattern: redis-*
       expect: 6
     endpoint: e-redis
-- id: conn-prod-10
+- id: conn-prod-11
   serves: r-channel-連-apigw
   purpose: 先送到 API Gateway 的 VIP
   from: !instance
@@ -483,7 +493,7 @@ connections:
   to: !infra
     node: f5-apigw
     endpoint: ep-f5-apigw
-- id: conn-prod-11
+- id: conn-prod-12
   serves: r-channel-連-apigw
   purpose: VIP 分流到 API Gateway Service
   from: !infra
@@ -493,7 +503,7 @@ connections:
       slug_pattern: apigw-*
       expect: 3
     endpoint: e-apigw
-- id: conn-prod-12
+- id: conn-prod-13
   serves: r-apigw-連-common
   purpose: 同中心優先（主中心）
   from: !instance
@@ -505,7 +515,7 @@ connections:
       slug_pattern: common-main-*
       expect: 2
     endpoint: e-common
-- id: conn-prod-13
+- id: conn-prod-14
   serves: r-apigw-連-common
   purpose: 同中心優先（異地）
   from: !instance
@@ -517,9 +527,10 @@ connections:
       slug_pattern: common-dr-*
       expect: 1
     endpoint: e-common
-- id: conn-prod-14
+- id: conn-prod-15
   serves: r-apigw-連-common
   purpose: 跨中心備援：主中心 → 異地
+  kind: fallback
   from: !instance
     target: !pattern
       slug_pattern: apigw-main-*
@@ -529,9 +540,10 @@ connections:
       slug_pattern: common-dr-*
       expect: 1
     endpoint: e-common
-- id: conn-prod-15
+- id: conn-prod-16
   serves: r-apigw-連-common
   purpose: 跨中心備援：異地 → 主中心
+  kind: fallback
   from: !instance
     target: !pattern
       slug_pattern: apigw-dr-*
@@ -541,7 +553,7 @@ connections:
       slug_pattern: common-main-*
       expect: 2
     endpoint: e-common
-- id: conn-prod-16
+- id: conn-prod-17
   serves: r-gateway-連-db
   purpose: 讀寫資料庫
   from: !instance
@@ -553,7 +565,7 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
-- id: conn-prod-17
+- id: conn-prod-18
   serves: r-channel-連-db
   purpose: 讀寫資料庫
   from: !instance
@@ -565,7 +577,7 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
-- id: conn-prod-18
+- id: conn-prod-19
   serves: r-common-連-db
   purpose: 讀寫資料庫
   from: !instance

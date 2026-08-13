@@ -18,6 +18,7 @@ export type {
   Cell,
   Change,
   ChangeKind,
+  ConnectionKind,
   Element,
   FindingView as Finding,
   Id,

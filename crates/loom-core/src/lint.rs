@@ -95,6 +95,8 @@ enum GraphNode {
     Instance(Id),
     Infra(Id),
     System(Id),
+    /// 真人。只會是路徑的起點，沒有下一跳。
+    Person(Id),
 }
 
 /// 檢查整個專案，回傳排序後的發現清單。
@@ -198,6 +200,20 @@ fn check_connections(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec
             });
         }
 
+        // 人住在邏輯層，`check_endpointing` 手上只有環境，所以在這裡查。
+        for side in [&conn.from, &conn.to] {
+            if let Endpointing::Person { person } = side
+                && !index.knows_person(person)
+            {
+                findings.push(Finding {
+                    rule: Rule::L003,
+                    environment: Some(env.id.clone()),
+                    subject: conn.id.clone(),
+                    detail: format!("連線指向不存在的 Person {person}"),
+                });
+            }
+        }
+
         check_endpointing(env, index, conn.id.clone(), &conn.from, findings);
         check_endpointing(env, index, conn.id.clone(), &conn.to, findings);
     }
@@ -281,6 +297,10 @@ fn check_endpointing(
                 }
             }
         },
+        // 人沒有落地也沒有位址，能檢查的只有「這個 Person 真的存在」——
+        // 那要看邏輯層，`check_endpointing` 手上只有環境，所以放在
+        // `check_connections` 裡做。這裡什麼都不用查。
+        Endpointing::Person { .. } => {}
         Endpointing::System { instance, endpoint } => match env.system_instance(instance) {
             None => findings.push(Finding {
                 rule: Rule::L003,
@@ -452,6 +472,8 @@ fn ends_to_nodes(
             .filter(|s| &s.system == sid)
             .map(|s| GraphNode::System(s.id.clone()))
             .collect(),
+        // 人不需要落地，所以不必去環境裡找——它本身就是圖上的一個點。
+        RelationshipEnd::Person(pid) => vec![GraphNode::Person(pid.clone())],
     }
 }
 
@@ -468,6 +490,7 @@ fn resolve(index: &EnvIndex<'_>, side: &Endpointing) -> Vec<GraphNode> {
         },
         Endpointing::Infra { node, .. } => vec![GraphNode::Infra(node.clone())],
         Endpointing::System { instance, .. } => vec![GraphNode::System(instance.clone())],
+        Endpointing::Person { person } => vec![GraphNode::Person(person.clone())],
     }
 }
 
@@ -518,7 +541,7 @@ fn check_orphan_instances(env: &Environment, index: &EnvIndex<'_>, findings: &mu
                     GraphNode::Instance(id) | GraphNode::System(id) => {
                         touched.insert(id);
                     }
-                    GraphNode::Infra(_) => {}
+                    GraphNode::Infra(_) | GraphNode::Person(_) => {}
                 }
             }
         }

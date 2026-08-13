@@ -41,6 +41,7 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
       <thead>
         <tr>
           <th class="sev" />
+          <th class="kind" />
           <th>契約</th>
           <th>來源</th>
           <th>目標</th>
@@ -50,9 +51,14 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in store.顯示的列" :key="row.id" :title="row.rules.join('、')">
+        <tr v-for="row in store.顯示的列" :key="row.id" :class="{ fallback: row.kind === 'fallback' }" :title="row.rules.join('、')">
           <td class="sev">
             <span v-if="row.severity" :class="['dot', row.severity]" />
+          </td>
+          <!-- 備援路徑要看得出不一樣，否則四條線一樣重，
+               讀的人分不出平常的資料流是哪幾條。 -->
+          <td class="kind">
+            <span v-if="row.kind === 'fallback'" class="fb" title="備援路徑：只在故障時走">備援</span>
           </td>
           <td class="mono">{{ row.servesSlug ?? row.serves }}</td>
           <td class="mono">{{ 端(row.from) }}</td>
@@ -68,7 +74,7 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
           <td class="muted">{{ row.purpose }}</td>
         </tr>
         <tr v-if="store.顯示的列.length === 0">
-          <td :colspan="7" class="empty muted">沒有符合條件的連線。</td>
+          <td :colspan="8" class="empty muted">沒有符合條件的連線。</td>
         </tr>
       </tbody>
     </table>
@@ -102,10 +108,21 @@ thead th {
 }
 
 tbody tr:hover td { background: var(--surface-2); }
+tbody tr.fallback td:not(.sev):not(.kind) { opacity: .62; }
 .right { text-align: right; }
 .empty { text-align: center; height: 96px; }
 
 .sev { width: 26px; padding-right: 0; }
+
+.kind { width: 44px; padding-left: 4px; padding-right: 4px; }
+.fb {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px dashed color-mix(in srgb, var(--ink-3) 70%, transparent);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .dot.error { background: var(--broken); }
 .dot.warning { background: var(--warn); }

@@ -388,6 +388,8 @@ fn import_row(
                 id: Id::generate(),
                 serves,
                 purpose,
+                // 試算表目前沒有欄位可以標備援路徑，一律當成正常路徑。
+                kind: Default::default(),
                 from: from_side,
                 to: to_side,
             });

@@ -213,6 +213,7 @@ pub fn connection(
         id: Id::new(id),
         serves: Id::new(serves),
         purpose: purpose.into(),
+        kind: Default::default(),
         from,
         to,
     }

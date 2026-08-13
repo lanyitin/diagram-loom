@@ -61,6 +61,16 @@ export type ChangeKind = "added" | "updated";
  */
 export type Connection = Connection_Serialize | Connection_Deserialize;
 
+/**  連線是正常路徑還是備援路徑。 */
+export type ConnectionKind = 
+/**  平常就在走的路。預設。 */
+"primary" | 
+/**
+ *  只在故障時才走。**它一樣要被建立、防火牆一樣要開**——
+ *  所以 lint 對它的要求跟正常路徑完全相同，差別只在畫面上的呈現。
+ */
+"fallback";
+
 /**
  *  環境層的一條實際連線。
  * 
@@ -72,6 +82,14 @@ export type Connection_Deserialize = {
 	serves: Id,
 	/**  用途說明。空白會觸發 L007。 */
 	purpose: string,
+	/**
+	 *  這是平常走的路，還是只在故障時走的。
+	 * 
+	 *  「同中心優先、某中心出問題才交叉」這種安排會讓一條契約長出四條連線，
+	 *  其中兩條是備援。沒有這個欄位的話四條看起來一樣重，圖上會很吵，
+	 *  讀的人也分不出平常的資料流是哪幾條。
+	 */
+	kind?: ConnectionKind,
 	from: Endpointing_Deserialize,
 	to: Endpointing_Deserialize,
 };
@@ -87,6 +105,14 @@ export type Connection_Serialize = {
 	serves: Id,
 	/**  用途說明。空白會觸發 L007。 */
 	purpose: string,
+	/**
+	 *  這是平常走的路，還是只在故障時走的。
+	 * 
+	 *  「同中心優先、某中心出問題才交叉」這種安排會讓一條契約長出四條連線，
+	 *  其中兩條是備援。沒有這個欄位的話四條看起來一樣重，圖上會很吵，
+	 *  讀的人也分不出平常的資料流是哪幾條。
+	 */
+	kind?: ConnectionKind,
 	from: Endpointing_Serialize,
 	to: Endpointing_Serialize,
 };
@@ -287,7 +313,7 @@ export type Endpointing_Deserialize = ({ instance: {
 	 *  來源端可為 `None`，表示由作業系統分配（ephemeral port）。
 	 */
 	endpoint?: Id | null,
-} }) & { infra?: never; system?: never } | ({ infra: {
+} }) & { infra?: never; person?: never; system?: never } | ({ infra: {
 	node: Id,
 	/**
 	 *  指向該設備上的具體 [`Endpoint`] id。
@@ -296,7 +322,7 @@ export type Endpointing_Deserialize = ({ instance: {
 	 *  它的 endpoint（VIP 位址）沒有 `EndpointDef` 可以指。
 	 */
 	endpoint?: Id | null,
-} }) & { instance?: never; system?: never } | 
+} }) & { instance?: never; person?: never; system?: never } | 
 /**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。 */
 ({ system: {
 	instance: Id,
@@ -305,7 +331,17 @@ export type Endpointing_Deserialize = ({ instance: {
 	 *  [`SoftwareSystem`](crate::logical::SoftwareSystem) 上）。
 	 */
 	endpoint?: Id | null,
-} }) & { infra?: never; instance?: never };
+} }) & { infra?: never; instance?: never; person?: never } | 
+/**
+ *  真人。只會出現在**來源端**——使用者是流量的起點。
+ * 
+ *  人沒有落地也沒有位址，所以這一端只指向邏輯層的
+ *  [`Person`](crate::logical::Person)，沒有 endpoint。
+ *  「使用者從哪裡連過來」不是我們配置得到的東西。
+ */
+({ person: {
+	person: Id,
+} }) & { infra?: never; instance?: never; system?: never };
 
 /**
  *  連線的一端。
@@ -339,7 +375,7 @@ export type Endpointing_Serialize = ({ instance: {
 	 *  來源端可為 `None`，表示由作業系統分配（ephemeral port）。
 	 */
 	endpoint?: Id | null,
-} }) & { infra?: never; system?: never } | ({ infra: {
+} }) & { infra?: never; person?: never; system?: never } | ({ infra: {
 	node: Id,
 	/**
 	 *  指向該設備上的具體 [`Endpoint`] id。
@@ -348,7 +384,7 @@ export type Endpointing_Serialize = ({ instance: {
 	 *  它的 endpoint（VIP 位址）沒有 `EndpointDef` 可以指。
 	 */
 	endpoint?: Id | null,
-} }) & { instance?: never; system?: never } | 
+} }) & { instance?: never; person?: never; system?: never } | 
 /**  外部系統。不支援萬用字元——一個外部系統在一個環境就是一個落地。 */
 ({ system: {
 	instance: Id,
@@ -357,7 +393,17 @@ export type Endpointing_Serialize = ({ instance: {
 	 *  [`SoftwareSystem`](crate::logical::SoftwareSystem) 上）。
 	 */
 	endpoint?: Id | null,
-} }) & { infra?: never; instance?: never };
+} }) & { infra?: never; instance?: never; person?: never } | 
+/**
+ *  真人。只會出現在**來源端**——使用者是流量的起點。
+ * 
+ *  人沒有落地也沒有位址，所以這一端只指向邏輯層的
+ *  [`Person`](crate::logical::Person)，沒有 endpoint。
+ *  「使用者從哪裡連過來」不是我們配置得到的東西。
+ */
+({ person: {
+	person: Id,
+} }) & { infra?: never; instance?: never; system?: never };
 
 /**  一個部署環境。 */
 export type Environment = Environment_Serialize | Environment_Deserialize;
@@ -518,7 +564,14 @@ export type Matrix = {
 };
 
 /**  運算載體的種類。 */
-export type NodeKind = "physical" | "virtual-machine" | "linux-container";
+export type NodeKind = 
+/**
+ *  機房、園區、可用區——**裝別的節點用的**，本身不跑東西。
+ * 
+ *  C4 的 Deployment Node 本來就可巢狀，站點是它最常見的外層用法。
+ *  沒有這個種類的話，「主中心」只能勉強標成實體機，畫出來會變成一台機器。
+ */
+"site" | "physical" | "virtual-machine" | "linux-container";
 
 /**  真人使用者。C4 的 `Person`，只出現在 Context 圖。 */
 export type Person = {
@@ -608,11 +661,18 @@ export type Relationship = {
 };
 
 /**
- *  邏輯連線的一端：自家的服務，或一整個外部系統。
+ *  邏輯連線的一端：自家的服務、一整個外部系統，或一個真人。
  * 
  *  外部系統不拆成 Container，所以它整個就是一端。
  */
-export type RelationshipEnd = ({ container: Id }) & { system?: never } | ({ system: Id }) & { container?: never };
+export type RelationshipEnd = ({ container: Id }) & { person?: never; system?: never } | ({ system: Id }) & { container?: never; person?: never } | 
+/**
+ *  真人。**只該出現在來源端**——「使用者連上系統」是 C4 Context 圖
+ *  最常見的關係，沒有它整條進入點的流量就少了最前面那一段。
+ * 
+ *  人不需要被部署，所以 L001 不會要求它在每個環境都有落地。
+ */
+({ person: Id }) & { container?: never; system?: never };
 
 /**  表格的一列。 */
 export type Row = {
@@ -623,6 +683,11 @@ export type Row = {
 	/**  契約的顯示名。找不到對應契約時是 `None`（那本身就是 L003）。 */
 	servesSlug: string | null,
 	purpose: string,
+	/**
+	 *  正常路徑還是備援路徑。畫面上用來區分——備援跟正常長得一樣的話，
+	 *  讀的人分不出平常的資料流是哪幾條。
+	 */
+	kind: ConnectionKind,
 	from: Side,
 	to: Side,
 	/**  這一列自己的嚴重度。沒問題時是 `None`。 */
@@ -673,7 +738,9 @@ export type SideKind =
 /**  F5 這類設備。 */
 "infra" | 
 /**  外部系統的落地。 */
-"system";
+"system" | 
+/**  真人。只會出現在來源端。 */
+"person";
 
 /**
  *  開一個專案之後，前端需要的所有東西一次給齊。

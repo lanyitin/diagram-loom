@@ -17,10 +17,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::Project;
-use crate::environment::{Endpointing, Environment, InstanceRef};
+use crate::environment::{ConnectionKind, Endpointing, Environment, InstanceRef};
 use crate::id::Id;
 use crate::index::EnvIndex;
 use crate::lint::{Rule, Severity, lint};
+use crate::logical::Logical;
 
 /// 連線的一端指向什麼。畫面上用不同的圖示區分。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +34,8 @@ pub enum SideKind {
     Infra,
     /// 外部系統的落地。
     System,
+    /// 真人。只會出現在來源端。
+    Person,
 }
 
 /// 連線的一端，已經解析成看得懂的東西。
@@ -65,6 +68,9 @@ pub struct Row {
     /// 契約的顯示名。找不到對應契約時是 `None`（那本身就是 L003）。
     pub serves_slug: Option<String>,
     pub purpose: String,
+    /// 正常路徑還是備援路徑。畫面上用來區分——備援跟正常長得一樣的話，
+    /// 讀的人分不出平常的資料流是哪幾條。
+    pub kind: ConnectionKind,
     pub from: Side,
     pub to: Side,
     /// 這一列自己的嚴重度。沒問題時是 `None`。
@@ -107,8 +113,9 @@ pub fn rows(project: &Project) -> Vec<Row> {
                     .find(|r| r.id == conn.serves)
                     .map(|r| r.slug.clone()),
                 purpose: conn.purpose.clone(),
-                from: 解析(&index, env, &conn.from),
-                to: 解析(&index, env, &conn.to),
+                kind: conn.kind,
+                from: 解析(&index, env, &project.logical, &conn.from),
+                to: 解析(&index, env, &project.logical, &conn.to),
                 severity: rules.iter().map(|r| r.severity()).max(),
                 rules,
             });
@@ -131,7 +138,7 @@ pub fn rows(project: &Project) -> Vec<Row> {
     out
 }
 
-fn 解析(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing) -> Side {
+fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &Endpointing) -> Side {
     match side {
         Endpointing::Instance { target, endpoint } => match target {
             InstanceRef::One(id) => {
@@ -202,6 +209,21 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, side: &Endpointing) -> Side {
                 expect: None,
             }
         }
+        // 人沒有落地、沒有位址、也沒有數量——只有一個名字。
+        Endpointing::Person { person } => Side {
+            kind: SideKind::Person,
+            label: logical
+                .people
+                .iter()
+                .find(|p| &p.id == person)
+                .map(|p| p.slug.clone())
+                // 查不到就印 id：那是 L003，使用者需要知道是哪個 id 壞了。
+                .unwrap_or_else(|| person.to_string()),
+            endpoint: None,
+            addresses: vec![],
+            matched: 1,
+            expect: None,
+        },
         Endpointing::System { instance, endpoint } => {
             let found = env.system_instance(instance);
             let ep = found.and_then(|s| {

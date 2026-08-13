@@ -26,6 +26,7 @@ function 列(id: string, extra: Partial<Row> = {}): Row {
     purpose: '讀寫快取',
     from: 端('app-01'),
     to: 端('redis-*', { endpoint: 'client-port', addresses: ['10.0.1.11:6379', '10.0.1.12:6379', '10.0.1.13:6379'], matched: 3, expect: 3 }),
+    kind: 'primary',
     severity: null,
     rules: [],
     ...extra,
@@ -58,17 +59,23 @@ describe('連線表', () => {
     store.snapshot = 假快照([列('c1')])
   })
 
+  /** 依表頭名稱取儲存格，不用位置——加一欄就全錯的測試沒有價值。 */
+  function 欄位(w: ReturnType<typeof mount>, 表頭: string) {
+    const i = w.findAll('thead th').findIndex((t) => t.text() === 表頭)
+    expect(i, `找不到「${表頭}」這一欄`).toBeGreaterThanOrEqual(0)
+    return w.findAll('tbody tr')[0]!.findAll('td')[i]!
+  }
+
   it('端點顯示成「名稱 : 接點」', () => {
     const w = mount(ConnectionTable)
-    const 欄 = w.findAll('tbody td')
-    expect(欄[2]!.text()).toBe('app-01')
-    expect(欄[3]!.text()).toBe('redis-* : client-port')
+    expect(欄位(w, '來源').text()).toBe('app-01')
+    expect(欄位(w, '目標').text()).toBe('redis-* : client-port')
   })
 
   it('位址很多時只顯示第一個加數量', () => {
     // 十幾個位址塞進一格會把表格撐爛，而使用者要的是「大概在哪一段」。
     const w = mount(ConnectionTable)
-    expect(w.findAll('tbody td')[4]!.text()).toBe('10.0.1.11:6379 +2')
+    expect(欄位(w, '目標位址').text()).toBe('10.0.1.11:6379 +2')
   })
 
   it('數量對不上時把數字本身標起來', () => {
@@ -98,6 +105,14 @@ describe('連線表', () => {
 
     store.搜尋 = '10.9.9.9'
     expect(mount(ConnectionTable).find('.empty').exists()).toBe(true)
+  })
+
+  it('備援路徑會標出來', () => {
+    // 四條線一樣重的話，讀的人分不出平常的資料流是哪幾條。
+    store.snapshot = 假快照([列('c1'), 列('c2', { kind: 'fallback' })])
+    const w = mount(ConnectionTable)
+    expect(w.findAll('.fb')).toHaveLength(1)
+    expect(w.findAll('tbody tr.fallback')).toHaveLength(1)
   })
 
   it('只看有問題會濾掉沒問題的列', () => {

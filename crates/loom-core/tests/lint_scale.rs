@@ -148,6 +148,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                 id: Id::new(format!("conn-{env}-{i:03}-a")),
                 serves: Id::new(format!("r-{i:03}")),
                 purpose: "第一段：到 F5".into(),
+                kind: Default::default(),
                 from: Endpointing::Instance {
                     target: InstanceRef::Pattern {
                         slug_pattern: format!("svc{i:03}-*"),
@@ -164,6 +165,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                 id: Id::new(format!("conn-{env}-{i:03}-b")),
                 serves: Id::new(format!("r-{i:03}")),
                 purpose: "第二段：F5 分流到叢集".into(),
+                kind: Default::default(),
                 from: Endpointing::Infra {
                     node: Id::new(format!("f5-{env}")),
                     endpoint: None,
