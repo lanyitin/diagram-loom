@@ -576,6 +576,22 @@ export type Relationship = {
  */
 export type RelationshipEnd = ({ container: Id }) & { system?: never } | ({ system: Id }) & { container?: never };
 
+/**  表格的一列。 */
+export type Row = {
+	id: Id,
+	environment: Id,
+	/**  它服務哪條契約。 */
+	serves: Id,
+	/**  契約的顯示名。找不到對應契約時是 `None`（那本身就是 L003）。 */
+	servesSlug: string | null,
+	purpose: string,
+	from: Side,
+	to: Side,
+	/**  這一列自己的嚴重度。沒問題時是 `None`。 */
+	severity: Severity | null,
+	rules: Rule[],
+};
+
 /**  規則代號。序列化後就是 `"L001"` 這種字串，跟文件一致。 */
 export type Rule = 
 /**  邏輯層元素在某環境沒有任何實現。 */
@@ -597,6 +613,30 @@ export type Rule =
 
 export type Severity = "info" | "warning" | "error";
 
+/**  連線的一端，已經解析成看得懂的東西。 */
+export type Side = {
+	kind: SideKind,
+	/**  顯示名。萬用字元保留原樣（`redis-*`），使用者才看得出這是一群。 */
+	label: string,
+	/**  接點的顯示名。來源端可以沒有（由 OS 分配 ephemeral port）。 */
+	endpoint: string | null,
+	/**  實際位址。萬用字元會有多個。 */
+	addresses: string[],
+	/**  萬用字元展開成幾個。不是萬用字元時是 1。 */
+	matched: number,
+	/**  註明的期望數量。 */
+	expect: number | null,
+};
+
+/**  連線的一端指向什麼。畫面上用不同的圖示區分。 */
+export type SideKind = 
+/**  一台或一群服務落地。 */
+"instance" | 
+/**  F5 這類設備。 */
+"infra" | 
+/**  外部系統的落地。 */
+"system";
+
 /**
  *  開一個專案之後，前端需要的所有東西一次給齊。
  * 
@@ -616,6 +656,8 @@ export type Snapshot_Deserialize = {
 	project: Project_Deserialize,
 	findings: FindingView[],
 	matrix: Matrix,
+	/**  連線表用的列。跟矩陣一樣，是同一份資料的另一種排法。 */
+	rows: Row[],
 };
 
 /**
@@ -629,6 +671,8 @@ export type Snapshot_Serialize = {
 	project: Project_Serialize,
 	findings: FindingView[],
 	matrix: Matrix,
+	/**  連線表用的列。跟矩陣一樣，是同一份資料的另一種排法。 */
+	rows: Row[],
 };
 
 /**  軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。 */

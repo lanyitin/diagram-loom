@@ -27,6 +27,7 @@ use loom_core::Project;
 use loom_core::coverage::{self, Matrix};
 use loom_core::lint::{self, Finding, Rule, Severity};
 use loom_core::repository;
+use loom_core::table::{self, Row};
 use serde::Serialize;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands};
@@ -96,6 +97,8 @@ pub struct Snapshot {
     pub project: Project,
     pub findings: Vec<FindingView>,
     pub matrix: Matrix,
+    /// 連線表用的列。跟矩陣一樣，是同一份資料的另一種排法。
+    pub rows: Vec<Row>,
 }
 
 fn snapshot(root: &std::path::Path, project: Project) -> Snapshot {
@@ -103,6 +106,7 @@ fn snapshot(root: &std::path::Path, project: Project) -> Snapshot {
         root: root.display().to_string(),
         findings: lint::lint(&project).iter().map(FindingView::from).collect(),
         matrix: coverage::coverage(&project),
+        rows: table::rows(&project),
         project,
     }
 }

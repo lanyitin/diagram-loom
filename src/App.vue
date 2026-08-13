@@ -2,7 +2,9 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
 import CoverageMatrix from './components/CoverageMatrix.vue'
+import ConnectionTable from './components/ConnectionTable.vue'
 import EnvPicker from './components/EnvPicker.vue'
+import LintPanel from './components/LintPanel.vue'
 
 const store = useProject()
 
@@ -32,25 +34,34 @@ async function 選專案() {
 
     <template v-if="store.已開啟">
       <div class="toolbar">
-        <input v-model="store.搜尋" type="search" placeholder="搜尋契約或用途…">
+        <div class="seg">
+          <button
+            v-for="v in (['覆蓋矩陣', '連線表'] as const)" :key="v"
+            :class="{ on: store.檢視 === v }"
+            @click="store.檢視 = v"
+          >{{ v }}</button>
+        </div>
+        <input v-model="store.搜尋" type="search" :placeholder="store.檢視 === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
         <label class="toggle">
           <input v-model="store.只看有問題" type="checkbox">
           只看有問題
         </label>
         <EnvPicker />
         <span class="grow" />
-        <span class="muted count">{{ store.顯示的契約.length }} / {{ store.契約.length }} 條契約</span>
+        <span class="muted count">
+          <template v-if="store.檢視 === '覆蓋矩陣'">
+            {{ store.顯示的契約.length }} / {{ store.契約.length }} 條契約
+          </template>
+          <template v-else>
+            {{ store.顯示的列.length }} / {{ store.列.length }} 條連線
+          </template>
+        </span>
       </div>
 
-      <CoverageMatrix />
+      <CoverageMatrix v-if="store.檢視 === '覆蓋矩陣'" />
+      <ConnectionTable v-else />
 
-      <footer>
-        <span v-if="store.錯誤數" class="tally error">{{ store.錯誤數 }} 錯誤</span>
-        <span v-if="store.警告數" class="tally warn">{{ store.警告數 }} 警告</span>
-        <span v-if="!store.錯誤數 && !store.警告數" class="tally ok">沒有發現問題</span>
-        <span class="grow" />
-        <span class="muted">Lint 面板與連線表：階段 4 的下一步</span>
-      </footer>
+      <LintPanel />
     </template>
 
     <!-- 空狀態。第一次開啟時畫面不該是一片白。 -->
@@ -69,7 +80,7 @@ async function 選專案() {
 .app { height: 100%; display: flex; flex-direction: column; }
 .grow { flex: 1; }
 
-header, .toolbar, footer {
+header, .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -93,16 +104,18 @@ header {
 .toggle input { accent-color: var(--warp); }
 .count { font-size: 12px; }
 
-footer {
-  background: var(--surface-2);
-  border-top: 1px solid var(--rule);
-  font-size: 12.5px;
+/* 檢視切換。兩個檢視是同一份資料的兩種排法，所以用分段控制項而不是分頁。 */
+.seg { display: flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+.seg button {
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink-3);
+  padding: 4px 12px;
 }
-
-.tally { font-weight: 600; }
-.tally.error { color: var(--broken); }
-.tally.warn { color: var(--warn); }
-.tally.ok { color: var(--ok); }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: color-mix(in srgb, var(--warp) 12%, var(--surface)); color: var(--ink); font-weight: 600; }
 
 .failure {
   margin: 0;

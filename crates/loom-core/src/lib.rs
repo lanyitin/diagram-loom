@@ -31,6 +31,7 @@ pub mod reconcile;
 pub mod repository;
 pub mod slug;
 pub mod store;
+pub mod table;
 
 use crate::environment::Environment;
 use crate::id::Id;

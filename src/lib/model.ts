@@ -20,8 +20,11 @@ export type {
   Id,
   Matrix,
   Relationship,
+  Row,
   Rule,
   Severity,
+  Side,
+  SideKind,
   Status,
 } from './bindings'
 

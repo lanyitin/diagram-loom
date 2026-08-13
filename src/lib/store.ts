@@ -10,10 +10,14 @@
 
 import { defineStore } from 'pinia'
 import { commands } from './bindings'
-import type { Cell, Environment, Finding, Id, Relationship, Snapshot } from './model'
+import type { Cell, Environment, Finding, Id, Relationship, Row, Snapshot } from './model'
+
+type 檢視 = '覆蓋矩陣' | '連線表'
 
 interface State {
   snapshot: Snapshot | null
+  檢視: 檢視
+  面板展開: boolean
   /** 使用者勾選要比對哪幾個環境。空陣列代表「全部」。 */
   比對中的環境: Id[]
   搜尋: string
@@ -25,6 +29,8 @@ interface State {
 export const useProject = defineStore('project', {
   state: (): State => ({
     snapshot: null,
+    檢視: '覆蓋矩陣',
+    面板展開: false,
     比對中的環境: [],
     搜尋: '',
     只看有問題: false,
@@ -63,6 +69,26 @@ export const useProject = defineStore('project', {
     },
 
     格子們: (s): Cell[] => s.snapshot?.matrix.cells ?? [],
+
+    列: (s): Row[] => s.snapshot?.rows ?? [],
+
+    /** 連線表要顯示的列。跟矩陣共用同一組篩選條件，切換檢視時不會突然變一套。 */
+    顯示的列(): Row[] {
+      const 關鍵字 = this.搜尋.trim().toLowerCase()
+      const 環境們 = new Set(this.顯示的環境.map((e) => e.id))
+
+      return this.列.filter((r) => {
+        if (!環境們.has(r.environment)) return false
+        if (this.只看有問題 && r.severity === null) return false
+        if (!關鍵字) return true
+        const 可搜尋 = [
+          r.servesSlug ?? r.serves, r.purpose,
+          r.from.label, r.to.label,
+          ...r.to.addresses,
+        ].join(' ').toLowerCase()
+        return 可搜尋.includes(關鍵字)
+      })
+    },
 
     發現: (s): Finding[] => s.snapshot?.findings ?? [],
 
