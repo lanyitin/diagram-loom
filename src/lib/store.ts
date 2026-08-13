@@ -15,7 +15,7 @@ import type {
   Snapshot,
 } from './model'
 
-type view = '覆蓋矩陣' | '連線表' | '資源'
+type view = '覆蓋矩陣' | '連線表' | '資源' | '圖'
 
 interface State {
   snapshot: Snapshot | null

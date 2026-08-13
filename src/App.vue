@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
 import { SCALES, apply as applyScale, load as loadScale, type Scale } from './lib/ui'
 import CoverageMatrix from './components/CoverageMatrix.vue'
+import DiagramView from './components/DiagramView.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
 import AddInstances from './components/AddInstances.vue'
@@ -145,16 +146,20 @@ onUnmounted(() => {
       <div class="toolbar">
         <div class="seg">
           <button
-            v-for="v in (['覆蓋矩陣', '連線表', '資源'] as const)" :key="v"
+            v-for="v in (['覆蓋矩陣', '連線表', '資源', '圖'] as const)" :key="v"
             :class="{ on: store.view === v }"
             @click="store.view = v"
           >{{ v }}</button>
         </div>
-        <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
-        <label class="toggle">
-          <input v-model="store.onlyProblems" type="checkbox">
-          只看有問題
-        </label>
+        <!-- 搜尋與篩選是表格的東西。圖上沒有「列」可以篩，留著只會讓人
+             以為打了字圖會跟著變。 -->
+        <template v-if="store.view !== '圖'">
+          <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋契約、機器或位址…'">
+          <label class="toggle">
+            <input v-model="store.onlyProblems" type="checkbox">
+            只看有問題
+          </label>
+        </template>
         <EnvPicker />
 
         <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
@@ -169,6 +174,8 @@ onUnmounted(() => {
           <template v-if="store.view === '覆蓋矩陣'">
             {{ store.visibleRelationships.length }} / {{ store.relationships.length }} 條契約
           </template>
+          <!-- 圖是一個環境一張，數「幾條連線」在這裡沒有意義。 -->
+          <template v-else-if="store.view === '圖'">一張圖只畫一個環境</template>
           <template v-else>
             {{ store.visibleRows.length }} / {{ store.rows.length }} 條連線
           </template>
@@ -183,6 +190,7 @@ onUnmounted(() => {
 
       <CoverageMatrix v-if="store.view === '覆蓋矩陣'" />
       <ConnectionTable v-else-if="store.view === '連線表'" />
+      <DiagramView v-else-if="store.view === '圖'" />
       <ResourceView v-else />
 
       <LintPanel />
