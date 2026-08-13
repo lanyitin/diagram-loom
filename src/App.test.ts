@@ -41,6 +41,9 @@ vi.mock('./lib/bindings', () => ({
     proposeConnection: vi.fn(),
     connectionChoices: vi.fn(),
     previewBatch: vi.fn(),
+    resourceTables: vi.fn(),
+    blankResource: vi.fn(),
+    createProject: vi.fn(),
   },
 }))
 
@@ -102,12 +105,31 @@ describe('視窗組裝', () => {
     expect(w.find('.backdrop').exists()).toBe(true)
   })
 
+  it('歡迎畫面同時提供「從零開始」與「開啟現有」', () => {
+    // 使用者不見得有 Excel 可以匯，從零開始是真實情境。
+    const w = mount(App)
+    const 字 = w.find('.welcome').text()
+    expect(字).toContain('從零開始')
+    expect(字).toContain('開啟現有專案')
+  })
+
+  it('切到資源檢視時另外兩個要收起來', () => {
+    store.snapshot = 假快照()
+    store.檢視 = '資源'
+    vi.mocked(commands.resourceTables).mockResolvedValue({ status: 'ok', data: [] } as never)
+    const w = mount(App)
+    expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
+    expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(false)
+    expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
+  })
+
   it('切到連線表時矩陣要收起來', () => {
     store.snapshot = 假快照()
     store.檢視 = '連線表'
     const w = mount(App)
     expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
     expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(false)
   })
 
   it('沒開專案時不能按儲存與匯入', () => {
@@ -209,7 +231,10 @@ describe('視窗組裝', () => {
     // 跟匯入精靈同一個坑：它是疊在上層的對話框，不是 v-if 鏈的一環。
     store.snapshot = 假快照()
     vi.spyOn(store, '預覽編輯').mockResolvedValue({ introduced: [], resolved: [] })
-    store.刪除中 = { environment: 'env-prod', connection: 'c1', label: 'a → b' }
+    store.刪除中 = {
+      edit: { deleteConnection: { environment: 'env-prod', connection: 'c1' } },
+      kind: '連線', label: 'a → b',
+    }
     const w = mount(App)
     expect(w.find('.welcome').exists()).toBe(false)
     expect(w.findComponent({ name: 'DeleteConfirm' }).find('.box').exists()).toBe(true)

@@ -30,9 +30,7 @@ watch(
     impact.value = null
     if (!目標) return
     算著.value = true
-    impact.value = await store.預覽編輯({
-      deleteConnection: { environment: 目標.environment, connection: 目標.connection },
-    })
+    impact.value = await store.預覽編輯(目標.edit)
     算著.value = false
   },
   { immediate: true },
@@ -42,7 +40,7 @@ watch(
 <template>
   <div v-if="store.刪除中" class="scrim" @click.self="store.刪除中 = null">
     <section class="box" role="dialog" aria-modal="true">
-      <h2>刪除這條連線？</h2>
+      <h2>刪除這個{{ store.刪除中.kind }}？</h2>
       <p class="mono target">{{ store.刪除中.label }}</p>
 
       <p v-if="算著" class="muted">正在算會影響什麼…</p>

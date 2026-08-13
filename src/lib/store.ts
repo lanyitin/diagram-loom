@@ -11,10 +11,11 @@
 import { defineStore } from 'pinia'
 import { commands } from './bindings'
 import type {
-  Cell, Edit, Environment, Finding, FixValue, Id, Impact, Relationship, Row, Snapshot,
+  Cell, Edit, Environment, Finding, FixValue, Id, Impact, Relationship, Resource, Row,
+  Snapshot,
 } from './model'
 
-type 檢視 = '覆蓋矩陣' | '連線表'
+type 檢視 = '覆蓋矩陣' | '連線表' | '資源'
 
 interface State {
   snapshot: Snapshot | null
@@ -41,6 +42,16 @@ interface State {
   新增連線中: 待建 | null
   /** 使用者要在哪個環境批次建立哪個服務的機器。 */
   新增機器中: 待建機器 | null
+  /** 使用者正在新增或編輯的資源。 */
+  編輯資源中: 待編 | null
+}
+
+/** 資源表單需要知道的：改哪一個、是不是新的、怎麼稱呼它。 */
+export interface 待編 {
+  resource: Resource
+  新的: boolean
+  /** 標題用：「服務」「契約」。就是分頁上的那個字。 */
+  kind: string
 }
 
 /** 批次建立的表單需要知道的：建哪個服務的機器，以及怎麼稱呼它。 */
@@ -63,10 +74,17 @@ export interface 聚焦目標 {
   label: string
 }
 
-/** 刪除確認框需要知道的：刪什麼，以及怎麼稱呼它。 */
+/**
+ * 刪除確認框需要知道的：刪什麼，以及怎麼稱呼它。
+ *
+ * 帶的是一個完整的 `Edit`，不是「連線 id」——連線、服務、契約、機器
+ * 都可以刪，而確認框問的問題（「會弄壞什麼」）對每一種都一樣。
+ */
 export interface 待刪 {
-  environment: Id
-  connection: Id
+  edit: Edit
+  /** 標題用：「連線」「服務」「契約」。呼叫端本來就知道自己在刪什麼。 */
+  kind: string
+  /** 那個東西叫什麼，顯示在標題下面。 */
   label: string
 }
 
@@ -85,6 +103,7 @@ export const useProject = defineStore('project', {
     刪除中: null,
     新增連線中: null,
     新增機器中: null,
+    編輯資源中: null,
   }),
 
   getters: {
@@ -174,6 +193,14 @@ export const useProject = defineStore('project', {
       await this.執行(() => commands.openProject(path))
     },
 
+    /** 在一個空資料夾裡開新專案。資料夾非空時 Rust 會擋下來。 */
+    async 建立專案(path: string, name: string) {
+      await this.執行(() => commands.createProject(path, name))
+      // 空專案沒有連線也沒有契約，矩陣是一片空白。直接帶到資源檢視，
+      // 那裡每張表都會說「這是什麼、為什麼需要它」。
+      if (this.已開啟) this.檢視 = '資源'
+    },
+
     async 重新檢查() {
       if (!this.已開啟) return
       await this.執行(() => commands.recheck())
@@ -216,9 +243,7 @@ export const useProject = defineStore('project', {
       const 目標 = this.刪除中
       if (!目標) return
       this.刪除中 = null
-      await this.套用編輯({
-        deleteConnection: { environment: 目標.environment, connection: 目標.connection },
-      })
+      await this.套用編輯(目標.edit)
     },
 
     async 復原() {

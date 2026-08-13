@@ -37,8 +37,8 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
 /** 只是打開確認框。真正刪掉在使用者看過影響之後。 */
 function 想刪(row: Row) {
   store.刪除中 = {
-    environment: row.environment,
-    connection: row.id,
+    edit: { deleteConnection: { environment: row.environment, connection: row.id } },
+    kind: '連線',
     label: `${row.servesSlug ?? row.serves}：${端(row.from)} → ${端(row.to)}`,
   }
 }

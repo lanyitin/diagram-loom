@@ -32,7 +32,11 @@ describe('刪除確認框', () => {
   })
 
   function 想刪() {
-    store.刪除中 = { environment: 'env-prod', connection: 'conn-1', label: 'api → redis' }
+    store.刪除中 = {
+      edit: { deleteConnection: { environment: 'env-prod', connection: 'conn-1' } },
+      kind: '連線',
+      label: 'api → redis',
+    }
   }
 
   it('沒有要刪東西時整個不存在', () => {

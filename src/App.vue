@@ -6,6 +6,8 @@ import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
 import AddInstances from './components/AddInstances.vue'
+import ResourceForm from './components/ResourceForm.vue'
+import ResourceView from './components/ResourceView.vue'
 import CloseGuard from './components/CloseGuard.vue'
 import DeleteConfirm from './components/DeleteConfirm.vue'
 import EnvPicker from './components/EnvPicker.vue'
@@ -17,6 +19,20 @@ const store = useProject()
 async function 選專案() {
   const 選了 = await open({ directory: true, title: '選擇專案資料夾（.loom）' })
   if (typeof 選了 === 'string') await store.開啟(選了)
+}
+
+/**
+ * 開一個全新的專案。
+ *
+ * 之前只能「開啟現有專案」——但使用者不見得有一份 Excel 可以匯，
+ * 「從零開始」是真實情境。資料夾必須是空的，那是 Rust 擋的：
+ * 選到一個已經有東西的資料夾就會蓋掉別人的檔案，而那沒辦法復原。
+ */
+async function 新專案() {
+  const 選了 = await open({ directory: true, title: '選一個空資料夾放新專案' })
+  if (typeof 選了 !== 'string') return
+  const 名字 = 選了.split('/').pop()?.replace(/\.loom$/, '') || '新專案'
+  await store.建立專案(選了, 名字)
 }
 
 /**
@@ -65,6 +81,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
         >↷ 重做</button>
       </div>
 
+      <button :disabled="store.忙碌中" @click="新專案">新專案…</button>
       <button :disabled="store.忙碌中" @click="選專案">開啟專案…</button>
       <button :disabled="!store.已開啟 || store.忙碌中" @click="store.匯入中 = true">匯入試算表…</button>
       <button :disabled="!store.已開啟 || store.忙碌中" @click="store.重新檢查()">重新檢查</button>
@@ -79,7 +96,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
       <div class="toolbar">
         <div class="seg">
           <button
-            v-for="v in (['覆蓋矩陣', '連線表'] as const)" :key="v"
+            v-for="v in (['覆蓋矩陣', '連線表', '資源'] as const)" :key="v"
             :class="{ on: store.檢視 === v }"
             @click="store.檢視 = v"
           >{{ v }}</button>
@@ -116,7 +133,8 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
       </p>
 
       <CoverageMatrix v-if="store.檢視 === '覆蓋矩陣'" />
-      <ConnectionTable v-else />
+      <ConnectionTable v-else-if="store.檢視 === '連線表'" />
+      <ResourceView v-else />
 
       <LintPanel />
     </template>
@@ -127,15 +145,19 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
     <section v-else class="welcome">
       <h1>diagram-loom</h1>
       <p class="muted">
-        開啟一個專案資料夾，看看每個環境還缺什麼。
+        管理系統的部署與連線，找出每個環境還缺什麼。
       </p>
-      <button class="primary" @click="選專案">開啟專案…</button>
+      <div class="two">
+        <button class="primary" @click="新專案">從零開始…</button>
+        <button @click="選專案">開啟現有專案…</button>
+      </div>
       <p class="muted hint mono">fixtures/sample.loom 是一份刻意留了破洞的範例</p>
     </section>
 
     <ImportWizard v-if="store.匯入中" />
     <AddConnection />
     <AddInstances />
+    <ResourceForm />
     <DeleteConfirm />
     <CloseGuard />
   </div>
@@ -231,6 +253,7 @@ header {
   justify-content: center;
   gap: 12px;
 }
+.welcome .two { display: flex; gap: 10px; }
 .welcome h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
 .welcome p { margin: 0; }
 .hint { font-size: 12px; }
