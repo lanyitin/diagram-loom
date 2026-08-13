@@ -11,7 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import App from './App.vue'
 import { useProject } from './lib/store'
@@ -19,6 +19,14 @@ import { commands } from './lib/bindings'
 import type { Snapshot } from './lib/model'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+/** Rust 那邊 emit 的事件。測試裡自己觸發它。 */
+const listeners: (() => void)[] = []
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (_name: string, handler: () => void) => {
+    listeners.push(handler)
+    return Promise.resolve(() => {})
+  },
+}))
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     onCloseRequested: () => Promise.resolve(() => {}),
@@ -191,6 +199,20 @@ describe('視窗組裝', () => {
 
     await headerButton(mount(App), '復原').trigger('click')
     expect(undo).toHaveBeenCalled()
+  })
+
+  it('AI Agent 改了東西之後畫面會自己拉新', async () => {
+    // 少了這個，Agent 做的事使用者完全看不到——而「看得到它在改什麼」
+    // 正是把 MCP 掛在 App 裡而不是做成獨立程序的全部理由。
+    listeners.length = 0
+    store.snapshot = fakeSnapshot()
+    const recheck = vi.spyOn(store, 'recheck').mockResolvedValue(undefined)
+    mount(App)
+    await flushPromises()
+
+    expect(listeners.length, '沒有人在聽 loom://changed').toBe(1)
+    listeners[0]!()
+    expect(recheck).toHaveBeenCalled()
   })
 
   it('⌘Z 復原、⇧⌘Z 重做', async () => {

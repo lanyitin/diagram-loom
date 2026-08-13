@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
 import { SCALES, apply as applyScale, load as loadScale, type Scale } from './lib/ui'
@@ -62,8 +63,26 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+/**
+ * AI Agent 改了東西之後把畫面拉新。
+ *
+ * 少了這個，Agent 做的事使用者**完全看不到**：畫面上還是它動手之前
+ * 那份快照，連復原按鈕都是灰的（那份快照裡沒有可復原的步驟）。
+ *
+ * 而「看得到它在改什麼」正是把 MCP 掛在 App 裡、而不是做成獨立程序的
+ * 全部理由——看不到的話，等他發現時已經是一整批改完了。
+ */
+let unlisten: (() => void) | null = null
+
+onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
+  unlisten = await listen('loom://changed', () => void store.recheck())
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  unlisten?.()
+})
 </script>
 
 <template>

@@ -249,13 +249,21 @@ export const useProject = defineStore('project', {
       await this.applyEdit(target.edit)
     },
 
+    /**
+     * 復原／重做**不看前端的標籤**，直接送出去。
+     *
+     * 原本會先檢查 `undoLabel` 有沒有值。那個檢查在快照是新的時候沒問題，
+     * 但快照一過期（例如 AI Agent 改了東西而畫面還沒更新）它就會
+     * **擋掉一次合法的復原**——而使用者只會看到「⌘Z 沒反應」。
+     *
+     * Rust 那邊本來就會安全地不做事（「已經到底了就原樣回傳」），
+     * 所以這個檢查擋不到任何壞事，只擋得到好事。
+     */
     async undo() {
-      if (!this.undoLabel) return
       await this.run(() => commands.undo())
     },
 
     async redo() {
-      if (!this.redoLabel) return
       await this.run(() => commands.redo())
     },
 
