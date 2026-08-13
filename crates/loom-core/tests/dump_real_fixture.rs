@@ -44,6 +44,9 @@ use loom_core::logical::{
 };
 
 const 系統: &str = "s-通路";
+/// 站點的節點 id。`within` 用它把萬用字元限定在某個機房底下。
+const 主中心節點: &str = "n-prod-dc-主中心";
+const 異地節點: &str = "n-prod-dc-異地";
 
 /// 服務、顯示名、對外接點、協定。
 const 服務清單: &[(&str, &str, &str, Protocol)] = &[
@@ -198,9 +201,15 @@ fn 站點(env: &str, slug: &str, 機器們: Vec<DeploymentNode>) -> DeploymentNo
 }
 
 fn 群(pattern: &str, expect: u32, 服務: &str) -> Endpointing {
+    群於(pattern, None, expect, 服務)
+}
+
+/// 限定在某個部署節點底下的一群。站點就用這個表達，不必編進 slug。
+fn 群於(pattern: &str, within: Option<&str>, expect: u32, 服務: &str) -> Endpointing {
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
+            within: within.map(Id::new),
             expect: Some(expect),
         },
         endpoint: Some(接點(服務)),
@@ -209,9 +218,14 @@ fn 群(pattern: &str, expect: u32, 服務: &str) -> Endpointing {
 
 /// 來源端不指定接點——由作業系統分配 ephemeral port。
 fn 從群(pattern: &str, expect: u32) -> Endpointing {
+    從群於(pattern, None, expect)
+}
+
+fn 從群於(pattern: &str, within: Option<&str>, expect: u32) -> Endpointing {
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
+            within: within.map(Id::new),
             expect: Some(expect),
         },
         endpoint: None,
@@ -267,33 +281,37 @@ impl 連線表 {
     ///
     /// 只寫同站的兩條，跨中心備援路徑的防火牆有沒有開就看不出來——
     /// 而那正是最常漏的東西。
+    ///
+    /// 站點用 `within` 限定，不編進 slug。編進名字的話機器搬家之後
+    /// 名字就說謊了，而且 `expect` 只數總量，搬家根本抓不到。
     fn 兩站互連(&mut self, serves: &str, 來源: &str, 目標: &str, 主: u32, 異: u32) {
+        let 樣式 = |s: &str| format!("{s}-*");
         self.加(
             serves,
             "同中心優先（主中心）",
-            從群(&format!("{來源}-main-*"), 主),
-            群(&format!("{目標}-main-*"), 主, 目標),
+            從群於(&樣式(來源), Some(主中心節點), 主),
+            群於(&樣式(目標), Some(主中心節點), 主, 目標),
         );
         self.加(
             serves,
             "同中心優先（異地）",
-            從群(&format!("{來源}-dr-*"), 異),
-            群(&format!("{目標}-dr-*"), 異, 目標),
+            從群於(&樣式(來源), Some(異地節點), 異),
+            群於(&樣式(目標), Some(異地節點), 異, 目標),
         );
         // 標成 Fallback：一樣要建立、防火牆一樣要開，只是畫面上會區分開來。
         self.加種類(
             serves,
             "跨中心備援：主中心 → 異地",
             ConnectionKind::Fallback,
-            從群(&format!("{來源}-main-*"), 主),
-            群(&format!("{目標}-dr-*"), 異, 目標),
+            從群於(&樣式(來源), Some(主中心節點), 主),
+            群於(&樣式(目標), Some(異地節點), 異, 目標),
         );
         self.加種類(
             serves,
             "跨中心備援：異地 → 主中心",
             ConnectionKind::Fallback,
-            從群(&format!("{來源}-dr-*"), 異),
-            群(&format!("{目標}-main-*"), 主, 目標),
+            從群於(&樣式(來源), Some(異地節點), 異),
+            群於(&樣式(目標), Some(主中心節點), 主, 目標),
         );
     }
 }
@@ -328,52 +346,52 @@ fn prod() -> Environment {
             機器(
                 e,
                 "vm-b01",
-                vec![落地(e, "apache-main-01", "apache", "10.1.1.11:8080")],
+                vec![落地(e, "apache-01", "apache", "10.1.1.11:8080")],
             ),
             機器(
                 e,
                 "vm-b02",
-                vec![落地(e, "apache-main-02", "apache", "10.1.1.12:8080")],
+                vec![落地(e, "apache-02", "apache", "10.1.1.12:8080")],
             ),
             機器(
                 e,
                 "vm-c01",
-                vec![落地(e, "gateway-main-01", "gateway", "10.1.2.11:8080")],
+                vec![落地(e, "gateway-01", "gateway", "10.1.2.11:8080")],
             ),
             機器(
                 e,
                 "vm-c02",
-                vec![落地(e, "gateway-main-02", "gateway", "10.1.2.12:8080")],
+                vec![落地(e, "gateway-02", "gateway", "10.1.2.12:8080")],
             ),
             機器(
                 e,
                 "vm-d01",
-                vec![落地(e, "channel-main-01", "channel", "10.1.3.11:8080")],
+                vec![落地(e, "channel-01", "channel", "10.1.3.11:8080")],
             ),
             機器(
                 e,
                 "vm-d02",
-                vec![落地(e, "channel-main-02", "channel", "10.1.3.12:8080")],
+                vec![落地(e, "channel-02", "channel", "10.1.3.12:8080")],
             ),
             機器(
                 e,
                 "vm-e01",
-                vec![落地(e, "apigw-main-01", "apigw", "10.1.6.11:8080")],
+                vec![落地(e, "apigw-01", "apigw", "10.1.6.11:8080")],
             ),
             機器(
                 e,
                 "vm-e02",
-                vec![落地(e, "apigw-main-02", "apigw", "10.1.6.12:8080")],
+                vec![落地(e, "apigw-02", "apigw", "10.1.6.12:8080")],
             ),
             機器(
                 e,
                 "vm-f01",
-                vec![落地(e, "common-main-01", "common", "10.1.4.11:8080")],
+                vec![落地(e, "common-01", "common", "10.1.4.11:8080")],
             ),
             機器(
                 e,
                 "vm-f02",
-                vec![落地(e, "common-main-02", "common", "10.1.4.12:8080")],
+                vec![落地(e, "common-02", "common", "10.1.4.12:8080")],
             ),
             // 一台 VM 同時跑 Consul 與 Redis——模型接得住，
             // 一個 DeploymentNode 可以有多個 ContainerInstance。
@@ -381,24 +399,24 @@ fn prod() -> Environment {
                 e,
                 "vm-g01",
                 vec![
-                    落地(e, "consul-main-01", "consul", "10.1.5.11:8500"),
-                    落地(e, "redis-main-01", "redis", "10.1.5.11:6379"),
+                    落地(e, "consul-01", "consul", "10.1.5.11:8500"),
+                    落地(e, "redis-01", "redis", "10.1.5.11:6379"),
                 ],
             ),
             機器(
                 e,
                 "vm-g02",
                 vec![
-                    落地(e, "consul-main-02", "consul", "10.1.5.12:8500"),
-                    落地(e, "redis-main-02", "redis", "10.1.5.12:6379"),
+                    落地(e, "consul-02", "consul", "10.1.5.12:8500"),
+                    落地(e, "redis-02", "redis", "10.1.5.12:6379"),
                 ],
             ),
             機器(
                 e,
                 "vm-g03",
                 vec![
-                    落地(e, "consul-main-03", "consul", "10.1.5.13:8500"),
-                    落地(e, "redis-main-03", "redis", "10.1.5.13:6379"),
+                    落地(e, "consul-03", "consul", "10.1.5.13:8500"),
+                    落地(e, "redis-03", "redis", "10.1.5.13:6379"),
                 ],
             ),
             機器(
@@ -421,50 +439,50 @@ fn prod() -> Environment {
             機器(
                 e,
                 "vm-b03",
-                vec![落地(e, "apache-dr-01", "apache", "10.2.1.11:8080")],
+                vec![落地(e, "apache-03", "apache", "10.2.1.11:8080")],
             ),
             機器(
                 e,
                 "vm-c03",
-                vec![落地(e, "gateway-dr-01", "gateway", "10.2.2.11:8080")],
+                vec![落地(e, "gateway-03", "gateway", "10.2.2.11:8080")],
             ),
             機器(
                 e,
                 "vm-d03",
-                vec![落地(e, "channel-dr-01", "channel", "10.2.3.11:8080")],
+                vec![落地(e, "channel-03", "channel", "10.2.3.11:8080")],
             ),
             機器(
                 e,
                 "vm-e03",
-                vec![落地(e, "apigw-dr-01", "apigw", "10.2.6.11:8080")],
+                vec![落地(e, "apigw-03", "apigw", "10.2.6.11:8080")],
             ),
             機器(
                 e,
                 "vm-f03",
-                vec![落地(e, "common-dr-01", "common", "10.2.4.11:8080")],
+                vec![落地(e, "common-03", "common", "10.2.4.11:8080")],
             ),
             機器(
                 e,
                 "vm-g04",
                 vec![
-                    落地(e, "consul-dr-01", "consul", "10.2.5.11:8500"),
-                    落地(e, "redis-dr-01", "redis", "10.2.5.11:6379"),
+                    落地(e, "consul-04", "consul", "10.2.5.11:8500"),
+                    落地(e, "redis-04", "redis", "10.2.5.11:6379"),
                 ],
             ),
             機器(
                 e,
                 "vm-g05",
                 vec![
-                    落地(e, "consul-dr-02", "consul", "10.2.5.12:8500"),
-                    落地(e, "redis-dr-02", "redis", "10.2.5.12:6379"),
+                    落地(e, "consul-05", "consul", "10.2.5.12:8500"),
+                    落地(e, "redis-05", "redis", "10.2.5.12:6379"),
                 ],
             ),
             機器(
                 e,
                 "vm-g06",
                 vec![
-                    落地(e, "consul-dr-03", "consul", "10.2.5.13:8500"),
-                    落地(e, "redis-dr-03", "redis", "10.2.5.13:6379"),
+                    落地(e, "consul-06", "consul", "10.2.5.13:8500"),
+                    落地(e, "redis-06", "redis", "10.2.5.13:6379"),
                 ],
             ),
         ],
@@ -583,32 +601,32 @@ fn test_env() -> Environment {
             機器(
                 e,
                 "vm-t-b01",
-                vec![落地(e, "apache-main-01", "apache", "10.9.1.11:8080")],
+                vec![落地(e, "apache-01", "apache", "10.9.1.11:8080")],
             ),
             機器(
                 e,
                 "vm-t-c01",
-                vec![落地(e, "gateway-main-01", "gateway", "10.9.2.11:8080")],
+                vec![落地(e, "gateway-01", "gateway", "10.9.2.11:8080")],
             ),
             機器(
                 e,
                 "vm-t-d01",
-                vec![落地(e, "channel-main-01", "channel", "10.9.3.11:8080")],
+                vec![落地(e, "channel-01", "channel", "10.9.3.11:8080")],
             ),
             機器(
                 e,
                 "vm-t-e01",
-                vec![落地(e, "apigw-main-01", "apigw", "10.9.6.11:8080")],
+                vec![落地(e, "apigw-01", "apigw", "10.9.6.11:8080")],
             ),
             機器(
                 e,
                 "vm-t-f01",
-                vec![落地(e, "common-main-01", "common", "10.9.4.11:8080")],
+                vec![落地(e, "common-01", "common", "10.9.4.11:8080")],
             ),
             機器(
                 e,
                 "vm-t-g01",
-                vec![落地(e, "consul-main-01", "consul", "10.9.5.11:8500")],
+                vec![落地(e, "consul-01", "consul", "10.9.5.11:8500")],
             ),
             機器(
                 e,

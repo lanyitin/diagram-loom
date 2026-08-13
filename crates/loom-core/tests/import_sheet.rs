@@ -224,6 +224,7 @@ fn 萬用字元那列不會建出新機器() {
         target,
         &InstanceRef::Pattern {
             slug_pattern: "redis-vm-*-redis".into(),
+            within: None,
             expect: Some(1),
         }
     );

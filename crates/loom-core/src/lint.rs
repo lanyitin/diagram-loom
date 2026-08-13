@@ -243,9 +243,23 @@ fn check_endpointing(
             },
             InstanceRef::Pattern {
                 slug_pattern,
+                within,
                 expect,
             } => {
-                let matched = index.matching(slug_pattern);
+                // 限定範圍卻指向不存在的節點——這比數量不對更嚴重，
+                // 因為它會讓 expect 永遠是 0，看起來像「一台都沒建」。
+                if let Some(node) = within
+                    && !index.knows_node(node)
+                {
+                    findings.push(Finding {
+                        rule: Rule::L003,
+                        environment: env_id.clone(),
+                        subject: conn_id.clone(),
+                        detail: format!("within 指向不存在的部署節點 {node}"),
+                    });
+                }
+
+                let matched = index.matching_within(slug_pattern, within.as_ref());
 
                 match expect {
                     None => findings.push(Finding {
@@ -258,10 +272,16 @@ fn check_endpointing(
                         rule: Rule::L004,
                         environment: env_id.clone(),
                         subject: conn_id.clone(),
-                        detail: format!(
-                            "萬用字元 {slug_pattern} 期望 {want} 個，實際符合 {} 個",
-                            matched.len()
-                        ),
+                        detail: match within {
+                            Some(node) => format!(
+                                "萬用字元 {slug_pattern}（限定在 {node} 底下）期望 {want} 個，實際符合 {} 個",
+                                matched.len()
+                            ),
+                            None => format!(
+                                "萬用字元 {slug_pattern} 期望 {want} 個，實際符合 {} 個",
+                                matched.len()
+                            ),
+                        },
                     }),
                     Some(_) => {}
                 }
@@ -482,8 +502,12 @@ fn resolve(index: &EnvIndex<'_>, side: &Endpointing) -> Vec<GraphNode> {
     match side {
         Endpointing::Instance { target, .. } => match target {
             InstanceRef::One(id) => vec![GraphNode::Instance(id.clone())],
-            InstanceRef::Pattern { slug_pattern, .. } => index
-                .matching(slug_pattern)
+            InstanceRef::Pattern {
+                slug_pattern,
+                within,
+                ..
+            } => index
+                .matching_within(slug_pattern, within.as_ref())
                 .into_iter()
                 .map(|i| GraphNode::Instance(i.id.clone()))
                 .collect(),

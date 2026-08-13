@@ -10,11 +10,11 @@ nodes:
     slug: vm-t-b01
     kind: virtual-machine
     instances:
-    - id: i-test-apache-main-01
-      slug: apache-main-01
+    - id: i-test-apache-01
+      slug: apache-01
       container: c-apache
       endpoints:
-      - id: ep-test-apache-main-01
+      - id: ep-test-apache-01
         slug: http
         def: e-apache
         protocol: tcp
@@ -23,11 +23,11 @@ nodes:
     slug: vm-t-c01
     kind: virtual-machine
     instances:
-    - id: i-test-gateway-main-01
-      slug: gateway-main-01
+    - id: i-test-gateway-01
+      slug: gateway-01
       container: c-gateway
       endpoints:
-      - id: ep-test-gateway-main-01
+      - id: ep-test-gateway-01
         slug: http
         def: e-gateway
         protocol: tcp
@@ -36,11 +36,11 @@ nodes:
     slug: vm-t-d01
     kind: virtual-machine
     instances:
-    - id: i-test-channel-main-01
-      slug: channel-main-01
+    - id: i-test-channel-01
+      slug: channel-01
       container: c-channel
       endpoints:
-      - id: ep-test-channel-main-01
+      - id: ep-test-channel-01
         slug: http
         def: e-channel
         protocol: tcp
@@ -49,11 +49,11 @@ nodes:
     slug: vm-t-e01
     kind: virtual-machine
     instances:
-    - id: i-test-apigw-main-01
-      slug: apigw-main-01
+    - id: i-test-apigw-01
+      slug: apigw-01
       container: c-apigw
       endpoints:
-      - id: ep-test-apigw-main-01
+      - id: ep-test-apigw-01
         slug: http
         def: e-apigw
         protocol: tcp
@@ -62,11 +62,11 @@ nodes:
     slug: vm-t-f01
     kind: virtual-machine
     instances:
-    - id: i-test-common-main-01
-      slug: common-main-01
+    - id: i-test-common-01
+      slug: common-01
       container: c-common
       endpoints:
-      - id: ep-test-common-main-01
+      - id: ep-test-common-01
         slug: http
         def: e-common
         protocol: tcp
@@ -75,11 +75,11 @@ nodes:
     slug: vm-t-g01
     kind: virtual-machine
     instances:
-    - id: i-test-consul-main-01
-      slug: consul-main-01
+    - id: i-test-consul-01
+      slug: consul-01
       container: c-consul
       endpoints:
-      - id: ep-test-consul-main-01
+      - id: ep-test-consul-01
         slug: http-api
         def: e-consul
         protocol: tcp

@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::Project;
-use crate::environment::{Connection, ContainerInstance, Environment};
+use crate::environment::{Connection, ContainerInstance, DeploymentNode, Environment};
 use crate::id::Id;
 
 pub(crate) struct EnvIndex<'a> {
@@ -34,6 +34,11 @@ pub(crate) struct EnvIndex<'a> {
     known_relationships: HashSet<&'a Id>,
     /// 邏輯層的人。人沒有落地，只能確認「這個 id 真的存在」。
     known_people: HashSet<&'a Id>,
+    /// 每個 Instance 落在哪些 DeploymentNode 底下（含所有祖先）。
+    /// `within` 要用它判斷「這台在不在指定的站點裡」。
+    ancestors: HashMap<&'a Id, Vec<&'a Id>>,
+    /// 這個環境有哪些 DeploymentNode。`within` 指向不存在的節點是 L003。
+    known_nodes: HashSet<&'a Id>,
 }
 
 impl<'a> EnvIndex<'a> {
@@ -43,6 +48,12 @@ impl<'a> EnvIndex<'a> {
 
         let mut by_slug = all.clone();
         by_slug.sort_by(|a, b| a.slug.cmp(&b.slug));
+
+        let mut ancestors: HashMap<&Id, Vec<&Id>> = HashMap::new();
+        let mut known_nodes: HashSet<&Id> = HashSet::new();
+        for node in &env.nodes {
+            走訪(node, &mut vec![], &mut ancestors, &mut known_nodes);
+        }
 
         let mut serving: HashMap<&Id, Vec<&Connection>> = HashMap::new();
         for conn in &env.connections {
@@ -61,7 +72,13 @@ impl<'a> EnvIndex<'a> {
                 .map(|r| &r.id)
                 .collect(),
             known_people: project.logical.people.iter().map(|p| &p.id).collect(),
+            ancestors,
+            known_nodes,
         }
+    }
+
+    pub fn knows_node(&self, id: &Id) -> bool {
+        self.known_nodes.contains(id)
     }
 
     pub fn instance(&self, id: &Id) -> Option<&'a ContainerInstance> {
@@ -93,7 +110,25 @@ impl<'a> EnvIndex<'a> {
     ///
     /// `*foo` 這種沒有前綴的樣式，範圍就是全部，退回線性掃描——正確但慢，
     /// 而實務上不會有人這樣寫。`tests/lint_project.rs` 有測試釘住這個邊界。
-    pub fn matching(&self, pattern: &str) -> Vec<&'a ContainerInstance> {
+    /// 符合樣式的 Instance。`within` 有值時只算那個節點底下的（含所有子孫）。
+    pub fn matching_within(
+        &self,
+        pattern: &str,
+        within: Option<&Id>,
+    ) -> Vec<&'a ContainerInstance> {
+        let 全部 = self.符合樣式(pattern);
+        let Some(node) = within else { return 全部 };
+        全部
+            .into_iter()
+            .filter(|i| {
+                self.ancestors
+                    .get(&i.id)
+                    .is_some_and(|chain| chain.contains(&node))
+            })
+            .collect()
+    }
+
+    fn 符合樣式(&self, pattern: &str) -> Vec<&'a ContainerInstance> {
         let prefix = pattern.split('*').next().unwrap_or("");
         let lo = self.by_slug.partition_point(|i| i.slug.as_str() < prefix);
         let hi = self
@@ -106,4 +141,24 @@ impl<'a> EnvIndex<'a> {
             .copied()
             .collect()
     }
+}
+
+/// 走一遍部署樹，記下每個 Instance 的祖先鏈與所有節點 id。
+fn 走訪<'a>(
+    node: &'a DeploymentNode,
+    chain: &mut Vec<&'a Id>,
+    ancestors: &mut HashMap<&'a Id, Vec<&'a Id>>,
+    nodes: &mut HashSet<&'a Id>,
+) {
+    nodes.insert(&node.id);
+    chain.push(&node.id);
+
+    for inst in &node.instances {
+        ancestors.insert(&inst.id, chain.clone());
+    }
+    for child in &node.children {
+        走訪(child, chain, ancestors, nodes);
+    }
+
+    chain.pop();
 }

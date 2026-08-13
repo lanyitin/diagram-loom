@@ -169,6 +169,7 @@ fn 備援路徑的檢查標準跟正常路徑完全一樣() {
                 // 期望 5 台，實際只有 3 台——標成備援也一樣要被抓到。
                 target: InstanceRef::Pattern {
                     slug_pattern: "redis-*".into(),
+                    within: None,
                     expect: Some(5),
                 },
                 endpoint: Some(Id::new(REDIS_CLIENT)),
@@ -235,4 +236,200 @@ fn 沒標種類的連線預設是正常路徑() {
             .all(|c| c.kind == ConnectionKind::Primary),
         "沒寫 kind 的連線讀回來必須是正常路徑"
     );
+}
+
+// ── C：把萬用字元限定在某個站點底下 ─────────────────────
+
+/// prod 改成兩個站點，Redis 各站三台。
+fn 兩站的專案() -> loom_core::Project {
+    let mut project = 有使用者的專案();
+    let prod = &mut project.environments[0];
+
+    // 再加三台 Redis，湊成兩站各三台。
+    for n in 4..=6 {
+        prod.nodes.extend(vms(
+            "prod",
+            vec![instance(
+                "prod",
+                &format!("redis-0{n}"),
+                REDIS,
+                REDIS_CLIENT,
+                &format!("10.0.2.1{n}:6379"),
+            )],
+        ));
+    }
+
+    // 前三台進主中心，後三台進異地；其餘機器留在主中心。
+    let 全部 = std::mem::take(&mut prod.nodes);
+    let (異地機器, 主中心機器): (Vec<_>, Vec<_>) = 全部.into_iter().partition(|n| {
+        matches!(
+            n.slug.as_str(),
+            "vm-redis-04" | "vm-redis-05" | "vm-redis-06"
+        )
+    });
+
+    prod.nodes = vec![
+        DeploymentNode {
+            id: Id::new("n-主中心"),
+            slug: "dc-主中心".into(),
+            kind: NodeKind::Site,
+            children: 主中心機器,
+            instances: vec![],
+        },
+        DeploymentNode {
+            id: Id::new("n-異地"),
+            slug: "dc-異地".into(),
+            kind: NodeKind::Site,
+            children: 異地機器,
+            instances: vec![],
+        },
+    ];
+
+    // 快取那條改成兩條：每站各三台。
+    prod.connections[1].to = Endpointing::Instance {
+        target: InstanceRef::Pattern {
+            slug_pattern: "redis-*".into(),
+            within: Some(Id::new("n-主中心")),
+            expect: Some(3),
+        },
+        endpoint: Some(Id::new(REDIS_CLIENT)),
+    };
+    let mut 異地那條 = prod.connections[1].clone();
+    異地那條.id = Id::new("conn-prod-redis-異地");
+    異地那條.to = Endpointing::Instance {
+        target: InstanceRef::Pattern {
+            slug_pattern: "redis-*".into(),
+            within: Some(Id::new("n-異地")),
+            expect: Some(3),
+        },
+        endpoint: Some(Id::new(REDIS_CLIENT)),
+    };
+    prod.connections.push(異地那條);
+
+    project
+}
+
+#[test]
+fn 兩站各三台是健康的() {
+    let found = lint(&兩站的專案());
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn 機器從主中心搬到異地會被抓到() {
+    // 這是 L-C 的整個重點。
+    //
+    // 寫成 `redis-* expect 6` 的話，搬一台過去總數還是 6，lint 完全不會叫——
+    // 而「東西還在但位置錯了」正是最難用眼睛發現的那種漏。
+    let mut project = 兩站的專案();
+
+    let prod = &mut project.environments[0];
+    let 搬走的 = {
+        let 主中心 = prod
+            .nodes
+            .iter_mut()
+            .find(|n| n.slug == "dc-主中心")
+            .unwrap();
+        let i = 主中心
+            .children
+            .iter()
+            .position(|n| n.slug == "vm-redis-03")
+            .unwrap();
+        主中心.children.remove(i)
+    };
+    prod.nodes
+        .iter_mut()
+        .find(|n| n.slug == "dc-異地")
+        .unwrap()
+        .children
+        .push(搬走的);
+
+    let found = lint(&project);
+    let 數量錯的: Vec<_> = found.iter().filter(|f| f.rule == Rule::L004).collect();
+    assert_eq!(
+        數量錯的.len(),
+        2,
+        "主中心少一台、異地多一台，兩邊都該叫：{found:?}"
+    );
+    assert!(數量錯的.iter().all(|f| f.detail.contains("限定在")));
+}
+
+#[test]
+fn 沒有限定範圍時搬家抓不到() {
+    // 反過來證明上一條測的是真的東西：不用 within 就抓不到。
+    // 這也是為什麼 within 值得加。
+    let mut project = 兩站的專案();
+
+    let prod = &mut project.environments[0];
+    // 改回「全部六台」的寫法。
+    prod.connections
+        .retain(|c| c.id != Id::new("conn-prod-redis-異地"));
+    prod.connections[1].to = Endpointing::Instance {
+        target: InstanceRef::Pattern {
+            slug_pattern: "redis-*".into(),
+            within: None,
+            expect: Some(6),
+        },
+        endpoint: Some(Id::new(REDIS_CLIENT)),
+    };
+
+    // 一樣把一台搬到異地。
+    let 搬走的 = {
+        let 主中心 = prod
+            .nodes
+            .iter_mut()
+            .find(|n| n.slug == "dc-主中心")
+            .unwrap();
+        let i = 主中心
+            .children
+            .iter()
+            .position(|n| n.slug == "vm-redis-03")
+            .unwrap();
+        主中心.children.remove(i)
+    };
+    prod.nodes
+        .iter_mut()
+        .find(|n| n.slug == "dc-異地")
+        .unwrap()
+        .children
+        .push(搬走的);
+
+    assert!(
+        lint(&project).is_empty(),
+        "沒有 within 的話這種搬動本來就抓不到——這正是加它的理由"
+    );
+}
+
+#[test]
+fn within_指向不存在的節點是錯誤() {
+    // 打錯節點 id 會讓 expect 永遠是 0，看起來像「一台都沒建」。
+    // 如果不特別報出來，使用者會去找根本不存在的問題。
+    let mut project = 兩站的專案();
+    project.environments[0].connections[1].to = Endpointing::Instance {
+        target: InstanceRef::Pattern {
+            slug_pattern: "redis-*".into(),
+            within: Some(Id::new("n-打錯的節點")),
+            expect: Some(3),
+        },
+        endpoint: Some(Id::new(REDIS_CLIENT)),
+    };
+
+    let found = lint(&project);
+    assert!(
+        found
+            .iter()
+            .any(|f| f.rule == Rule::L003 && f.detail.contains("within")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn 限定範圍會顯示在連線表上() {
+    // 只寫「3 台」的話，讀的人會以為全部只有 3 台。
+    let project = 兩站的專案();
+    let row = rows(&project)
+        .into_iter()
+        .find(|r| r.id == Id::new("conn-prod-2"))
+        .unwrap();
+    assert_eq!(row.to.label, "redis-* @ dc-主中心");
 }

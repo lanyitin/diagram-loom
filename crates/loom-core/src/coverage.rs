@@ -204,8 +204,12 @@ fn 目標規模(index: &EnvIndex<'_>, to: &Endpointing) -> (u32, Option<u32>) {
             InstanceRef::One(_) => (1, None),
             InstanceRef::Pattern {
                 slug_pattern,
+                within,
                 expect,
-            } => (index.matching(slug_pattern).len() as u32, *expect),
+            } => (
+                index.matching_within(slug_pattern, within.as_ref()).len() as u32,
+                *expect,
+            ),
         },
         Endpointing::Infra { .. } | Endpointing::System { .. } => (1, None),
         // 人不是「幾台」，數量對它沒有意義。

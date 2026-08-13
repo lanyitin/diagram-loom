@@ -182,6 +182,7 @@ pub fn to_cluster(pattern: &str, expect: Option<u32>, endpoint_def: &str) -> End
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),
+            within: None,
             expect,
         },
         endpoint: Some(Id::new(endpoint_def)),

@@ -46,6 +46,7 @@ fn prod_with_batch(count: usize, expect: u32) -> loom_core::Project {
     prod.connections[1].to = Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: "redis-*".into(),
+            within: None,
             expect: Some(expect),
         },
         endpoint: Some(Id::new(REDIS_CLIENT)),

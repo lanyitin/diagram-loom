@@ -126,6 +126,21 @@ pub enum InstanceRef {
     /// 因此沒填 `expect` 要能被 lint 抓出來（L005），型別就不能強制它存在。
     Pattern {
         slug_pattern: String,
+        /// 只算這個 [`DeploymentNode`] 底下的（含所有子孫）。
+        ///
+        /// # 為什麼需要它
+        ///
+        /// `redis-* expect 6` 只數總量。有人把一台機器從主中心搬到異地，
+        /// 總數還是 6，**lint 不會叫**——而那正是這個工具存在的理由。
+        ///
+        /// 拆成兩條「主中心 3 台」「異地 3 台」就抓得到。而站點資訊
+        /// **本來就在模型裡**（Instance 住在 VM 裡，VM 住在站點裡），
+        /// 所以不需要新的 Cluster 概念，只需要能限定範圍。
+        ///
+        /// 順帶好處：站點不必再編進 slug（`redis-main-01`）。
+        /// 名字編了資訊就會說謊——機器搬家之後 slug 不會自己改。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        within: Option<Id>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         /// 用 `u32` 而不是 `usize`：這是「期望有幾台機器」，不是記憶體索引。
         /// 而且 `usize` 不能匯出成 TypeScript（specta 怕 BigInt 精度問題）。

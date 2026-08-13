@@ -2,8 +2,10 @@
 /**
  * 挑要比對哪幾個環境。
  *
- * 沒勾＝全部。環境不多時勾選沒意義，所以少於三個就整個不顯示——
- * 畫面上不放不影響任何事情的控制項。
+ * 沒勾＝全部。只有一個環境時才隱藏——那時真的沒有東西可比。
+ *
+ * 原本的門檻訂在三個，理由是「兩個環境勾選沒意義」。那是錯的：
+ * 兩欄的時候「我現在只想看 prod」一樣是真實需求，尤其契約很多的時候。
  */
 import { useProject } from '../lib/store'
 import type { Id } from '../lib/model'
@@ -33,7 +35,7 @@ function 有勾(id: Id) {
 </script>
 
 <template>
-  <div v-if="store.環境.length >= 3" class="picker">
+  <div v-if="store.環境.length >= 2" class="picker">
     <span class="muted label">比對</span>
     <label v-for="env in store.環境" :key="env.id" class="chip" :class="{ on: 有勾(env.id) }">
       <input type="checkbox" :checked="有勾(env.id)" @change="切換(env.id)">

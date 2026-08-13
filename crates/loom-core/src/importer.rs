@@ -312,6 +312,9 @@ fn import_row(
         let target = if to_is_pattern {
             InstanceRef::Pattern {
                 slug_pattern: format!("{to_node_raw}-{service}"),
+                // 試算表目前沒有欄位可以說「這台在哪個機房」，所以不限定範圍。
+                // 見 docs/domain-model.md 的限制 D。
+                within: None,
                 expect,
             }
         } else {

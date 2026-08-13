@@ -10,11 +10,11 @@ nodes:
     slug: vm-b01
     kind: virtual-machine
     instances:
-    - id: i-prod-apache-main-01
-      slug: apache-main-01
+    - id: i-prod-apache-01
+      slug: apache-01
       container: c-apache
       endpoints:
-      - id: ep-prod-apache-main-01
+      - id: ep-prod-apache-01
         slug: http
         def: e-apache
         protocol: tcp
@@ -23,11 +23,11 @@ nodes:
     slug: vm-b02
     kind: virtual-machine
     instances:
-    - id: i-prod-apache-main-02
-      slug: apache-main-02
+    - id: i-prod-apache-02
+      slug: apache-02
       container: c-apache
       endpoints:
-      - id: ep-prod-apache-main-02
+      - id: ep-prod-apache-02
         slug: http
         def: e-apache
         protocol: tcp
@@ -36,11 +36,11 @@ nodes:
     slug: vm-c01
     kind: virtual-machine
     instances:
-    - id: i-prod-gateway-main-01
-      slug: gateway-main-01
+    - id: i-prod-gateway-01
+      slug: gateway-01
       container: c-gateway
       endpoints:
-      - id: ep-prod-gateway-main-01
+      - id: ep-prod-gateway-01
         slug: http
         def: e-gateway
         protocol: tcp
@@ -49,11 +49,11 @@ nodes:
     slug: vm-c02
     kind: virtual-machine
     instances:
-    - id: i-prod-gateway-main-02
-      slug: gateway-main-02
+    - id: i-prod-gateway-02
+      slug: gateway-02
       container: c-gateway
       endpoints:
-      - id: ep-prod-gateway-main-02
+      - id: ep-prod-gateway-02
         slug: http
         def: e-gateway
         protocol: tcp
@@ -62,11 +62,11 @@ nodes:
     slug: vm-d01
     kind: virtual-machine
     instances:
-    - id: i-prod-channel-main-01
-      slug: channel-main-01
+    - id: i-prod-channel-01
+      slug: channel-01
       container: c-channel
       endpoints:
-      - id: ep-prod-channel-main-01
+      - id: ep-prod-channel-01
         slug: http
         def: e-channel
         protocol: tcp
@@ -75,11 +75,11 @@ nodes:
     slug: vm-d02
     kind: virtual-machine
     instances:
-    - id: i-prod-channel-main-02
-      slug: channel-main-02
+    - id: i-prod-channel-02
+      slug: channel-02
       container: c-channel
       endpoints:
-      - id: ep-prod-channel-main-02
+      - id: ep-prod-channel-02
         slug: http
         def: e-channel
         protocol: tcp
@@ -88,11 +88,11 @@ nodes:
     slug: vm-e01
     kind: virtual-machine
     instances:
-    - id: i-prod-apigw-main-01
-      slug: apigw-main-01
+    - id: i-prod-apigw-01
+      slug: apigw-01
       container: c-apigw
       endpoints:
-      - id: ep-prod-apigw-main-01
+      - id: ep-prod-apigw-01
         slug: http
         def: e-apigw
         protocol: tcp
@@ -101,11 +101,11 @@ nodes:
     slug: vm-e02
     kind: virtual-machine
     instances:
-    - id: i-prod-apigw-main-02
-      slug: apigw-main-02
+    - id: i-prod-apigw-02
+      slug: apigw-02
       container: c-apigw
       endpoints:
-      - id: ep-prod-apigw-main-02
+      - id: ep-prod-apigw-02
         slug: http
         def: e-apigw
         protocol: tcp
@@ -114,11 +114,11 @@ nodes:
     slug: vm-f01
     kind: virtual-machine
     instances:
-    - id: i-prod-common-main-01
-      slug: common-main-01
+    - id: i-prod-common-01
+      slug: common-01
       container: c-common
       endpoints:
-      - id: ep-prod-common-main-01
+      - id: ep-prod-common-01
         slug: http
         def: e-common
         protocol: tcp
@@ -127,11 +127,11 @@ nodes:
     slug: vm-f02
     kind: virtual-machine
     instances:
-    - id: i-prod-common-main-02
-      slug: common-main-02
+    - id: i-prod-common-02
+      slug: common-02
       container: c-common
       endpoints:
-      - id: ep-prod-common-main-02
+      - id: ep-prod-common-02
         slug: http
         def: e-common
         protocol: tcp
@@ -140,20 +140,20 @@ nodes:
     slug: vm-g01
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-main-01
-      slug: consul-main-01
+    - id: i-prod-consul-01
+      slug: consul-01
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-main-01
+      - id: ep-prod-consul-01
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.1.5.11:8500
-    - id: i-prod-redis-main-01
-      slug: redis-main-01
+    - id: i-prod-redis-01
+      slug: redis-01
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-main-01
+      - id: ep-prod-redis-01
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -162,20 +162,20 @@ nodes:
     slug: vm-g02
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-main-02
-      slug: consul-main-02
+    - id: i-prod-consul-02
+      slug: consul-02
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-main-02
+      - id: ep-prod-consul-02
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.1.5.12:8500
-    - id: i-prod-redis-main-02
-      slug: redis-main-02
+    - id: i-prod-redis-02
+      slug: redis-02
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-main-02
+      - id: ep-prod-redis-02
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -184,20 +184,20 @@ nodes:
     slug: vm-g03
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-main-03
-      slug: consul-main-03
+    - id: i-prod-consul-03
+      slug: consul-03
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-main-03
+      - id: ep-prod-consul-03
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.1.5.13:8500
-    - id: i-prod-redis-main-03
-      slug: redis-main-03
+    - id: i-prod-redis-03
+      slug: redis-03
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-main-03
+      - id: ep-prod-redis-03
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -223,11 +223,11 @@ nodes:
     slug: vm-b03
     kind: virtual-machine
     instances:
-    - id: i-prod-apache-dr-01
-      slug: apache-dr-01
+    - id: i-prod-apache-03
+      slug: apache-03
       container: c-apache
       endpoints:
-      - id: ep-prod-apache-dr-01
+      - id: ep-prod-apache-03
         slug: http
         def: e-apache
         protocol: tcp
@@ -236,11 +236,11 @@ nodes:
     slug: vm-c03
     kind: virtual-machine
     instances:
-    - id: i-prod-gateway-dr-01
-      slug: gateway-dr-01
+    - id: i-prod-gateway-03
+      slug: gateway-03
       container: c-gateway
       endpoints:
-      - id: ep-prod-gateway-dr-01
+      - id: ep-prod-gateway-03
         slug: http
         def: e-gateway
         protocol: tcp
@@ -249,11 +249,11 @@ nodes:
     slug: vm-d03
     kind: virtual-machine
     instances:
-    - id: i-prod-channel-dr-01
-      slug: channel-dr-01
+    - id: i-prod-channel-03
+      slug: channel-03
       container: c-channel
       endpoints:
-      - id: ep-prod-channel-dr-01
+      - id: ep-prod-channel-03
         slug: http
         def: e-channel
         protocol: tcp
@@ -262,11 +262,11 @@ nodes:
     slug: vm-e03
     kind: virtual-machine
     instances:
-    - id: i-prod-apigw-dr-01
-      slug: apigw-dr-01
+    - id: i-prod-apigw-03
+      slug: apigw-03
       container: c-apigw
       endpoints:
-      - id: ep-prod-apigw-dr-01
+      - id: ep-prod-apigw-03
         slug: http
         def: e-apigw
         protocol: tcp
@@ -275,11 +275,11 @@ nodes:
     slug: vm-f03
     kind: virtual-machine
     instances:
-    - id: i-prod-common-dr-01
-      slug: common-dr-01
+    - id: i-prod-common-03
+      slug: common-03
       container: c-common
       endpoints:
-      - id: ep-prod-common-dr-01
+      - id: ep-prod-common-03
         slug: http
         def: e-common
         protocol: tcp
@@ -288,20 +288,20 @@ nodes:
     slug: vm-g04
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-dr-01
-      slug: consul-dr-01
+    - id: i-prod-consul-04
+      slug: consul-04
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-dr-01
+      - id: ep-prod-consul-04
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.2.5.11:8500
-    - id: i-prod-redis-dr-01
-      slug: redis-dr-01
+    - id: i-prod-redis-04
+      slug: redis-04
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-dr-01
+      - id: ep-prod-redis-04
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -310,20 +310,20 @@ nodes:
     slug: vm-g05
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-dr-02
-      slug: consul-dr-02
+    - id: i-prod-consul-05
+      slug: consul-05
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-dr-02
+      - id: ep-prod-consul-05
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.2.5.12:8500
-    - id: i-prod-redis-dr-02
-      slug: redis-dr-02
+    - id: i-prod-redis-05
+      slug: redis-05
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-dr-02
+      - id: ep-prod-redis-05
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -332,20 +332,20 @@ nodes:
     slug: vm-g06
     kind: virtual-machine
     instances:
-    - id: i-prod-consul-dr-03
-      slug: consul-dr-03
+    - id: i-prod-consul-06
+      slug: consul-06
       container: c-consul
       endpoints:
-      - id: ep-prod-consul-dr-03
+      - id: ep-prod-consul-06
         slug: http-api
         def: e-consul
         protocol: tcp
         address: 10.2.5.13:8500
-    - id: i-prod-redis-dr-03
-      slug: redis-dr-03
+    - id: i-prod-redis-06
+      slug: redis-06
       container: c-redis
       endpoints:
-      - id: ep-prod-redis-dr-03
+      - id: ep-prod-redis-06
         slug: client-port
         def: e-redis
         protocol: tcp
@@ -426,11 +426,13 @@ connections:
   purpose: 同中心優先（主中心）
   from: !instance
     target: !pattern
-      slug_pattern: gateway-main-*
+      slug_pattern: gateway-*
+      within: n-prod-dc-主中心
       expect: 2
   to: !instance
     target: !pattern
-      slug_pattern: channel-main-*
+      slug_pattern: channel-*
+      within: n-prod-dc-主中心
       expect: 2
     endpoint: e-channel
 - id: conn-prod-07
@@ -438,11 +440,13 @@ connections:
   purpose: 同中心優先（異地）
   from: !instance
     target: !pattern
-      slug_pattern: gateway-dr-*
+      slug_pattern: gateway-*
+      within: n-prod-dc-異地
       expect: 1
   to: !instance
     target: !pattern
-      slug_pattern: channel-dr-*
+      slug_pattern: channel-*
+      within: n-prod-dc-異地
       expect: 1
     endpoint: e-channel
 - id: conn-prod-08
@@ -451,11 +455,13 @@ connections:
   kind: fallback
   from: !instance
     target: !pattern
-      slug_pattern: gateway-main-*
+      slug_pattern: gateway-*
+      within: n-prod-dc-主中心
       expect: 2
   to: !instance
     target: !pattern
-      slug_pattern: channel-dr-*
+      slug_pattern: channel-*
+      within: n-prod-dc-異地
       expect: 1
     endpoint: e-channel
 - id: conn-prod-09
@@ -464,11 +470,13 @@ connections:
   kind: fallback
   from: !instance
     target: !pattern
-      slug_pattern: gateway-dr-*
+      slug_pattern: gateway-*
+      within: n-prod-dc-異地
       expect: 1
   to: !instance
     target: !pattern
-      slug_pattern: channel-main-*
+      slug_pattern: channel-*
+      within: n-prod-dc-主中心
       expect: 2
     endpoint: e-channel
 - id: conn-prod-10
@@ -508,11 +516,13 @@ connections:
   purpose: 同中心優先（主中心）
   from: !instance
     target: !pattern
-      slug_pattern: apigw-main-*
+      slug_pattern: apigw-*
+      within: n-prod-dc-主中心
       expect: 2
   to: !instance
     target: !pattern
-      slug_pattern: common-main-*
+      slug_pattern: common-*
+      within: n-prod-dc-主中心
       expect: 2
     endpoint: e-common
 - id: conn-prod-14
@@ -520,11 +530,13 @@ connections:
   purpose: 同中心優先（異地）
   from: !instance
     target: !pattern
-      slug_pattern: apigw-dr-*
+      slug_pattern: apigw-*
+      within: n-prod-dc-異地
       expect: 1
   to: !instance
     target: !pattern
-      slug_pattern: common-dr-*
+      slug_pattern: common-*
+      within: n-prod-dc-異地
       expect: 1
     endpoint: e-common
 - id: conn-prod-15
@@ -533,11 +545,13 @@ connections:
   kind: fallback
   from: !instance
     target: !pattern
-      slug_pattern: apigw-main-*
+      slug_pattern: apigw-*
+      within: n-prod-dc-主中心
       expect: 2
   to: !instance
     target: !pattern
-      slug_pattern: common-dr-*
+      slug_pattern: common-*
+      within: n-prod-dc-異地
       expect: 1
     endpoint: e-common
 - id: conn-prod-16
@@ -546,11 +560,13 @@ connections:
   kind: fallback
   from: !instance
     target: !pattern
-      slug_pattern: apigw-dr-*
+      slug_pattern: apigw-*
+      within: n-prod-dc-異地
       expect: 1
   to: !instance
     target: !pattern
-      slug_pattern: common-main-*
+      slug_pattern: common-*
+      within: n-prod-dc-主中心
       expect: 2
     endpoint: e-common
 - id: conn-prod-17

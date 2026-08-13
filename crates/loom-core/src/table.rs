@@ -162,9 +162,10 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &End
             }
             InstanceRef::Pattern {
                 slug_pattern,
+                within,
                 expect,
             } => {
-                let matched = index.matching(slug_pattern);
+                let matched = index.matching_within(slug_pattern, within.as_ref());
                 let addresses = matched
                     .iter()
                     .filter_map(|i| {
@@ -181,7 +182,11 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &End
                 });
                 Side {
                     kind: SideKind::Instance,
-                    label: slug_pattern.clone(),
+                    // 限定了範圍就寫出來，否則「3 台」看起來像全部只有 3 台。
+                    label: match within {
+                        Some(node) => format!("{slug_pattern} @ {}", 節點名(env, node)),
+                        None => slug_pattern.clone(),
+                    },
                     endpoint: ep.map(|e| e.slug.clone()),
                     addresses,
                     matched: matched.len() as u32,
@@ -243,4 +248,22 @@ fn 解析(index: &EnvIndex<'_>, env: &Environment, logical: &Logical, side: &End
             }
         }
     }
+}
+
+/// 部署節點的顯示名。找不到就印 id——那是 L003，使用者要知道是哪個壞了。
+fn 節點名(env: &Environment, id: &Id) -> String {
+    fn 找<'a>(nodes: &'a [crate::environment::DeploymentNode], id: &Id) -> Option<&'a str> {
+        for n in nodes {
+            if &n.id == id {
+                return Some(&n.slug);
+            }
+            if let Some(found) = 找(&n.children, id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    找(&env.nodes, id)
+        .map(str::to_string)
+        .unwrap_or_else(|| id.to_string())
 }

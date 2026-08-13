@@ -85,6 +85,7 @@ fn 開頭就是萬用字元的樣式也要算對數量() {
         && let InstanceRef::Pattern {
             slug_pattern,
             expect,
+            ..
         } = target
     {
         *slug_pattern = "*-01".into();

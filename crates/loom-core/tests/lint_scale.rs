@@ -152,6 +152,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                 from: Endpointing::Instance {
                     target: InstanceRef::Pattern {
                         slug_pattern: format!("svc{i:03}-*"),
+                        within: None,
                         expect: Some(scale.nodes as u32),
                     },
                     endpoint: None,
@@ -173,6 +174,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                 to: Endpointing::Instance {
                     target: InstanceRef::Pattern {
                         slug_pattern: format!("svc{next:03}-*"),
+                        within: None,
                         expect: Some(scale.nodes as u32),
                     },
                     endpoint: Some(Id::new(def(next))),
