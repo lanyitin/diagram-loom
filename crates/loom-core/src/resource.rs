@@ -141,6 +141,106 @@ impl Resource {
     }
 }
 
+/// 照 id 把一個元素撈出來。
+///
+/// # 為什麼不走 [`crate::inventory`]
+///
+/// 那份是給畫面用的，每叫一次都會**跑一遍整份 lint** 來標紅點。
+/// [`crate::cascade`] 要在一個迴圈裡反覆查，付不起這個代價。
+///
+/// 走訪的順序刻意跟 [`delete`] 一模一樣——這兩個函式對「元素住在哪」
+/// 的認知必須一致，不然會出現「查得到卻刪不掉」。
+pub fn find(project: &Project, id: &Id) -> Option<Resource> {
+    let logical = &project.logical;
+
+    if let Some(x) = logical.people.iter().find(|x| &x.id == id) {
+        return Some(Resource::Person(x.clone()));
+    }
+    if let Some(x) = logical.systems.iter().find(|x| &x.id == id) {
+        return Some(Resource::System(x.clone()));
+    }
+    if let Some(x) = logical.containers.iter().find(|x| &x.id == id) {
+        return Some(Resource::Container(x.clone()));
+    }
+    if let Some(x) = logical.relationships.iter().find(|x| &x.id == id) {
+        return Some(Resource::Relationship(x.clone()));
+    }
+    // 接點定義掛在服務或外部系統身上，兩邊都找。
+    for (owner, defs) in logical
+        .containers
+        .iter()
+        .map(|c| (&c.id, &c.endpoints))
+        .chain(logical.systems.iter().map(|s| (&s.id, &s.endpoints)))
+    {
+        if let Some(def) = defs.iter().find(|d| &d.id == id) {
+            return Some(Resource::EndpointDef {
+                owner: owner.clone(),
+                def: def.clone(),
+            });
+        }
+    }
+
+    for env in &project.environments {
+        if &env.id == id {
+            return Some(Resource::Environment(env.clone()));
+        }
+        if let Some(found) = find_in_nodes(&env.id, None, &env.nodes, id) {
+            return Some(found);
+        }
+        for n in &env.infra {
+            if &n.id == id {
+                return Some(Resource::Infra {
+                    environment: env.id.clone(),
+                    node: n.clone(),
+                });
+            }
+            if let Some(ep) = n.endpoints.iter().find(|e| &e.id == id) {
+                return Some(Resource::InfraEndpoint {
+                    environment: env.id.clone(),
+                    node: n.id.clone(),
+                    endpoint: ep.clone(),
+                });
+            }
+        }
+        if let Some(si) = env.systems.iter().find(|s| &s.id == id) {
+            return Some(Resource::SystemInstance {
+                environment: env.id.clone(),
+                instance: si.clone(),
+            });
+        }
+    }
+    None
+}
+
+/// 機器是一棵樹，服務實體掛在機器上，所以這兩個要一起遞迴。
+fn find_in_nodes(
+    environment: &Id,
+    within: Option<&Id>,
+    nodes: &[DeploymentNode],
+    id: &Id,
+) -> Option<Resource> {
+    for n in nodes {
+        if &n.id == id {
+            return Some(Resource::Node {
+                environment: environment.clone(),
+                within: within.cloned(),
+                node: n.clone(),
+            });
+        }
+        if let Some(i) = n.instances.iter().find(|i| &i.id == id) {
+            return Some(Resource::Instance {
+                environment: environment.clone(),
+                node: n.id.clone(),
+                instance: i.clone(),
+            });
+        }
+        if let Some(found) = find_in_nodes(environment, Some(&n.id), &n.children, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// 空白的新資源，給表單當起點。
 ///
 /// # 為什麼 id 在這裡就發好

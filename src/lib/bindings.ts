@@ -459,7 +459,7 @@ export type Edit_Deserialize =
 	 *  那正是「我還不知道位址」該有的狀態。
 	 */
 	address: string | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  L007 的修法：填上用途。
  * 
@@ -469,27 +469,27 @@ export type Edit_Deserialize =
 	environment: Id | null,
 	subject: Id,
 	purpose: string,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never; updateResource?: never } | 
 /**  L004 / L005 的修法：萬用字元的期望數量。 */
 ({ setExpect: {
 	environment: Id,
 	connection: Id,
 	side: ConnectionEnd,
 	expect: number | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
 	/**  Instance 或外部系統實體的 id。 */
 	subject: Id,
 	standalone: boolean,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
 /**  改成正常路徑或備援路徑。 */
 ({ setConnectionKind: {
 	environment: Id,
 	connection: Id,
 	kind: ConnectionKind,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  L001／L002 的修法：新增一條環境層連線。
  * 
@@ -508,7 +508,7 @@ export type Edit_Deserialize =
 	kind: ConnectionKind,
 	from: Endpointing_Deserialize,
 	to: Endpointing_Deserialize,
-} }) & { addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  批次建立機器與服務實體：L001「這個服務一台都還沒建」的修法。
  * 
@@ -520,7 +520,7 @@ export type Edit_Deserialize =
 	/**  掛在哪個部署節點底下（通常是站點）。`None` 表示掛在環境最上層。 */
 	within: Id | null,
 	nodes: DeploymentNode_Deserialize[],
-} }) & { addConnection?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  刪掉一條環境層連線。
  * 
@@ -529,24 +529,49 @@ export type Edit_Deserialize =
 ({ deleteConnection: {
 	environment: Id,
 	connection: Id,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**  新增一個模型元素。id 由 [`crate::resource::blank`] 先發好。 */
-({ addResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+({ addResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  整份換掉一個模型元素。
  * 
  *  帶完整的值而不是欄位差異：整份換掉的語意最單純，
  *  而復原本來就是存整份快照，省不了什麼。
  */
-({ updateResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+({ updateResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  刪掉一個模型元素。
  * 
  *  **不連帶刪除。** 指著它的東西會變成懸空，由 L012 叫出來
  *  （見 `docs/decisions.md`）。連帶刪除可能一次消失幾十個東西，
  *  而這工具的重點就是「怕漏」。
+ * 
+ *  想連帶刪除的話走 [`crate::cascade`]：它把「還會壞掉哪些」算成
+ *  一串 `Edit`，包成一個 [`Edit::Batch`]，**先給人看過**再送進來。
  */
-({ deleteResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never };
+({ deleteResource: Resource_Deserialize }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+/**
+ *  一整批修改，算**一步**。
+ * 
+ *  # 為什麼需要它
+ * 
+ *  從一份盤點資料建模型是幾百次新增。一次一個 `Edit` 有三個代價，
+ *  每一個都是真的痛：
+ * 
+ *  - **復原變成按幾百次。** 而「Agent 建了一批、人看過覺得不對」
+ *    正是最需要一鍵退回的時候。
+ *  - **每一步都要重算一次 lint。** 幾百條連線的專案上這是平方級的浪費。
+ *  - **MCP 那邊是幾百趟來回。** 慢的是趟數，不是每趟做的事。
+ * 
+ *  # 全成功才算數
+ * 
+ *  中途失敗**整批不算**，跟 [`Edit::AddInstances`] 同一個規矩。
+ *  「建了一半」是最糟的結果：看起來成功了，其實模型是殘的，
+ *  而殘在哪裡沒有人知道。
+ * 
+ *  巢狀是允許的，不特別處理——遞迴下去語意剛好對。
+ */
+({ batch: Edit_Deserialize[] }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never };
 
 /**  對專案的一次修改。 */
 export type Edit_Serialize = 
@@ -564,7 +589,7 @@ export type Edit_Serialize =
 	 *  那正是「我還不知道位址」該有的狀態。
 	 */
 	address: string | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  L007 的修法：填上用途。
  * 
@@ -574,27 +599,27 @@ export type Edit_Serialize =
 	environment: Id | null,
 	subject: Id,
 	purpose: string,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never; updateResource?: never } | 
 /**  L004 / L005 的修法：萬用字元的期望數量。 */
 ({ setExpect: {
 	environment: Id,
 	connection: Id,
 	side: ConnectionEnd,
 	expect: number | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
 	/**  Instance 或外部系統實體的 id。 */
 	subject: Id,
 	standalone: boolean,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; updateResource?: never } | 
 /**  改成正常路徑或備援路徑。 */
 ({ setConnectionKind: {
 	environment: Id,
 	connection: Id,
 	kind: ConnectionKind,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  L001／L002 的修法：新增一條環境層連線。
  * 
@@ -613,7 +638,7 @@ export type Edit_Serialize =
 	kind: ConnectionKind,
 	from: Endpointing_Serialize,
 	to: Endpointing_Serialize,
-} }) & { addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  批次建立機器與服務實體：L001「這個服務一台都還沒建」的修法。
  * 
@@ -625,7 +650,7 @@ export type Edit_Serialize =
 	/**  掛在哪個部署節點底下（通常是站點）。`None` 表示掛在環境最上層。 */
 	within: Id | null,
 	nodes: DeploymentNode_Serialize[],
-} }) & { addConnection?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  刪掉一條環境層連線。
  * 
@@ -634,24 +659,49 @@ export type Edit_Serialize =
 ({ deleteConnection: {
 	environment: Id,
 	connection: Id,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**  新增一個模型元素。id 由 [`crate::resource::blank`] 先發好。 */
-({ addResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+({ addResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
 /**
  *  整份換掉一個模型元素。
  * 
  *  帶完整的值而不是欄位差異：整份換掉的語意最單純，
  *  而復原本來就是存整份快照，省不了什麼。
  */
-({ updateResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+({ updateResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  刪掉一個模型元素。
  * 
  *  **不連帶刪除。** 指著它的東西會變成懸空，由 L012 叫出來
  *  （見 `docs/decisions.md`）。連帶刪除可能一次消失幾十個東西，
  *  而這工具的重點就是「怕漏」。
+ * 
+ *  想連帶刪除的話走 [`crate::cascade`]：它把「還會壞掉哪些」算成
+ *  一串 `Edit`，包成一個 [`Edit::Batch`]，**先給人看過**再送進來。
  */
-({ deleteResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never };
+({ deleteResource: Resource_Serialize }) & { addConnection?: never; addInstances?: never; addResource?: never; batch?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never } | 
+/**
+ *  一整批修改，算**一步**。
+ * 
+ *  # 為什麼需要它
+ * 
+ *  從一份盤點資料建模型是幾百次新增。一次一個 `Edit` 有三個代價，
+ *  每一個都是真的痛：
+ * 
+ *  - **復原變成按幾百次。** 而「Agent 建了一批、人看過覺得不對」
+ *    正是最需要一鍵退回的時候。
+ *  - **每一步都要重算一次 lint。** 幾百條連線的專案上這是平方級的浪費。
+ *  - **MCP 那邊是幾百趟來回。** 慢的是趟數，不是每趟做的事。
+ * 
+ *  # 全成功才算數
+ * 
+ *  中途失敗**整批不算**，跟 [`Edit::AddInstances`] 同一個規矩。
+ *  「建了一半」是最糟的結果：看起來成功了，其實模型是殘的，
+ *  而殘在哪裡沒有人知道。
+ * 
+ *  巢狀是允許的，不特別處理——遞迴下去語意剛好對。
+ */
+({ batch: Edit_Serialize[] }) & { addConnection?: never; addInstances?: never; addResource?: never; deleteConnection?: never; deleteResource?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never; updateResource?: never };
 
 /**  動到的是什麼東西。畫面上用來分組。 */
 export type Element = "environment" | 

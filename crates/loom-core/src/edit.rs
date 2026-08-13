@@ -133,7 +133,31 @@ pub enum Edit {
     /// **不連帶刪除。** 指著它的東西會變成懸空，由 L012 叫出來
     /// （見 `docs/decisions.md`）。連帶刪除可能一次消失幾十個東西，
     /// 而這工具的重點就是「怕漏」。
+    ///
+    /// 想連帶刪除的話走 [`crate::cascade`]：它把「還會壞掉哪些」算成
+    /// 一串 `Edit`，包成一個 [`Edit::Batch`]，**先給人看過**再送進來。
     DeleteResource(Resource),
+
+    /// 一整批修改，算**一步**。
+    ///
+    /// # 為什麼需要它
+    ///
+    /// 從一份盤點資料建模型是幾百次新增。一次一個 `Edit` 有三個代價，
+    /// 每一個都是真的痛：
+    ///
+    /// - **復原變成按幾百次。** 而「Agent 建了一批、人看過覺得不對」
+    ///   正是最需要一鍵退回的時候。
+    /// - **每一步都要重算一次 lint。** 幾百條連線的專案上這是平方級的浪費。
+    /// - **MCP 那邊是幾百趟來回。** 慢的是趟數，不是每趟做的事。
+    ///
+    /// # 全成功才算數
+    ///
+    /// 中途失敗**整批不算**，跟 [`Edit::AddInstances`] 同一個規矩。
+    /// 「建了一半」是最糟的結果：看起來成功了，其實模型是殘的，
+    /// 而殘在哪裡沒有人知道。
+    ///
+    /// 巢狀是允許的，不特別處理——遞迴下去語意剛好對。
+    Batch(Vec<Edit>),
 }
 
 impl Edit {
@@ -151,6 +175,19 @@ impl Edit {
             Edit::AddResource(r) => r.kind_name_label("新增"),
             Edit::UpdateResource(r) => r.kind_name_label("修改"),
             Edit::DeleteResource(r) => r.kind_name_label("刪除"),
+            // 整批都在做同一件事就講那件事——「復原：新增服務」比
+            // 「復原：批次修改」有用得多，而一批通常真的就是同一件事。
+            Edit::Batch(edits) => match edits.split_first() {
+                Some((first, rest)) => {
+                    let label = first.label();
+                    if rest.iter().all(|e| e.label() == label) {
+                        label
+                    } else {
+                        "批次修改"
+                    }
+                }
+                None => "批次修改",
+            },
         }
     }
 }
@@ -169,6 +206,21 @@ pub enum EditError {
     },
     /// 這條規則沒有「填一格就好」的修法。
     NoFix(Rule),
+    /// 空的 [`Edit::Batch`]。
+    ///
+    /// 放過去的話會留下一步「什麼都沒做」的可復原紀錄，而使用者按了
+    /// 復原卻沒有任何變化——那比報錯難懂得多。
+    EmptyBatch,
+    /// [`Edit::Batch`] 裡的第幾個失敗了。**整批都沒有套用。**
+    ///
+    /// 帶上序號是因為 Agent 一次送幾百個進來，只說「撞名了」它無從下手；
+    /// 說「第 37 個撞名了」它才知道要改哪一個再送一次。
+    InBatch {
+        /// 從 0 開始數。
+        at: usize,
+        total: usize,
+        cause: Box<EditError>,
+    },
     /// 這個 id 已經有一條連線／一個元素了。
     AlreadyExists(Id),
     /// 名稱是空的。空名字在畫面上是一列空白，找不到也刪不掉。
@@ -222,6 +274,13 @@ impl fmt::Display for EditError {
             EditError::NoFix(rule) => {
                 write!(f, "{} 沒有填一格就能解決的修法", rule.code())
             }
+            EditError::EmptyBatch => write!(f, "這批修改是空的，沒有東西可以套用"),
+            EditError::InBatch { at, total, cause } => write!(
+                f,
+                "這批 {total} 項修改的第 {} 項失敗了：{cause}。**整批都沒有套用**，\
+                 改掉那一項再整批送一次",
+                at + 1
+            ),
         }
     }
 }
@@ -413,6 +472,27 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             if env.connections.len() == original {
                 return Err(EditError::NoSuchConnection(connection.clone()));
             }
+            Ok(())
+        }
+
+        Edit::Batch(edits) => {
+            if edits.is_empty() {
+                return Err(EditError::EmptyBatch);
+            }
+            // 在複本上跑完才換過去。這一整段就是為了守住這個函式最上面
+            // 那句承諾：**失敗時 `project` 完全沒被動過**。
+            //
+            // 代價是複製一份專案，幾千個元素是毫秒級——而它換掉的是
+            // 「一批做到第 37 個才失敗」這種沒人救得回來的狀態。
+            let mut scratch = project.clone();
+            for (i, e) in edits.iter().enumerate() {
+                apply(&mut scratch, e).map_err(|err| EditError::InBatch {
+                    at: i,
+                    total: edits.len(),
+                    cause: Box::new(err),
+                })?;
+            }
+            *project = scratch;
             Ok(())
         }
     }

@@ -19,6 +19,7 @@
 //! `expect` 是 `Option`。型別若強制它們存在，對應的 lint 規則就永遠不會觸發。
 
 pub mod batch;
+pub mod cascade;
 pub mod connect;
 pub mod coverage;
 pub mod edit;
