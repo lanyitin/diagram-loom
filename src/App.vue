@@ -4,6 +4,7 @@ import { useProject } from './lib/store'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import EnvPicker from './components/EnvPicker.vue'
+import ImportWizard from './components/ImportWizard.vue'
 import LintPanel from './components/LintPanel.vue'
 
 const store = useProject()
@@ -24,6 +25,7 @@ async function 選專案() {
       <span class="grow" />
 
       <button :disabled="store.忙碌中" @click="選專案">開啟專案…</button>
+      <button :disabled="!store.已開啟 || store.忙碌中" @click="store.匯入中 = true">匯入試算表…</button>
       <button :disabled="!store.已開啟 || store.忙碌中" @click="store.重新檢查()">重新檢查</button>
       <button class="primary" :disabled="!store.已開啟 || store.忙碌中" @click="store.儲存()">
         儲存
@@ -63,6 +65,8 @@ async function 選專案() {
 
       <LintPanel />
     </template>
+
+    <ImportWizard v-if="store.匯入中" />
 
     <!-- 空狀態。第一次開啟時畫面不該是一片白。 -->
     <section v-else class="welcome">

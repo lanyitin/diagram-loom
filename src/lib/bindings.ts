@@ -15,6 +15,11 @@ export const commands = {
 	 */
 	recheck: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("recheck")),
 	saveProject: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("save_project")),
+	/**  讀一張表，算出「如果匯進去會發生什麼」。**不改動任何東西。** */
+	previewImport: (path: string) => typedError<Plan, Failure>(__TAURI_INVOKE("preview_import", { path })),
+	/**  套用剛剛預覽過的那一份。 */
+	applyImport: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_import")),
+	cancelImport: () => typedError<null, Failure>(__TAURI_INVOKE("cancel_import")),
 };
 
 /* Types */
@@ -35,6 +40,18 @@ export type Cell = {
 	/**  這格對應到哪些 lint 規則。畫面上點下去就能跳到 lint 面板。 */
 	rules: Rule[],
 };
+
+export type Change = {
+	kind: ChangeKind,
+	element: Element,
+	/**  人看得懂的位置，例如 `prod / redis-01`。 */
+	label: string,
+	/**  更新前的值。新增時是 `None`。 */
+	before: string | null,
+	after: string,
+};
+
+export type ChangeKind = "added" | "updated";
 
 /**
  *  環境層的一條實際連線。
@@ -161,6 +178,17 @@ export type DeploymentNode_Serialize = {
 	children?: DeploymentNode_Serialize[],
 	instances?: ContainerInstance_Serialize[],
 };
+
+/**  動到的是什麼東西。畫面上用來分組。 */
+export type Element = "environment" | 
+/**  邏輯層的服務。 */
+"container" | 
+/**  邏輯層的接點定義。 */
+"endpointDef" | 
+/**  邏輯層的連線契約。 */
+"relationship" | "deploymentNode" | "containerInstance" | 
+/**  某個 Endpoint 的實際位址。 */
+"address" | "infrastructureNode" | "softwareSystemInstance" | "connection";
 
 /**  Endpoint 在某環境的實際樣貌：定義加上位址。 */
 export type Endpoint = Endpoint_Serialize | Endpoint_Deserialize;
@@ -497,6 +525,16 @@ export type Person = {
 	id: Id,
 	slug: string,
 	name: string,
+};
+
+export type Plan = {
+	changes: Change[],
+	/**  檔案裡有、但內容完全相同的項目數。重新匯入時這個數字會很大。 */
+	unchanged: number,
+	/**  importer 自己的計數與警告（例如位址衝突）。 */
+	warnings: string[],
+	/**  這份檔案會動到哪些環境。 */
+	environments: string[],
 };
 
 /**

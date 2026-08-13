@@ -16,9 +16,13 @@
 
 export type {
   Cell,
+  Change,
+  ChangeKind,
+  Element,
   FindingView as Finding,
   Id,
   Matrix,
+  Plan,
   Relationship,
   Row,
   Rule,

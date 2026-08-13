@@ -18,6 +18,7 @@ interface State {
   snapshot: Snapshot | null
   檢視: 檢視
   面板展開: boolean
+  匯入中: boolean
   /** 使用者勾選要比對哪幾個環境。空陣列代表「全部」。 */
   比對中的環境: Id[]
   搜尋: string
@@ -31,6 +32,7 @@ export const useProject = defineStore('project', {
     snapshot: null,
     檢視: '覆蓋矩陣',
     面板展開: false,
+    匯入中: false,
     比對中的環境: [],
     搜尋: '',
     只看有問題: false,

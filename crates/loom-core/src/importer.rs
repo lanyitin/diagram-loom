@@ -93,7 +93,7 @@ impl Sheet {
     }
 
     /// 取某一列某一欄的值，已去頭尾空白。缺欄或缺值都回空字串。
-    fn value(&self, row: usize, column: &str) -> &str {
+    pub fn value(&self, row: usize, column: &str) -> &str {
         self.column_index(column)
             .and_then(|i| self.rows[row].get(i))
             .map(|v| v.trim())
@@ -194,7 +194,10 @@ impl fmt::Display for ImportWarning {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImportReport {
+    /// 新建立的連線數。
     pub connections: usize,
+    /// 已存在、只更新了用途的連線數。重新匯入同一份檔案時這個數字會等於總列數。
+    pub connections_updated: usize,
     pub environments_created: usize,
     pub containers_created: usize,
     pub instances_created: usize,
@@ -363,15 +366,34 @@ fn import_row(
         ensure_relationship(project, &slug, &from_container, to, &to_endpoint, &purpose)
     };
 
+    // 連線也要 upsert，跟其他元素一樣（見 docs/excel-import.md）。
+    //
+    // 連線沒有名字，所以身分是「服務哪條契約 + 兩端接到哪」。同一個環境裡
+    // 這三者相同就是同一條，只有用途可能被改寫。
+    //
+    // 少了這一步，每次重新匯入同一份 Excel 都會把整份連線複製一遍——
+    // 而重新匯入正是這個功能最常見的用法。
     let env = environment_mut(project, &env_slug);
-    env.connections.push(Connection {
-        id: Id::generate(),
-        serves,
-        purpose,
-        from: from_side,
-        to: to_side,
-    });
-    report.connections += 1;
+    match env
+        .connections
+        .iter_mut()
+        .find(|c| c.serves == serves && c.from == from_side && c.to == to_side)
+    {
+        Some(既有) => {
+            既有.purpose = purpose;
+            report.connections_updated += 1;
+        }
+        None => {
+            env.connections.push(Connection {
+                id: Id::generate(),
+                serves,
+                purpose,
+                from: from_side,
+                to: to_side,
+            });
+            report.connections += 1;
+        }
+    }
 
     Ok(())
 }

@@ -25,7 +25,9 @@ use std::sync::Mutex;
 
 use loom_core::Project;
 use loom_core::coverage::{self, Matrix};
+use loom_core::importer;
 use loom_core::lint::{self, Finding, Rule, Severity};
+use loom_core::plan::{self, Plan};
 use loom_core::repository;
 use loom_core::table::{self, Row};
 use serde::Serialize;
@@ -39,6 +41,11 @@ use tauri_specta::{Builder, collect_commands};
 struct Opened {
     root: Option<PathBuf>,
     project: Option<Project>,
+    /// 預覽過、還沒套用的匯入結果。
+    ///
+    /// 存起來而不是套用時重跑一次：重跑會產生新的 UUID，使用者按下「套用」
+    /// 拿到的就不是他剛剛看過的那份東西了。
+    pending: Option<Project>,
 }
 
 type State<'a> = tauri::State<'a, Mutex<Opened>>;
@@ -101,6 +108,12 @@ pub struct Snapshot {
     pub rows: Vec<Row>,
 }
 
+fn 鎖<'a>(state: &'a State<'_>) -> Result<std::sync::MutexGuard<'a, Opened>, Failure> {
+    state.lock().map_err(|_| Failure {
+        message: "內部狀態毀損".into(),
+    })
+}
+
 fn snapshot(root: &std::path::Path, project: Project) -> Snapshot {
     Snapshot {
         root: root.display().to_string(),
@@ -144,6 +157,61 @@ fn recheck(state: State<'_>) -> Result<Snapshot, Failure> {
     Ok(snapshot(root, project.clone()))
 }
 
+/// 讀一張表，算出「如果匯進去會發生什麼」。**不改動任何東西。**
+#[tauri::command]
+#[specta::specta]
+fn preview_import(state: State<'_>, path: String) -> Result<Plan, Failure> {
+    let sheet = 讀表(&path)?;
+    let mut opened = 鎖(&state)?;
+    let Some(project) = &opened.project else {
+        return Err(Failure {
+            message: "還沒有開啟任何專案".into(),
+        });
+    };
+
+    let (計畫, 之後) = plan::plan(project, &sheet)?;
+    opened.pending = Some(之後);
+    Ok(計畫)
+}
+
+/// 套用剛剛預覽過的那一份。
+#[tauri::command]
+#[specta::specta]
+fn apply_import(state: State<'_>) -> Result<Snapshot, Failure> {
+    let mut opened = 鎖(&state)?;
+    let (Some(root), Some(之後)) = (opened.root.clone(), opened.pending.take()) else {
+        return Err(Failure {
+            message: "沒有等待套用的匯入。請先預覽。".into(),
+        });
+    };
+    opened.project = Some(之後.clone());
+    Ok(snapshot(&root, 之後))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn cancel_import(state: State<'_>) -> Result<(), Failure> {
+    鎖(&state)?.pending = None;
+    Ok(())
+}
+
+/// 副檔名決定怎麼讀。這是轉接，不是判斷。
+fn 讀表(path: &str) -> Result<importer::Sheet, Failure> {
+    let p = std::path::Path::new(path);
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("csv") => importer::read_csv(p).map_err(Into::into),
+        Some("xlsx") | Some("xls") | Some("xlsm") => importer::read_xlsx(p).map_err(Into::into),
+        _ => Err(Failure {
+            message: format!("認不得的副檔名：{path}"),
+        }),
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 fn save_project(state: State<'_>) -> Result<Snapshot, Failure> {
@@ -162,7 +230,14 @@ fn save_project(state: State<'_>) -> Result<Snapshot, Failure> {
 /// 產生 TS 型別用的 builder。`main.rs` 與型別產生器共用同一份，
 /// 所以不可能出現「command 加了但型別沒更新」。
 pub fn builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![open_project, recheck, save_project])
+    Builder::<tauri::Wry>::new().commands(collect_commands![
+        open_project,
+        recheck,
+        save_project,
+        preview_import,
+        apply_import,
+        cancel_import
+    ])
 }
 
 pub fn run() {

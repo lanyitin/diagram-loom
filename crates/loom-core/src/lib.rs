@@ -27,6 +27,7 @@ mod index;
 pub mod lint;
 pub mod logical;
 pub mod pattern;
+pub mod plan;
 pub mod reconcile;
 pub mod repository;
 pub mod slug;
