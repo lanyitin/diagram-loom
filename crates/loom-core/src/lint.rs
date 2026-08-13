@@ -7,19 +7,26 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use serde::{Deserialize, Serialize};
+
 use crate::Project;
-use crate::environment::{Connection, ContainerInstance, Endpointing, Environment, InstanceRef};
+use crate::environment::{ContainerInstance, Endpointing, Environment, InstanceRef};
 use crate::id::Id;
+use crate::index::EnvIndex;
 use crate::logical::RelationshipEnd;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub enum Severity {
     Info,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// 規則代號。序列化後就是 `"L001"` 這種字串，跟文件一致。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum Rule {
     /// 邏輯層元素在某環境沒有任何實現。
     L001,
@@ -64,7 +71,9 @@ impl Rule {
 /// 一項發現。
 ///
 /// 欄位順序即排序順序，讓 lint 的輸出穩定可比對。
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub rule: Rule,
     /// 發生在哪個環境；邏輯層本身的問題為 `None`。
@@ -115,81 +124,8 @@ pub fn lint(project: &Project) -> Vec<Finding> {
     findings
 }
 
-/// 一個環境的查表，在 lint 開始時建一次。
-///
-/// 沒有它的話效能會是平方級：`Environment::instances()` 每次呼叫都會重走一次
-/// 整棵部署樹並配置一個新的 Vec，而萬用字元比對每條連線都要呼叫一次。
-/// 幾百條連線 × 幾千個 Instance，光配置就是幾十 MB。
-///
-/// 這只是查表，不含任何判斷——規則還是留在各個 `check_*` 裡。
-struct Index<'a> {
-    all: Vec<&'a ContainerInstance>,
-    by_id: HashMap<&'a Id, &'a ContainerInstance>,
-    /// 依 slug 排序，讓萬用字元比對可以二分搜尋出候選範圍。
-    by_slug: Vec<&'a ContainerInstance>,
-    /// 依 `serves` 分好組的實際連線。
-    /// 否則每條邏輯連線都要重掃一次全部連線。
-    serving: HashMap<&'a Id, Vec<&'a Connection>>,
-    /// 邏輯連線的 id。用來認出「指向不存在的契約」的連線。
-    known_relationships: HashSet<&'a Id>,
-}
-
-impl<'a> Index<'a> {
-    fn build(project: &'a Project, env: &'a Environment) -> Self {
-        let all = env.instances();
-        let by_id = all.iter().map(|i| (&i.id, *i)).collect();
-
-        let mut by_slug = all.clone();
-        by_slug.sort_by(|a, b| a.slug.cmp(&b.slug));
-
-        let mut serving: HashMap<&Id, Vec<&Connection>> = HashMap::new();
-        for conn in &env.connections {
-            serving.entry(&conn.serves).or_default().push(conn);
-        }
-
-        Self {
-            all,
-            by_id,
-            by_slug,
-            serving,
-            known_relationships: project
-                .logical
-                .relationships
-                .iter()
-                .map(|r| &r.id)
-                .collect(),
-        }
-    }
-
-    fn instance(&self, id: &Id) -> Option<&'a ContainerInstance> {
-        self.by_id.get(id).copied()
-    }
-
-    /// 符合樣式的 Instance。
-    ///
-    /// 樣式的第一段（第一個 `*` 之前）是**必定成立的字面前綴**——
-    /// `redis-*` 一定以 `redis-` 開頭。所以先在排序過的清單上二分搜出
-    /// 那段前綴的範圍，只對範圍內的做完整比對。
-    ///
-    /// `*foo` 這種沒有前綴的樣式，範圍就是全部，退回線性掃描——正確但慢，
-    /// 而實務上不會有人這樣寫。
-    fn matching(&self, pattern: &str) -> Vec<&'a ContainerInstance> {
-        let prefix = pattern.split('*').next().unwrap_or("");
-        let lo = self.by_slug.partition_point(|i| i.slug.as_str() < prefix);
-        let hi = self
-            .by_slug
-            .partition_point(|i| i.slug.as_str() < prefix || i.slug.starts_with(prefix));
-
-        self.by_slug[lo..hi]
-            .iter()
-            .filter(|i| crate::pattern::matches(pattern, &i.slug))
-            .copied()
-            .collect()
-    }
-}
-
 fn lint_environment(project: &Project, env: &Environment, findings: &mut Vec<Finding>) {
-    let index = Index::build(project, env);
+    let index = EnvIndex::build(project, env);
 
     check_logical_realized(project, env, &index.all, findings);
     check_connections(env, &index, findings);
@@ -242,7 +178,7 @@ fn check_logical_realized(
 }
 
 /// L003 / L004 / L005 / L007：逐條連線檢查。
-fn check_connections(env: &Environment, index: &Index<'_>, findings: &mut Vec<Finding>) {
+fn check_connections(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec<Finding>) {
     for conn in &env.connections {
         if conn.purpose.trim().is_empty() {
             findings.push(Finding {
@@ -253,7 +189,7 @@ fn check_connections(env: &Environment, index: &Index<'_>, findings: &mut Vec<Fi
             });
         }
 
-        if !index.known_relationships.contains(&conn.serves) {
+        if !index.knows_relationship(&conn.serves) {
             findings.push(Finding {
                 rule: Rule::L003,
                 environment: Some(env.id.clone()),
@@ -269,7 +205,7 @@ fn check_connections(env: &Environment, index: &Index<'_>, findings: &mut Vec<Fi
 
 fn check_endpointing(
     env: &Environment,
-    index: &Index<'_>,
+    index: &EnvIndex<'_>,
     conn_id: Id,
     side: &Endpointing,
     findings: &mut Vec<Finding>,
@@ -302,7 +238,7 @@ fn check_endpointing(
                         subject: conn_id.clone(),
                         detail: format!("萬用字元 {slug_pattern} 沒有註明 expect 期望數量"),
                     }),
-                    Some(want) if *want != matched.len() => findings.push(Finding {
+                    Some(want) if *want as usize != matched.len() => findings.push(Finding {
                         rule: Rule::L004,
                         environment: env_id.clone(),
                         subject: conn_id.clone(),
@@ -401,7 +337,7 @@ fn check_instance_has_endpoint(
 }
 
 /// L006：每個 Endpoint 都要有實際位址。
-fn check_endpoint_addresses(env: &Environment, index: &Index<'_>, findings: &mut Vec<Finding>) {
+fn check_endpoint_addresses(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec<Finding>) {
     for instance in &index.all {
         for endpoint in &instance.endpoints {
             if endpoint.address.is_none() {
@@ -450,17 +386,11 @@ fn check_endpoint_addresses(env: &Environment, index: &Index<'_>, findings: &mut
 fn check_relationships_reachable(
     project: &Project,
     env: &Environment,
-    index: &Index<'_>,
+    index: &EnvIndex<'_>,
     findings: &mut Vec<Finding>,
 ) {
-    const 沒有連線: &[&Connection] = &[];
-
     for rel in &project.logical.relationships {
-        let serving: &[&Connection] = index
-            .serving
-            .get(&rel.id)
-            .map(Vec::as_slice)
-            .unwrap_or(沒有連線);
+        let serving = index.serving(&rel.id);
 
         if serving.is_empty() {
             findings.push(Finding {
@@ -526,7 +456,7 @@ fn ends_to_nodes(
 }
 
 /// 把**實際連線的一端**展開成圖上的點。萬用字元會展開成多個點。
-fn resolve(index: &Index<'_>, side: &Endpointing) -> Vec<GraphNode> {
+fn resolve(index: &EnvIndex<'_>, side: &Endpointing) -> Vec<GraphNode> {
     match side {
         Endpointing::Instance { target, .. } => match target {
             InstanceRef::One(id) => vec![GraphNode::Instance(id.clone())],
@@ -579,7 +509,7 @@ fn reachable(
 /// L008：沒有被任何連線碰到的 Instance。
 ///
 /// 冷備機是合法情境，所以可以在該 Instance 標記 `standalone` 關掉這個警告。
-fn check_orphan_instances(env: &Environment, index: &Index<'_>, findings: &mut Vec<Finding>) {
+fn check_orphan_instances(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec<Finding>) {
     let mut touched: HashSet<Id> = HashSet::new();
     for conn in &env.connections {
         for side in [&conn.from, &conn.to] {

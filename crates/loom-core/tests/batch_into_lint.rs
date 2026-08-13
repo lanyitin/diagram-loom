@@ -35,7 +35,7 @@ fn redis_batch(count: usize) -> BatchSpec {
 }
 
 /// 用批次建立換掉 prod 原本手寫的 Redis，並把連線的 expect 設成 `expect`。
-fn prod_with_batch(count: usize, expect: usize) -> loom_core::Project {
+fn prod_with_batch(count: usize, expect: u32) -> loom_core::Project {
     let mut project = healthy_project();
     let prod = &mut project.environments[0];
 

@@ -10,6 +10,7 @@ use crate::logical::Protocol;
 
 /// 運算載體的種類。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum NodeKind {
     Physical,
@@ -19,6 +20,7 @@ pub enum NodeKind {
 
 /// Endpoint 在某環境的實際樣貌：定義加上位址。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Endpoint {
     pub id: Id,
     pub slug: String,
@@ -37,6 +39,7 @@ pub struct Endpoint {
 /// 叢集就是多個 Instance：12 台 VM 各跑一個 Redis process
 /// 就是 12 個 `ContainerInstance`。節點數不另外存數字，避免兩份資料不一致。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct ContainerInstance {
     pub id: Id,
     pub slug: String,
@@ -51,6 +54,7 @@ pub struct ContainerInstance {
 
 /// 機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct DeploymentNode {
     pub id: Id,
     pub slug: String,
@@ -78,6 +82,7 @@ impl DeploymentNode {
 /// 例如金流系統：prod 用正式閘道，test 用 sandbox。
 /// 它**不放在 [`DeploymentNode`] 底下**——那些機器不是我們的，我們只知道位址。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct SoftwareSystemInstance {
     pub id: Id,
     pub slug: String,
@@ -94,6 +99,7 @@ pub struct SoftwareSystemInstance {
 /// 它**不含 Container**，但有自己的 endpoint（VIP 位址），
 /// 因此連線可以「經過」它——這也是為什麼經過 F5 的流量會拆成兩段。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct InfrastructureNode {
     pub id: Id,
     pub slug: String,
@@ -103,6 +109,7 @@ pub struct InfrastructureNode {
 
 /// 連線一端指向的 Instance：可以是一個，也可以是一整群。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum InstanceRef {
     /// 指名一個 Instance。
@@ -115,7 +122,9 @@ pub enum InstanceRef {
     Pattern {
         slug_pattern: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        expect: Option<usize>,
+        /// 用 `u32` 而不是 `usize`：這是「期望有幾台機器」，不是記憶體索引。
+        /// 而且 `usize` 不能匯出成 TypeScript（specta 怕 BigInt 精度問題）。
+        expect: Option<u32>,
     },
 }
 
@@ -133,6 +142,7 @@ pub enum InstanceRef {
 ///     endpoint: ep-f5-redis
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum Endpointing {
     Instance {
@@ -174,6 +184,7 @@ pub enum Endpointing {
 /// `serves` 指向它所服務的邏輯 [`Relationship`](crate::logical::Relationship)。
 /// Lint 把貼同一個 `serves` 的連線攤開成一張圖，檢查從來源走不走得到目標。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Connection {
     pub id: Id,
     pub serves: Id,
@@ -185,6 +196,7 @@ pub struct Connection {
 
 /// 一個部署環境。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Environment {
     pub id: Id,
     pub slug: String,

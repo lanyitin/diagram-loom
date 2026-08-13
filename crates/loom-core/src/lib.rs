@@ -19,9 +19,11 @@
 //! `expect` 是 `Option`。型別若強制它們存在，對應的 lint 規則就永遠不會觸發。
 
 pub mod batch;
+pub mod coverage;
 pub mod environment;
 pub mod id;
 pub mod importer;
+mod index;
 pub mod lint;
 pub mod logical;
 pub mod pattern;
@@ -35,7 +37,12 @@ use crate::id::Id;
 use crate::logical::Logical;
 
 /// 一個專案：一份邏輯層母版，加上多個環境。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 一個完整的專案。
+///
+/// 存檔時會被 [`repository`] 拆成多個 YAML 檔，所以磁碟上沒有「一個 Project 檔」。
+/// 但它整份會跨過 Tauri 邊界送到前端當唯讀鏡像，因此需要序列化。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Project {
     pub id: Id,
     pub slug: String,

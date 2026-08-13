@@ -13,3 +13,5 @@ dist
 /vendor/drawio/
 
 .DS_Store
+src-tauri/target/
+src-tauri/gen/

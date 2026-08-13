@@ -178,7 +178,7 @@ pub fn from_instance(id: &str) -> Endpointing {
 }
 
 /// 目標端：一整群 Instance，附期望數量。
-pub fn to_cluster(pattern: &str, expect: Option<usize>, endpoint_def: &str) -> Endpointing {
+pub fn to_cluster(pattern: &str, expect: Option<u32>, endpoint_def: &str) -> Endpointing {
     Endpointing::Instance {
         target: InstanceRef::Pattern {
             slug_pattern: pattern.into(),

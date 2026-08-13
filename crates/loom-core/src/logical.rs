@@ -15,6 +15,7 @@ use crate::id::Id;
 /// 「Port」這個詞不夠準確——Unix socket、JDBC URL 與檔案都不是 port，
 /// 它們的共通點是「服務對外的一個接點」，因此統一叫 Endpoint。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum Protocol {
     Tcp,
@@ -26,6 +27,7 @@ pub enum Protocol {
 
 /// 真人使用者。C4 的 `Person`，只出現在 Context 圖。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Person {
     pub id: Id,
     pub slug: String,
@@ -34,6 +36,7 @@ pub struct Person {
 
 /// 軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct SoftwareSystem {
     pub id: Id,
     pub slug: String,
@@ -60,6 +63,7 @@ impl SoftwareSystem {
 ///
 /// 位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct EndpointDef {
     pub id: Id,
     pub slug: String,
@@ -68,6 +72,7 @@ pub struct EndpointDef {
 
 /// 一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Container {
     pub id: Id,
     pub slug: String,
@@ -91,6 +96,7 @@ impl Container {
 /// 一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
 /// dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Relationship {
     pub id: Id,
     pub slug: String,
@@ -107,6 +113,7 @@ pub struct Relationship {
 ///
 /// 外部系統不拆成 Container，所以它整個就是一端。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum RelationshipEnd {
     Container(Id),
@@ -115,6 +122,7 @@ pub enum RelationshipEnd {
 
 /// 邏輯層的全部內容。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Logical {
     pub people: Vec<Person>,
     pub systems: Vec<SoftwareSystem>,

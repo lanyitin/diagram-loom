@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// 元素的永久識別碼。建立後永不改變。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(transparent)]
 pub struct Id(String);
 

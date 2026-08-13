@@ -1,0 +1,26 @@
+# Tauri 殼。刻意很薄——它只做轉接，不做判斷。
+#
+# 所有規則都在 loom-core，那裡可以用 cargo test 驗證，不必開視窗。
+# 這裡的每個 command 都應該短到「一眼看得出它沒有偷做決定」。
+[package]
+name = "diagram-loom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# Tauri 的行動平台支援需要 lib target；桌面版也照這個結構走。
+name = "diagram_loom_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+loom-core = { path = "../crates/loom-core", features = ["specta"] }
+serde = { version = "1", features = ["derive"] }
+specta = { version = "2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "0.0.12"
+tauri = { version = "2", features = [] }
+tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }

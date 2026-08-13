@@ -415,7 +415,7 @@ fn parse_protocol(value: &str, row: usize) -> Result<Protocol, ImportError> {
     }
 }
 
-fn parse_expect(value: &str, row: usize) -> Result<Option<usize>, ImportError> {
+fn parse_expect(value: &str, row: usize) -> Result<Option<u32>, ImportError> {
     if value.is_empty() {
         return Ok(None);
     }
