@@ -17,6 +17,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useProject } from '../lib/store'
+import Picker from './Picker.vue'
 import type { Id, Resource } from '../lib/model'
 
 const store = useProject()
@@ -31,6 +32,58 @@ watch(
   },
   { immediate: true },
 )
+
+/** 這個環境裡所有的機器，攤平成一串（含站點底下的）。落地要選一台。 */
+const machines = computed(() => {
+  const envId = (draft.value as { instance?: { environment: Id } })?.instance?.environment
+  const env = store.environments.find((e) => e.id === envId)
+  const out: { value: string; label: string; hint?: string }[] = []
+  const walk = (nodes: { id: Id; slug: string; kind: string; children?: unknown[] }[], path: string) => {
+    for (const n of nodes) {
+      out.push({ value: n.id, label: path ? `${path} / ${n.slug}` : n.slug, hint: kindLabel(n.kind) })
+      walk((n.children ?? []) as never, path ? `${path} / ${n.slug}` : n.slug)
+    }
+  }
+  walk((env?.nodes ?? []) as never, '')
+  return out
+})
+
+function kindLabel(kind: string): string {
+  return { site: '站點', physical: '實體機', 'virtual-machine': '虛擬機', 'linux-container': 'Linux 容器' }[kind] ?? kind
+}
+
+/**
+ * 落地的接點。**IP 與 port 就填在這裡。**
+ *
+ * `def` 指向邏輯層的接點定義——填了之後 lint 才知道「這台的 client-port
+ * 對應到契約上的哪一個」。沒填也可以，只是那條連線接不上。
+ */
+const instanceEndpoints = computed(() => {
+  const inst = (draft.value as { instance?: { instance: { endpoints?: unknown[] } } })?.instance?.instance
+  return (inst?.endpoints ?? []) as { id: Id; slug: string; def: Id | null; protocol: string; address: string | null }[]
+})
+
+/** 這個落地對應的服務上，定義了哪些接點。 */
+const defsOfContainer = computed(() => {
+  const inst = (draft.value as { instance?: { instance: { container: Id } } })?.instance?.instance
+  const c = containers.value.find((x) => x.id === inst?.container)
+  return (c?.endpoints ?? []).map((d) => ({ value: d.id, label: d.slug, hint: d.protocol }))
+})
+
+function addEndpoint() {
+  const inst = (draft.value as { instance?: { instance: { endpoints: unknown[] } } })?.instance?.instance
+  if (!inst) return
+  inst.endpoints = [
+    ...(inst.endpoints ?? []),
+    { id: crypto.randomUUID(), slug: '', def: null, protocol: 'tcp', address: null },
+  ]
+}
+
+function removeEndpoint(id: Id) {
+  const inst = (draft.value as { instance?: { instance: { endpoints: { id: Id }[] } } })?.instance?.instance
+  if (!inst) return
+  inst.endpoints = inst.endpoints.filter((e) => e.id !== id)
+}
 
 const logical = computed(() => store.snapshot?.project.logical)
 const containers = computed(() => logical.value?.containers ?? [])
@@ -226,6 +279,57 @@ function write(path: string, v: unknown) {
         <label>位址<input :value="read('infraEndpoint.endpoint.address')" class="mono" placeholder="10.0.0.100:6379" @input="write('infraEndpoint.endpoint.address', ($event.target as HTMLInputElement).value || null)"></label>
       </template>
 
+      <!-- 落地：位址就住在這裡 -->
+      <template v-else-if="'instance' in draft">
+        <label>名稱<input :value="read('instance.instance.slug')" class="mono" placeholder="redis-01" @input="write('instance.instance.slug', ($event.target as HTMLInputElement).value)"></label>
+        <label>哪個服務
+          <Picker
+            :model-value="read('instance.instance.container') || null"
+            :options="containers.map((c) => ({ value: c.id, label: c.slug, hint: c.name }))"
+            placeholder="打字搜尋服務…"
+            @update:model-value="write('instance.instance.container', $event)"
+          />
+        </label>
+        <label>跑在哪台機器上
+          <Picker
+            :model-value="read('instance.node') || null"
+            :options="machines"
+            placeholder="打字搜尋機器…"
+            @update:model-value="write('instance.node', $event)"
+          />
+        </label>
+
+        <!-- 接點：IP 與 port 在這裡。之前只能等 L006 叫了才改得到。 -->
+        <div class="sub">
+          <div class="subhead">
+            <strong>接點與位址</strong>
+            <button type="button" class="link" @click="addEndpoint()">＋ 加一個</button>
+          </div>
+          <p v-if="!instanceEndpoints.length" class="muted hint">
+            還沒有接點。<strong>IP 與 port 填在接點上</strong>——一個服務可以有好幾個
+            （對外一個、管理介面一個）。
+          </p>
+          <div v-for="e in instanceEndpoints" :key="e.id" class="ep">
+            <input v-model="e.slug" class="mono" placeholder="client-port">
+            <input v-model="e.address" class="mono" placeholder="10.0.1.11:6379">
+            <Picker
+              :model-value="e.def"
+              :options="defsOfContainer"
+              allow-empty
+              empty-label="（沒對應到契約）"
+              placeholder="對應哪個接點定義…"
+              @update:model-value="e.def = $event"
+            />
+            <button type="button" class="icon del" title="拿掉這個接點" @click="removeEndpoint(e.id)">✕</button>
+          </div>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" :checked="!!read('instance.instance.standalone')" @change="write('instance.instance.standalone', ($event.target as HTMLInputElement).checked)">
+          刻意獨立（沒有任何連線碰到它也不要叫）
+        </label>
+      </template>
+
       <!-- 外部系統落地 -->
       <template v-else-if="'systemInstance' in draft">
         <label>名稱<input :value="read('systemInstance.instance.slug')" class="mono" @input="write('systemInstance.instance.slug', ($event.target as HTMLInputElement).value)"></label>
@@ -285,4 +389,20 @@ label.row input { accent-color: var(--warp); }
 
 footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .grow { flex: 1; }
+
+.sub {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+.subhead { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.subhead strong { flex: 1; }
+.ep { display: grid; grid-template-columns: 1fr 1.3fr 1.2fr auto; gap: 6px; align-items: center; }
+.link { background: none; border: 0; padding: 0; color: var(--warp); cursor: pointer; font-size: 11.5px; }
+.check { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.check input { accent-color: var(--warp); flex: none; }
 </style>

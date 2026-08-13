@@ -40,6 +40,7 @@ export type {
   McpStatus,
   NodeKind,
   Plan,
+  Protocol,
   Proposal,
   Relationship,
   Row,

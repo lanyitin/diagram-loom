@@ -1194,7 +1194,7 @@ export type InstanceRef_Serialize =
 } }) & { one?: never };
 
 /**  [`blank`] 要建哪一種。跟 [`Resource`] 分開，因為前端要先選種類才有內容。 */
-export type Kind = "person" | "system" | "container" | "endpointDef" | "relationship" | "environment" | "node" | "infra" | "infraEndpoint" | "systemInstance";
+export type Kind = "person" | "system" | "container" | "endpointDef" | "relationship" | "environment" | "node" | "infra" | "infraEndpoint" | "instance" | "systemInstance";
 
 /**
  *  圖上的一條線。
@@ -1470,34 +1470,45 @@ export type ResourceRow_Serialize = {
  *  帶的是**完整的值**而不是「欄位差異」：整份換掉的語意最單純，
  *  而復原本來就是存整份快照（見 [`crate::history`]），省不了什麼。
  */
-export type Resource_Deserialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Deserialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+export type Resource_Deserialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Deserialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  接點定義掛在服務或外部系統身上，所以要指名擁有者。 */
 ({ endpointDef: {
 	owner: Id,
 	def: EndpointDef,
-} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Deserialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Deserialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  站點、實體機、VM、Linux 容器。`within` 是父節點。 */
 ({ node: {
 	environment: Id,
 	within: Id | null,
 	node: DeploymentNode_Deserialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  F5 這類 VIP 設備。 */
 ({ infra: {
 	environment: Id,
 	node: InfrastructureNode_Deserialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  設備上的一個 VIP。設備不對應邏輯層元素，所以它的接點沒有 `def`。 */
 ({ infraEndpoint: {
 	environment: Id,
 	node: Id,
 	endpoint: Endpoint_Deserialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+/**
+ *  一個服務在某台機器上的落地。**位址就住在這裡。**
+ * 
+ *  `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+ *  「東西跑在哪裡」正是部署圖唯一要回答的問題。
+ */
+({ instance: {
+	environment: Id,
+	node: Id,
+	instance: ContainerInstance_Deserialize,
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  外部系統在這個環境的落地。 */
 ({ systemInstance: {
 	environment: Id,
 	instance: SoftwareSystemInstance_Deserialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never };
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never };
 
 /**
  *  一個可以增／改／刪的模型元素。
@@ -1505,34 +1516,45 @@ export type Resource_Deserialize = ({ person: Person }) & { container?: never; e
  *  帶的是**完整的值**而不是「欄位差異」：整份換掉的語意最單純，
  *  而復原本來就是存整份快照（見 [`crate::history`]），省不了什麼。
  */
-export type Resource_Serialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Serialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+export type Resource_Serialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Serialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  接點定義掛在服務或外部系統身上，所以要指名擁有者。 */
 ({ endpointDef: {
 	owner: Id,
 	def: EndpointDef,
-} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Serialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Serialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  站點、實體機、VM、Linux 容器。`within` 是父節點。 */
 ({ node: {
 	environment: Id,
 	within: Id | null,
 	node: DeploymentNode_Serialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  F5 這類 VIP 設備。 */
 ({ infra: {
 	environment: Id,
 	node: InfrastructureNode_Serialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  設備上的一個 VIP。設備不對應邏輯層元素，所以它的接點沒有 `def`。 */
 ({ infraEndpoint: {
 	environment: Id,
 	node: Id,
 	endpoint: Endpoint_Serialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+/**
+ *  一個服務在某台機器上的落地。**位址就住在這裡。**
+ * 
+ *  `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+ *  「東西跑在哪裡」正是部署圖唯一要回答的問題。
+ */
+({ instance: {
+	environment: Id,
+	node: Id,
+	instance: ContainerInstance_Serialize,
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  外部系統在這個環境的落地。 */
 ({ systemInstance: {
 	environment: Id,
 	instance: SoftwareSystemInstance_Serialize,
-} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; node?: never; person?: never; relationship?: never; system?: never };
+} }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never };
 
 /**  表格的一列。 */
 export type Row = {

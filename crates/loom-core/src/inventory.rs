@@ -84,6 +84,7 @@ pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
         && let Some(env) = project.environment(env_id)
     {
         out.push(nodes_table(env, &severity_of));
+        out.push(instances_table(project, env, &severity_of));
         out.push(infra_table(env, &severity_of));
         out.push(system_instances_table(project, env, &severity_of));
     }
@@ -409,6 +410,84 @@ fn nodes_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -
         empty_hint: "站點、實體機、VM、Linux 容器都是機器。站點是拿來裝別的機器的。".into(),
         rows,
     }
+}
+
+/// 落地：一個服務在某台機器上跑起來的那一份。**位址就住在這裡。**
+///
+/// 在它之前，落地只能靠「批次建機器」產生，而位址只能等 L006 叫了才改得到。
+/// 也就是說「我知道這台的 IP，我想現在填進去」這件事**沒有地方可以做**。
+fn instances_table(
+    project: &Project,
+    env: &crate::environment::Environment,
+    sev: SeverityLookup<'_>,
+) -> Table {
+    fn walk(
+        nodes: &[DeploymentNode],
+        project: &Project,
+        env_id: &Id,
+        sev: SeverityLookup<'_>,
+        out: &mut Vec<ResourceRow>,
+    ) {
+        for n in nodes {
+            for i in &n.instances {
+                let container = project.logical.container(&i.container);
+                out.push(ResourceRow {
+                    id: i.id.clone(),
+                    depth: 0,
+                    severity: sev(&i.id),
+                    cells: vec![
+                        i.slug.clone(),
+                        // 指到不存在的服務時要看得出來，不是留一格空白——
+                        // 空白看起來像「還沒填」，而這是 L012 會叫的壞掉的參照。
+                        container.map_or_else(|| "（找不到這個服務）".into(), |c| c.slug.clone()),
+                        n.slug.clone(),
+                        addresses_of(i),
+                    ],
+                    resource: Resource::Instance {
+                        environment: env_id.clone(),
+                        node: n.id.clone(),
+                        instance: i.clone(),
+                    },
+                });
+            }
+            walk(&n.children, project, env_id, sev, out);
+        }
+    }
+
+    let mut rows = Vec::new();
+    walk(&env.nodes, project, &env.id, sev, &mut rows);
+
+    Table {
+        kind: Kind::Instance,
+        title: "落地".into(),
+        columns: vec![
+            "名稱".into(),
+            "哪個服務".into(),
+            "跑在哪台".into(),
+            "位址".into(),
+        ],
+        environment: Some(env.id.clone()),
+        empty_hint: "落地是「某個服務在某台機器上跑起來的那一份」，IP 與 port 就填在這裡。\
+                     12 台 Redis 就是 12 個落地。要一次建很多台的話，用機器那一頁的批次建立。"
+            .into(),
+        rows,
+    }
+}
+
+/// 落地上所有接點的位址，攤成一行。沒填的用「—」佔位，
+/// 這樣一眼就看得出「有這個接點但還沒有位址」，而不是「沒有這個接點」。
+fn addresses_of(i: &crate::environment::ContainerInstance) -> String {
+    if i.endpoints.is_empty() {
+        return String::new();
+    }
+    i.endpoints
+        .iter()
+        .map(|e| match &e.address {
+            Some(a) => format!("{}：{a}", e.slug),
+            None => format!("{}：—", e.slug),
+        })
+        .collect::<Vec<_>>()
+        .join("、")
 }
 
 fn infra_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -> Table {

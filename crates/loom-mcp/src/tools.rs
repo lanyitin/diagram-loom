@@ -668,6 +668,17 @@ fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<()
                 endpoint.protocol = protocol(&v)?
             }
         }
+        Resource::Instance { instance, .. } => {
+            if let Some(v) = s("slug") {
+                instance.slug = v
+            }
+            if let Some(v) = s("container") {
+                instance.container = container_id(project, &v)?
+            }
+            if let Some(v) = fields.get("standalone").and_then(Value::as_bool) {
+                instance.standalone = v
+            }
+        }
         Resource::SystemInstance { instance, .. } => {
             if let Some(v) = s("slug") {
                 instance.slug = v

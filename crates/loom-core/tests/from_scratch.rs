@@ -514,6 +514,337 @@ fn set_slug(r: &mut Resource, slug: &str) {
         Resource::Node { node, .. } => node.slug = slug.into(),
         Resource::Infra { node, .. } => node.slug = slug.into(),
         Resource::InfraEndpoint { endpoint, .. } => endpoint.slug = slug.into(),
+        Resource::Instance { instance, .. } => instance.slug = slug.into(),
         Resource::SystemInstance { instance, .. } => instance.slug = slug.into(),
+    }
+}
+
+/// 落地：**位址就住在這裡**，所以它必須自己建得起來、改得動。
+///
+/// 在它成為一個 `Resource` 之前，落地只能靠「批次建機器」順便產生，
+/// 而位址只能等 L006 叫了才改得到。也就是說「我知道這台的 IP，
+/// 我現在就想填進去」這件事在畫面上**沒有地方可以做**。
+mod instances {
+    use super::*;
+    use loom_core::environment::Endpoint;
+    use loom_core::logical::Protocol;
+
+    /// 一個環境、一台機器、一個服務。回傳 (history, 環境, 機器, 服務)。
+    fn ready() -> (History, Id, Id, Id) {
+        let mut h = History::opened(empty_project());
+        let system = create(&mut h, blank(Kind::System, None, None), |r| {
+            let Resource::System(s) = r else {
+                unreachable!()
+            };
+            s.slug = "shop".into();
+        });
+        let container = create(
+            &mut h,
+            blank(Kind::Container, None, Some(system.clone())),
+            |r| {
+                let Resource::Container(c) = r else {
+                    unreachable!()
+                };
+                c.slug = "redis".into();
+            },
+        );
+        let env = create(&mut h, blank(Kind::Environment, None, None), |r| {
+            let Resource::Environment(e) = r else {
+                unreachable!()
+            };
+            e.slug = "prod".into();
+        });
+        let node = create(&mut h, blank(Kind::Node, Some(env.clone()), None), |r| {
+            let Resource::Node { node, .. } = r else {
+                unreachable!()
+            };
+            node.slug = "vm-01".into();
+        });
+        (h, env, node, container)
+    }
+
+    fn instance_on(env: &Id, node: &Id, container: &Id, slug: &str) -> Resource {
+        let mut r = blank(Kind::Instance, Some(env.clone()), Some(node.clone()));
+        let Resource::Instance { instance, .. } = &mut r else {
+            unreachable!()
+        };
+        instance.slug = slug.into();
+        instance.container = container.clone();
+        r
+    }
+
+    #[test]
+    fn a_single_instance_can_be_created_without_the_batch_tool() {
+        let (mut h, env, node, container) = ready();
+        h.edit(&Edit::AddResource(instance_on(
+            &env, &node, &container, "redis-01",
+        )))
+        .expect("落地建不起來");
+
+        let e = h.project().environment(&env).unwrap();
+        assert_eq!(e.instances().len(), 1);
+        assert_eq!(e.instances()[0].slug, "redis-01");
+    }
+
+    #[test]
+    fn an_address_can_be_filled_in_directly() {
+        // 這是整組測試的重點：**不必等 lint 叫，也不必走批次建立**。
+        let (mut h, env, node, container) = ready();
+        let mut r = instance_on(&env, &node, &container, "redis-01");
+        let Resource::Instance { instance, .. } = &mut r else {
+            unreachable!()
+        };
+        instance.endpoints.push(Endpoint {
+            id: Id::generate(),
+            slug: "client-port".into(),
+            def: None,
+            protocol: Protocol::Tcp,
+            address: Some("10.0.1.11:6379".into()),
+        });
+        h.edit(&Edit::AddResource(r)).unwrap();
+
+        let e = h.project().environment(&env).unwrap();
+        assert_eq!(
+            e.instances()[0].endpoints[0].address.as_deref(),
+            Some("10.0.1.11:6379")
+        );
+    }
+
+    #[test]
+    fn editing_an_instance_does_not_quietly_delete_it() {
+        // 改的時候要先從舊的那台機器移走，而 `replace_or_push` 在「找不到」時
+        // 是**安靜地什麼都不做**——照抄的話修改就會變成靜悄悄的刪除。
+        let (mut h, env, node, container) = ready();
+        let mut r = instance_on(&env, &node, &container, "redis-01");
+        h.edit(&Edit::AddResource(r.clone())).unwrap();
+
+        let Resource::Instance { instance, .. } = &mut r else {
+            unreachable!()
+        };
+        instance.slug = "redis-99".into();
+        h.edit(&Edit::UpdateResource(r)).expect("改不動");
+
+        let e = h.project().environment(&env).unwrap();
+        assert_eq!(e.instances().len(), 1, "改個名字就不見了");
+        assert_eq!(e.instances()[0].slug, "redis-99");
+    }
+
+    #[test]
+    fn moving_an_instance_to_another_machine_does_not_leave_a_copy_behind() {
+        // 搬家。留一份在舊機器上的話，萬用字元會把它數成兩台——
+        // 而那正是這個工具要防的誤會。
+        let (mut h, env, node, container) = ready();
+        let other = create(&mut h, blank(Kind::Node, Some(env.clone()), None), |r| {
+            let Resource::Node { node, .. } = r else {
+                unreachable!()
+            };
+            node.slug = "vm-02".into();
+        });
+
+        let mut r = instance_on(&env, &node, &container, "redis-01");
+        h.edit(&Edit::AddResource(r.clone())).unwrap();
+
+        let Resource::Instance { node: host, .. } = &mut r else {
+            unreachable!()
+        };
+        *host = other.clone();
+        h.edit(&Edit::UpdateResource(r)).expect("搬不動");
+
+        let e = h.project().environment(&env).unwrap();
+        assert_eq!(e.instances().len(), 1, "舊機器上還留著一份");
+        let on_other = e.nodes.iter().find(|n| n.id == other).unwrap();
+        assert_eq!(on_other.instances.len(), 1, "沒搬到新機器上");
+    }
+
+    #[test]
+    fn two_instances_in_one_environment_cannot_share_a_name() {
+        // 萬用字元比對的就是 slug。同名會讓 `expect` 數成兩台，
+        // 而使用者會以為那是兩台不同的機器。
+        let (mut h, env, node, container) = ready();
+        let other = create(&mut h, blank(Kind::Node, Some(env.clone()), None), |r| {
+            let Resource::Node { node, .. } = r else {
+                unreachable!()
+            };
+            node.slug = "vm-02".into();
+        });
+
+        h.edit(&Edit::AddResource(instance_on(
+            &env, &node, &container, "redis-01",
+        )))
+        .unwrap();
+        // 不同機器上也不行——名字在整個環境裡唯一。
+        let clash = h.edit(&Edit::AddResource(instance_on(
+            &env, &other, &container, "redis-01",
+        )));
+        assert!(clash.is_err(), "撞名應該要被擋下來");
+    }
+
+    #[test]
+    fn deleting_an_instance_reaches_into_nested_machines() {
+        // 落地住在樹裡（站點 → 機器 → 落地）。只掃最上層的話，
+        // 站點底下的那些會刪不掉，而畫面上按鈕按了沒反應。
+        let (mut h, env, site, container) = ready();
+        let inner = create(
+            &mut h,
+            blank(Kind::Node, Some(env.clone()), Some(site.clone())),
+            |r| {
+                let Resource::Node { node, .. } = r else {
+                    unreachable!()
+                };
+                node.slug = "vm-inner".into();
+            },
+        );
+        let r = instance_on(&env, &inner, &container, "redis-01");
+        h.edit(&Edit::AddResource(r.clone())).unwrap();
+        h.edit(&Edit::DeleteResource(r)).expect("刪不掉");
+
+        assert!(
+            h.project()
+                .environment(&env)
+                .unwrap()
+                .instances()
+                .is_empty()
+        );
+    }
+}
+
+/// 新增連線至少要說得通。
+///
+/// lint 是**事後**的：東西已經建進去了才叫你回頭修。對「兩端一樣」這種
+/// 一看就知道錯的東西那太晚了——它建出來之後長得像一條正常的連線，
+/// 使用者不會回頭懷疑自己按錯。
+mod adding_a_connection {
+    use super::*;
+    use loom_core::environment::{Endpointing, InstanceRef};
+
+    /// 環境、兩台落地、一條契約。
+    fn ready() -> (History, Id, Id, Id, Id) {
+        let mut h = History::opened(empty_project());
+        let system = create(&mut h, blank(Kind::System, None, None), |r| {
+            let Resource::System(s) = r else {
+                unreachable!()
+            };
+            s.slug = "shop".into();
+        });
+        let container = create(
+            &mut h,
+            blank(Kind::Container, None, Some(system.clone())),
+            |r| {
+                let Resource::Container(c) = r else {
+                    unreachable!()
+                };
+                c.slug = "app".into();
+            },
+        );
+        let rel = create(&mut h, blank(Kind::Relationship, None, None), |r| {
+            let Resource::Relationship(x) = r else {
+                unreachable!()
+            };
+            x.slug = "app-連-app".into();
+        });
+        let env = create(&mut h, blank(Kind::Environment, None, None), |r| {
+            let Resource::Environment(e) = r else {
+                unreachable!()
+            };
+            e.slug = "prod".into();
+        });
+        let node = create(&mut h, blank(Kind::Node, Some(env.clone()), None), |r| {
+            let Resource::Node { node, .. } = r else {
+                unreachable!()
+            };
+            node.slug = "vm-01".into();
+        });
+
+        let mut ids = vec![];
+        for slug in ["a-01", "b-01"] {
+            let mut r = blank(Kind::Instance, Some(env.clone()), Some(node.clone()));
+            let Resource::Instance { instance, .. } = &mut r else {
+                unreachable!()
+            };
+            instance.slug = slug.into();
+            instance.container = container.clone();
+            ids.push(instance.id.clone());
+            h.edit(&Edit::AddResource(r)).unwrap();
+        }
+        (h, env, rel, ids[0].clone(), ids[1].clone())
+    }
+
+    fn at(id: &Id) -> Endpointing {
+        Endpointing::Instance {
+            target: InstanceRef::One(id.clone()),
+            endpoint: None,
+        }
+    }
+
+    fn add(env: &Id, serves: &Id, from: Endpointing, to: Endpointing) -> Edit {
+        Edit::AddConnection {
+            environment: env.clone(),
+            id: Id::generate(),
+            serves: serves.clone(),
+            purpose: "測試".into(),
+            kind: Default::default(),
+            from,
+            to,
+        }
+    }
+
+    #[test]
+    fn a_normal_connection_still_goes_through() {
+        let (mut h, env, rel, a, b) = ready();
+        h.edit(&add(&env, &rel, at(&a), at(&b)))
+            .expect("正常的連線被擋掉了");
+    }
+
+    #[test]
+    fn both_ends_pointing_at_the_same_thing_is_rejected() {
+        // 兩端一樣的連線什麼也沒說，而且它長得像一條正常的連線。
+        let (mut h, env, rel, a, _) = ready();
+        assert!(h.edit(&add(&env, &rel, at(&a), at(&a))).is_err());
+    }
+
+    #[test]
+    fn the_endpoint_does_not_make_a_self_loop_acceptable() {
+        // 同一台機器的 A 埠連 B 埠仍然是自己連自己。
+        let (mut h, env, rel, a, _) = ready();
+        let with_endpoint = Endpointing::Instance {
+            target: InstanceRef::One(a.clone()),
+            endpoint: Some(Id::generate()),
+        };
+        assert!(h.edit(&add(&env, &rel, at(&a), with_endpoint)).is_err());
+    }
+
+    #[test]
+    fn a_person_cannot_be_the_target() {
+        // 人是流量的起點。沒有人會連進一個人裡面。
+        let (mut h, env, rel, a, _) = ready();
+        let person = create(&mut h, blank(Kind::Person, None, None), |r| {
+            let Resource::Person(p) = r else {
+                unreachable!()
+            };
+            p.slug = "客戶".into();
+        });
+        let as_target = Endpointing::Person { person };
+        assert!(h.edit(&add(&env, &rel, at(&a), as_target)).is_err());
+    }
+
+    #[test]
+    fn a_connection_serving_nothing_is_rejected() {
+        // 沒有契約的連線 lint 會叫（L011），而且覆蓋矩陣上看不到它——
+        // 也就是「怕漏」的那張表看不到它。
+        let (mut h, env, _, a, b) = ready();
+        assert!(h.edit(&add(&env, &Id::new(""), at(&a), at(&b))).is_err());
+        assert!(
+            h.edit(&add(&env, &Id::new("不存在"), at(&a), at(&b)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ends_unrelated_to_the_contract_are_still_allowed() {
+        // 中間要不要經過 F5、這條路走幾段，是人的決定。多段路徑就是這樣拼的，
+        // 擋掉的話 F5 那一段永遠建不起來。兜不兜得起來交給 L002 的可達性檢查。
+        let (mut h, env, rel, a, b) = ready();
+        h.edit(&add(&env, &rel, at(&b), at(&a)))
+            .expect("反向的一段被擋掉了");
     }
 }

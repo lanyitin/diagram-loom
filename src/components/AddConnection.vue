@@ -22,6 +22,7 @@
 import { computed, ref, watch } from 'vue'
 import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
+import Picker from './Picker.vue'
 import type { Choice, Endpointing, Proposal } from '../lib/model'
 
 const store = useProject()
@@ -35,18 +36,17 @@ const purpose = ref('')
 const isFallback = ref(false)
 const computing = ref(false)
 
-/** 下拉選單依 group 分段，找起來比一長串快。 */
-function groupBy(all: Choice[]) {
-  const g = new Map<string, Choice[]>()
-  for (const c of all) {
-    if (!g.has(c.group)) g.set(c.group, [])
-    g.get(c.group)!.push(c)
-  }
-  return [...g.entries()]
+/**
+ * 下拉選單的項目。`value` 用**陣列位置**——`endpointing` 是不透明的結構，
+ * 我們不該去看它裡面有什麼，位置是唯一穩定又不必解讀的鍵。
+ *
+ * 分組交給 [`Picker`]，不在這裡先分好。
+ */
+function optionsOf(all: Choice[]) {
+  return all.map((c, i) => ({ value: String(i), label: c.label, group: c.group }))
 }
-
-const fromGroups = computed(() => groupBy(fromChoiceList.value))
-const toGroups = computed(() => groupBy(toChoiceList.value))
+const fromOptions = computed(() => optionsOf(fromChoiceList.value))
+const toOptions = computed(() => optionsOf(toChoiceList.value))
 
 /** 選單的 value 用序號——`endpointing` 是物件，塞不進 `<option value>`。 */
 function picked(all: Choice[], i: string): Endpointing | null {
@@ -92,12 +92,30 @@ watch(
   { immediate: true },
 )
 
-const canCreate = computed(() => fromChoices.value !== null && target.value !== null)
+/**
+ * 為什麼還不能建。
+ *
+ * **回一句話，不是一個布林值。** 一顆灰掉又不說話的按鈕，使用者只會一直點，
+ * 然後以為工具壞了——那跟「按了沒反應」是同一種病。
+ *
+ * 這裡只擋畫面上看得出來的。真正的規則在 Rust（`edit::check_connection`），
+ * 因為 AI Agent 是直接送 `Edit` 進來的，繞得過畫面。
+ */
+const blocked = computed<string | null>(() => {
+  if (!fromChoices.value) return '還沒選來源'
+  if (!target.value) return '還沒選目標'
+  // 兩端一樣的連線什麼也沒說，而且它建出來長得像一條正常的連線。
+  if (JSON.stringify(fromChoices.value) === JSON.stringify(target.value)) {
+    return '來源與目標是同一個東西'
+  }
+  return null
+})
 
 async function create() {
   const pending = store.addingConnection
   const p = proposal.value
-  if (!pending || !p || !fromChoices.value || !target.value) return
+  if (!pending || !p || blocked.value) return
+  if (!fromChoices.value || !target.value) return
 
   store.addingConnection = null
   await store.applyEdit({
@@ -134,22 +152,22 @@ async function create() {
 
         <label class="field">
           <span>來源</span>
-          <select :value="indexOf(fromChoiceList, fromChoices)" @change="fromChoices = picked(fromChoiceList, ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <optgroup v-for="[g, items] in fromGroups" :key="g" :label="g">
-              <option v-for="c in items" :key="c.label" :value="fromChoiceList.indexOf(c)">{{ c.label }}</option>
-            </optgroup>
-          </select>
+          <Picker
+            :model-value="indexOf(fromChoiceList, fromChoices) || null"
+            :options="fromOptions"
+            placeholder="打字搜尋機器、設備或人…"
+            @update:model-value="fromChoices = picked(fromChoiceList, $event ?? '')"
+          />
         </label>
 
         <label class="field">
           <span>目標</span>
-          <select :value="indexOf(toChoiceList, target)" @change="target = picked(toChoiceList, ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <optgroup v-for="[g, items] in toGroups" :key="g" :label="g">
-              <option v-for="c in items" :key="c.label" :value="toChoiceList.indexOf(c)">{{ c.label }}</option>
-            </optgroup>
-          </select>
+          <Picker
+            :model-value="indexOf(toChoiceList, target) || null"
+            :options="toOptions"
+            placeholder="打字搜尋機器、設備或外部系統…"
+            @update:model-value="target = picked(toChoiceList, $event ?? '')"
+          />
         </label>
 
         <label class="field">
@@ -164,10 +182,14 @@ async function create() {
       </template>
 
       <footer>
-        <span class="muted hint">建錯了可以按 ⌘Z 復原</span>
+        <!-- 灰掉的按鈕一定要說為什麼。不說的話使用者只會一直點，
+             然後以為工具壞了——那跟「按了沒反應」是同一種病。 -->
+        <span :class="['hint', blocked ? 'why' : 'muted']">
+          {{ blocked ?? '建錯了可以按 ⌘Z 復原' }}
+        </span>
         <span class="grow" />
         <button @click="store.addingConnection = null">取消</button>
-        <button class="primary" :disabled="!canCreate || computing" @click="create()">建立</button>
+        <button class="primary" :disabled="!!blocked || computing" @click="create()">建立</button>
       </footer>
     </section>
   </div>
@@ -222,4 +244,5 @@ p { margin: 0; }
 footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .grow { flex: 1; }
 .hint { font-size: 11.5px; }
+.why { color: var(--broken); }
 </style>

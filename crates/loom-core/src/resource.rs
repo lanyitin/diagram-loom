@@ -28,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use crate::Project;
 use crate::edit::EditError;
 use crate::environment::{
-    DeploymentNode, Endpoint, Environment, InfrastructureNode, NodeKind, SoftwareSystemInstance,
+    ContainerInstance, DeploymentNode, Endpoint, Environment, InfrastructureNode, NodeKind,
+    SoftwareSystemInstance,
 };
 use crate::id::Id;
 use crate::logical::{Container, EndpointDef, Person, Protocol, Relationship, SoftwareSystem};
@@ -71,6 +72,15 @@ pub enum Resource {
         node: Id,
         endpoint: Endpoint,
     },
+    /// 一個服務在某台機器上的落地。**位址就住在這裡。**
+    ///
+    /// `node` 是它跑在哪台機器上。落地不能離開機器獨立存在——
+    /// 「東西跑在哪裡」正是部署圖唯一要回答的問題。
+    Instance {
+        environment: Id,
+        node: Id,
+        instance: ContainerInstance,
+    },
     /// 外部系統在這個環境的落地。
     SystemInstance {
         environment: Id,
@@ -91,6 +101,7 @@ impl Resource {
             Resource::Node { node, .. } => &node.id,
             Resource::Infra { node, .. } => &node.id,
             Resource::InfraEndpoint { endpoint, .. } => &endpoint.id,
+            Resource::Instance { instance, .. } => &instance.id,
             Resource::SystemInstance { instance, .. } => &instance.id,
         }
     }
@@ -107,6 +118,7 @@ impl Resource {
             Resource::Node { .. } => "機器",
             Resource::Infra { .. } => "設備",
             Resource::InfraEndpoint { .. } => "設備接點",
+            Resource::Instance { .. } => "落地",
             Resource::SystemInstance { .. } => "外部系統落地",
         }
     }
@@ -123,6 +135,7 @@ impl Resource {
             Resource::Node { node, .. } => &node.slug,
             Resource::Infra { node, .. } => &node.slug,
             Resource::InfraEndpoint { endpoint, .. } => &endpoint.slug,
+            Resource::Instance { instance, .. } => &instance.slug,
             Resource::SystemInstance { instance, .. } => &instance.slug,
         }
     }
@@ -215,6 +228,17 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 address: None,
             },
         },
+        Kind::Instance => Resource::Instance {
+            environment: environment.unwrap_or_else(|| Id::new("")),
+            node: owner.unwrap_or_else(|| Id::new("")),
+            instance: ContainerInstance {
+                id,
+                slug: String::new(),
+                container: Id::new(""),
+                endpoints: vec![],
+                standalone: false,
+            },
+        },
         Kind::SystemInstance => Resource::SystemInstance {
             environment: environment.unwrap_or_else(|| Id::new("")),
             instance: SoftwareSystemInstance {
@@ -242,6 +266,7 @@ pub enum Kind {
     Node,
     Infra,
     InfraEndpoint,
+    Instance,
     SystemInstance,
 }
 
@@ -261,6 +286,7 @@ impl Resource {
             ("新增", Resource::Node { .. }) => "新增機器",
             ("新增", Resource::Infra { .. }) => "新增設備",
             ("新增", Resource::InfraEndpoint { .. }) => "新增設備接點",
+            ("新增", Resource::Instance { .. }) => "新增落地",
             ("新增", Resource::SystemInstance { .. }) => "新增外部系統落地",
             ("刪除", Resource::Person(_)) => "刪除人",
             ("刪除", Resource::System(_)) => "刪除系統",
@@ -271,6 +297,7 @@ impl Resource {
             ("刪除", Resource::Node { .. }) => "刪除機器",
             ("刪除", Resource::Infra { .. }) => "刪除設備",
             ("刪除", Resource::InfraEndpoint { .. }) => "刪除設備接點",
+            ("刪除", Resource::Instance { .. }) => "刪除落地",
             ("刪除", Resource::SystemInstance { .. }) => "刪除外部系統落地",
             (_, Resource::Person(_)) => "修改人",
             (_, Resource::System(_)) => "修改系統",
@@ -281,6 +308,7 @@ impl Resource {
             (_, Resource::Node { .. }) => "修改機器",
             (_, Resource::Infra { .. }) => "修改設備",
             (_, Resource::InfraEndpoint { .. }) => "修改設備接點",
+            (_, Resource::Instance { .. }) => "修改落地",
             (_, Resource::SystemInstance { .. }) => "修改外部系統落地",
         }
     }
@@ -353,6 +381,10 @@ pub(crate) fn delete(project: &mut Project, r: &Resource) -> Result<(), EditErro
         Resource::Node { environment, .. } => {
             let env = find_env(project, environment)?;
             remove_node(&mut env.nodes, &id);
+        }
+        Resource::Instance { environment, .. } => {
+            let env = find_env(project, environment)?;
+            take_instance(&mut env.nodes, &id);
         }
         Resource::Infra { environment, .. } => {
             find_env(project, environment)?.infra.retain(|n| n.id != id);
@@ -494,6 +526,33 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             };
             parent_children.push(node.clone());
         }
+        Resource::Instance {
+            environment,
+            node,
+            instance,
+        } => {
+            let env = find_env(project, environment)?;
+            // 落地的名字在**整個環境**裡唯一，不是只在那台機器上。
+            // 萬用字元比對的就是它，兩台同名會讓 `expect` 數錯——
+            // 而使用者會以為那是兩台不同的機器。
+            check_slug_unique(
+                env.instances()
+                    .iter()
+                    .map(|i| (i.id.clone(), i.slug.clone())),
+                r,
+            )?;
+
+            // 先從舊的那台移走。使用者可以把落地搬到別台機器上，不移走的話
+            // 會變成兩份，而萬用字元會把它數成兩台。
+            //
+            // ⚠️ 不能用 `replace_or_push`：它在「找不到」時是**安靜地什麼都不做**，
+            // 而這裡剛剛才把東西移走，於是修改會變成靜悄悄的刪除。
+            // 移走再放上去，新增與修改就是同一件事。
+            take_instance(&mut env.nodes, &instance.id);
+            let host = find_node(&mut env.nodes, node)
+                .ok_or_else(|| EditError::NoSuchSubject(node.clone()))?;
+            host.instances.push(instance.clone());
+        }
         Resource::Infra { environment, node } => {
             let env = find_env(project, environment)?;
             check_slug_unique(env.infra.iter().map(|n| (n.id.clone(), n.slug.clone())), r)?;
@@ -576,6 +635,9 @@ fn exists(project: &Project, r: &Resource) -> bool {
             on_container || on_system
         }
         Resource::Environment(_) => project.environments.iter().any(|e| &e.id == id),
+        Resource::Instance { environment, .. } => project
+            .environment(environment)
+            .is_some_and(|env| env.instances().iter().any(|i| &i.id == id)),
         Resource::Node { environment, .. } => project
             .environment(environment)
             .is_some_and(|env| all_nodes(&env.nodes).into_iter().any(|(i, _)| &i == id)),
@@ -654,4 +716,20 @@ pub fn new_project(name: &str) -> Project {
         },
         environments: vec![],
     }
+}
+
+/// 把一個落地從部署樹裡拿走，回傳它。找不到就是 `None`。
+///
+/// 修改時也會用到：使用者可以把落地搬到別台機器上，那就得先從舊的那台移走，
+/// 否則會變成兩份——而萬用字元會把它數成兩台。
+fn take_instance(nodes: &mut [DeploymentNode], id: &Id) -> Option<ContainerInstance> {
+    for node in nodes.iter_mut() {
+        if let Some(at) = node.instances.iter().position(|i| &i.id == id) {
+            return Some(node.instances.remove(at));
+        }
+        if let Some(found) = take_instance(&mut node.children, id) {
+            return Some(found);
+        }
+    }
+    None
 }

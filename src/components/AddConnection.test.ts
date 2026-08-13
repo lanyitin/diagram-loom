@@ -98,7 +98,9 @@ describe('補一條連線', () => {
 
   it('兩個選單都照 Rust 給的分組列出來', async () => {
     const w = await openIt()
-    const groups = w.findAll('optgroup').map((g) => g.attributes('label'))
+    // 兩個選單都要展開才看得到清單——它們是會打字的下拉選單，不是原生 select。
+    for (const input of w.findAll('input[role="combobox"]')) await input.trigger('focus')
+    const groups = w.findAll('.group').map((g) => g.text())
     expect(groups).toContain('服務（整群）')
     expect(groups).toContain('設備')
     expect(groups).toContain('人')
@@ -128,8 +130,9 @@ describe('補一條連線', () => {
     const apply = vi.spyOn(store, 'applyEdit').mockResolvedValue(undefined)
 
     // 改成走 F5（提案擬不出這件事，只有人知道）。
-    const toSelect = w.findAll('select')[1]!
-    await toSelect.setValue('1')
+    const toPicker = w.findAllComponents({ name: 'Picker' })[1]!
+    await toPicker.find('input').trigger('focus')
+    await toPicker.findAll('.item')[1]!.trigger('click')
     await w.find('.primary').trigger('click')
 
     expect(apply).toHaveBeenCalledWith(
@@ -178,5 +181,61 @@ describe('補一條連線', () => {
     expect(apply).toHaveBeenCalledWith(
       expect.objectContaining({ addConnection: expect.objectContaining({ id: 'conn-新的' }) }),
     )
+  })
+})
+
+describe('建立之前的檢核', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    vi.mocked(commands.proposeConnection).mockResolvedValue({ status: 'ok', data: proposal() } as never)
+    // 兩邊給同一份清單，才選得出「兩端指到同一個東西」這個情況。
+    vi.mocked(commands.connectionChoices).mockResolvedValue({
+      status: 'ok', data: [...fromChoices, ...target],
+    } as never)
+    store.addingConnection = { environment: 'env-prod', relationship: 'r-cache', label: 'x' }
+  })
+
+  async function openIt() {
+    const w = mount(AddConnection)
+    await flushPromises()
+    return w
+  }
+
+  /** 在某一個選單裡挑第 n 項。 */
+  async function pick(w: ReturnType<typeof mount>, which: number, item: number) {
+    const picker = w.findAllComponents({ name: 'Picker' })[which]!
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[item]!.trigger('click')
+  }
+
+  it('兩端指到同一個東西時建不下去，而且說出為什麼', async () => {
+    // 灰掉又不說話的按鈕，使用者只會一直點然後以為工具壞了——
+    // 那跟「按了沒反應」是同一種病。
+    const w = await openIt()
+    await pick(w, 0, 0)
+    await pick(w, 1, 0)
+
+    expect(w.find('.primary').attributes('disabled')).toBeDefined()
+    expect(w.find('footer .hint').text()).toContain('同一個東西')
+  })
+
+  it('換成不同的目標之後就建得下去了', async () => {
+    const w = await openIt()
+    await pick(w, 0, 0)
+    await pick(w, 1, 0)
+    expect(w.find('.primary').attributes('disabled')).toBeDefined()
+
+    await pick(w, 1, 2)
+    expect(w.find('.primary').attributes('disabled')).toBeUndefined()
+  })
+
+  it('正常的一組不會被擋，而且底下寫的是復原提示', async () => {
+    const w = await openIt()
+    expect(w.find('.primary').attributes('disabled')).toBeUndefined()
+    expect(w.find('footer .hint').text()).toContain('⌘Z')
   })
 })

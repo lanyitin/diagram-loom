@@ -181,6 +181,12 @@ pub enum EditError {
         kind: &'static str,
         slug: String,
     },
+    /// 一條連線的兩端指到同一個東西。
+    SelfLoop,
+    /// 把「人」放在目標端。人是流量的起點，不是終點。
+    PersonAsTarget,
+    /// 連線沒有說它在實現哪一條契約。
+    NoServes,
 }
 
 impl fmt::Display for EditError {
@@ -191,6 +197,19 @@ impl fmt::Display for EditError {
             EditError::NoSuchConnection(id) => write!(f, "找不到連線 {id}"),
             EditError::NoSuchRelationship(id) => write!(f, "找不到邏輯連線 {id}"),
             EditError::NoSuchSubject(id) => write!(f, "找不到 {id}"),
+            EditError::SelfLoop => write!(
+                f,
+                "連線的兩端指到同一個東西。一條連線是「誰連到誰」，兩端一樣的話它什麼也沒說"
+            ),
+            EditError::PersonAsTarget => write!(
+                f,
+                "「人」只能放在來源端。使用者是流量的起點，不會有人連進一個人裡面"
+            ),
+            EditError::NoServes => write!(
+                f,
+                "這條連線沒有說它在實現哪一條契約。沒有契約的連線 lint 會叫（L011），\
+                 而且覆蓋矩陣上看不到它"
+            ),
             EditError::NotAPattern { connection, side } => write!(
                 f,
                 "連線 {connection} 的{side}端不是萬用字元，沒有期望數量可以設定"
@@ -333,6 +352,10 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             from,
             to,
         } => {
+            // 先驗，再動。這幾條在畫面上與 MCP 都擋不住——
+            // 畫面的下拉選單只是「不方便選到」，Agent 是直接送 `Edit` 進來的。
+            check_connection(project, serves, from, to)?;
+
             let env = find_env(project, environment)?;
             // 同一個 id 不能加兩次。會走到這裡多半是重播（復原後又重做），
             // 安靜地加第二條就會變成兩條一模一樣的連線。
@@ -491,6 +514,58 @@ pub enum FixValue {
 /// 新增一條規則就要記得同步兩個地方，而漏掉的那次是靜靜地不作用。
 ///
 /// 所以前端全程不需要知道 [`Edit`] 有哪些變體。
+/// 一條新連線至少要說得通。
+///
+/// # 為什麼在這裡而不是靠 lint
+///
+/// lint 是**事後**的：東西已經建進去了，再叫你回頭修。對「兩端一樣」
+/// 這種一看就知道錯的東西，那太晚了——而且它建出來之後長得像一條正常的連線，
+/// 使用者不會回頭懷疑自己按錯。
+///
+/// # 為什麼不驗更多
+///
+/// 中間要不要經過 F5、這條路要走幾段，**是人的決定**，工具不知道。
+/// 所以兩端可以指到跟契約沒有直接關係的東西——多段路徑本來就是這樣拼的。
+/// 那一類「兜不起來」由 lint 的可達性檢查（L002）回答，它看得到整條路。
+fn check_connection(
+    project: &Project,
+    serves: &Id,
+    from: &Endpointing,
+    to: &Endpointing,
+) -> Result<(), EditError> {
+    if serves.to_string().trim().is_empty() {
+        return Err(EditError::NoServes);
+    }
+    if project.logical.relationship(serves).is_none() {
+        return Err(EditError::NoSuchRelationship(serves.clone()));
+    }
+    if matches!(to, Endpointing::Person { .. }) {
+        return Err(EditError::PersonAsTarget);
+    }
+    // 只比「指到誰」，不比接點：同一台機器的 A 埠連 B 埠仍然是自己連自己。
+    if target_of(from) == target_of(to) {
+        return Err(EditError::SelfLoop);
+    }
+    Ok(())
+}
+
+/// 一端指到的東西是誰。萬用字元用它的樣式當身分。
+fn target_of(side: &Endpointing) -> String {
+    match side {
+        Endpointing::Instance { target, .. } => match target {
+            crate::environment::InstanceRef::One(id) => format!("i:{id}"),
+            crate::environment::InstanceRef::Pattern {
+                slug_pattern,
+                within,
+                ..
+            } => format!("p:{slug_pattern}@{within:?}"),
+        },
+        Endpointing::Infra { node, .. } => format!("n:{node}"),
+        Endpointing::System { instance, .. } => format!("s:{instance}"),
+        Endpointing::Person { person } => format!("h:{person}"),
+    }
+}
+
 pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> {
     let env_of = || {
         finding
