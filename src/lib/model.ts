@@ -32,6 +32,7 @@ export type {
   Impact,
   Kind,
   Matrix,
+  McpStatus,
   NodeKind,
   Plan,
   Proposal,

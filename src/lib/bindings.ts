@@ -71,6 +71,21 @@ export const commands = {
 	 */
 	createProject: (path: string, name: string) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("create_project", { path, name })),
 	/**
+	 *  打開給 AI Agent 用的本機端點。
+	 * 
+	 *  判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
+	 */
+	startMcp: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("start_mcp")),
+	stopMcp: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("stop_mcp")),
+	mcpStatus: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("mcp_status")),
+	/**
+	 *  給使用者複製到 Agent 設定檔裡的那一段 JSON。**含 token。**
+	 * 
+	 *  token 只從這裡出去，狀態查詢不會帶——狀態會被畫面到處傳，
+	 *  而 token 只該在使用者主動要求時出現一次。
+	 */
+	mcpConfig: () => typedError<string | null, Failure>(__TAURI_INVOKE("mcp_config")),
+	/**
 	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
 	 * 
 	 *  前端送回來的是**發現本身 + 使用者填了什麼**，不是 [`Edit`]——
@@ -1133,6 +1148,15 @@ export type Matrix = {
 	environments: Id[],
 	/**  每格一項，依 (relationship, environment) 排列，長度為兩者相乘。 */
 	cells: Cell[],
+};
+
+/**
+ *  前端要顯示的狀態。**不含 token**——狀態會被畫面到處傳，
+ *  而 token 只該在使用者主動要求時出現一次（見 [`config_snippet`]）。
+ */
+export type McpStatus = {
+	running: boolean,
+	url: string | null,
 };
 
 /**  運算載體的種類。 */

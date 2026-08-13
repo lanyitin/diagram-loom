@@ -7,6 +7,7 @@ import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
 import AddInstances from './components/AddInstances.vue'
+import AgentPanel from './components/AgentPanel.vue'
 import ResourceForm from './components/ResourceForm.vue'
 import ResourceView from './components/ResourceView.vue'
 import CloseGuard from './components/CloseGuard.vue'
@@ -102,6 +103,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.importing = true">匯入試算表…</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.recheck()">重新檢查</button>
+      <button :disabled="!store.isOpen || store.busy" @click="store.agentPanelOpen = true">AI 助手…</button>
       <button class="primary" :disabled="!store.dirty || store.busy" @click="store.save()">
         儲存
       </button>
@@ -174,6 +176,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <ImportWizard v-if="store.importing" />
     <AddConnection />
     <AddInstances />
+    <AgentPanel />
     <ResourceForm />
     <DeleteConfirm />
     <CloseGuard />

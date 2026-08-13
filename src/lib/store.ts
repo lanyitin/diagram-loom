@@ -44,6 +44,8 @@ interface State {
   addingInstances: PendingInstances | null
   /** 使用者正在新增或編輯的資源。 */
   editingResource: PendingEdit | null
+  /** 「讓 AI 助手接進來」那個面板開著。 */
+  agentPanelOpen: boolean
 }
 
 /** 資源表單需要知道的：改哪一個、是不是新的、怎麼稱呼它。 */
@@ -104,6 +106,7 @@ export const useProject = defineStore('project', {
     addingConnection: null,
     addingInstances: null,
     editingResource: null,
+    agentPanelOpen: false,
   }),
 
   getters: {

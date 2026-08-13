@@ -18,7 +18,7 @@ use loom_core::history::History;
 use loom_core::id::Id;
 use loom_core::lint::lint;
 use loom_core::logical::Logical;
-use loom_mcp::{Workspace, protocol, tools};
+use loom_mcp::{Workspace, tools};
 
 /// 最小的 Workspace：一個 History，跟桌面 App 用的是同一個型別。
 struct Desk(Option<History>);
@@ -521,49 +521,17 @@ fn the_user_can_undo_everything_the_agent_did() {
     assert!(!h.is_dirty(), "全部退回去之後應該回到未修改的狀態");
 }
 
-mod the_protocol_layer {
+mod what_the_agent_is_told {
     use super::*;
 
-    fn request(ws: &mut Desk, method: &str, params: Value) -> Value {
-        protocol::handle(
-            ws,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}),
-        )
-        .expect("有 id 的請求一定要有回應")
-    }
-
     #[test]
-    fn initialize_echoes_the_clients_protocol_version() {
-        let mut ws = empty();
-        let r = request(
-            &mut ws,
-            "initialize",
-            json!({"protocolVersion": "2024-11-05"}),
-        );
-        assert_eq!(r["result"]["protocolVersion"], "2024-11-05");
-        assert_eq!(r["result"]["serverInfo"]["name"], "diagram-loom");
-    }
-
-    #[test]
-    fn the_instructions_tell_the_agent_the_house_rules() {
-        // 這段是 Agent 唯一會無條件讀到的說明。
-        let mut ws = empty();
-        let r = request(&mut ws, "initialize", json!({}));
-        let text = r["result"]["instructions"].as_str().unwrap();
-        assert!(text.contains("describe"));
-        assert!(text.contains("lint"));
-        assert!(text.contains("不會自動存檔"));
-    }
-
-    #[test]
-    fn notifications_get_no_reply() {
-        // 依規範，沒有 id 的請求不能回應。回了的話有些客戶端會當成錯誤。
-        let mut ws = empty();
-        let r = protocol::handle(
-            &mut ws,
-            &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-        );
-        assert!(r.is_none());
+    fn the_instructions_carry_the_three_house_rules() {
+        // 這段是 Agent 唯一會無條件讀到的說明——工具的描述要它主動看，
+        // 這段不用。所以最重要的三件事一定要在裡面。
+        let text = loom_mcp::INSTRUCTIONS;
+        assert!(text.contains("describe"), "沒叫它先看現況");
+        assert!(text.contains("lint"), "沒叫它自我檢查");
+        assert!(text.contains("不會自動存檔"), "沒說清楚存檔是人的決定");
     }
 
     #[test]
@@ -582,34 +550,10 @@ mod the_protocol_layer {
     }
 
     #[test]
-    fn a_tool_failure_is_a_result_not_a_protocol_error() {
-        // 回成協定層的 error 的話，多數客戶端會直接中斷，
-        // 而使用者只看到「工具壞了」——模型連修正的機會都沒有。
+    fn an_unknown_tool_name_is_an_error_not_a_panic() {
+        // 協定由 rmcp 負責，但「沒有這個工具」還是要由這裡回答——
+        // rmcp 不知道我們有哪些工具。
         let mut ws = empty();
-        let r = request(
-            &mut ws,
-            "tools/call",
-            json!({"name": "create", "arguments": {"kind": "container", "fields": {"slug": "x", "system": "沒這個"}}}),
-        );
-        assert!(r.get("error").is_none(), "不該是協定層錯誤：{r}");
-        assert_eq!(r["result"]["isError"], true);
-        assert!(
-            r["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("找不到系統")
-        );
-    }
-
-    #[test]
-    fn an_unknown_method_does_not_take_the_server_down() {
-        let mut ws = empty();
-        let r = request(&mut ws, "resources/list", json!({}));
-        assert!(
-            r["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("沒有這個方法")
-        );
+        assert!(err(&mut ws, "刪掉全部", json!({})).contains("沒有這個工具"));
     }
 }

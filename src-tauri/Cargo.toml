@@ -20,13 +20,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 loom-core = { path = "../crates/loom-core", features = ["specta"] }
+loom-mcp = { path = "../crates/loom-mcp" }
 serde = { version = "1", features = ["derive"] }
 specta = { version = "2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "0.0.12"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }
+
+serde_json = "1"
+tokio = { version = "1", features = ["net", "rt"] }
+rmcp = { version = "3.1.2", default-features = false, features = ["server", "macros", "schemars", "transport-streamable-http-server", "transport-streamable-http-server-session", "tower"] }
 
 [dev-dependencies]
 # 只有權限檔的守門測試用得到。

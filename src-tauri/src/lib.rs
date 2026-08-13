@@ -20,6 +20,8 @@
 //! 寫進 `src/lib/bindings.ts`。**不要手改那個檔**——`mise run bindings`
 //! 會重新產生，`mise run check` 會檢查它是不是最新的。
 
+pub mod mcp;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -47,9 +49,9 @@ use tauri_specta::{Builder, collect_commands};
 /// 專案本體包在 [`History`] 裡，而且**只能透過它修改**——這樣「改了就能復原」
 /// 不是靠每個 command 各自記得，而是型別上就繞不過去。
 #[derive(Default)]
-struct Opened {
+pub struct Opened {
     root: Option<PathBuf>,
-    history: Option<History>,
+    pub history: Option<History>,
     /// 預覽過、還沒套用的匯入結果。
     ///
     /// 存起來而不是套用時重跑一次：重跑會產生新的 UUID，使用者按下「套用」
@@ -437,6 +439,37 @@ fn save_project(state: State<'_>) -> Result<Snapshot, Failure> {
     Ok(snapshot(root, history))
 }
 
+/// 打開給 AI Agent 用的本機端點。
+///
+/// 判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
+#[tauri::command]
+#[specta::specta]
+fn start_mcp(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
+    mcp::start(&app).map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn stop_mcp(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
+    mcp::stop(&app).map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn mcp_status(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
+    mcp::status_of(&app).map_err(Into::into)
+}
+
+/// 給使用者複製到 Agent 設定檔裡的那一段 JSON。**含 token。**
+///
+/// token 只從這裡出去，狀態查詢不會帶——狀態會被畫面到處傳，
+/// 而 token 只該在使用者主動要求時出現一次。
+#[tauri::command]
+#[specta::specta]
+fn mcp_config(app: tauri::AppHandle) -> Result<Option<String>, Failure> {
+    mcp::config_snippet(&app).map_err(Into::into)
+}
+
 /// 產生 TS 型別用的 builder。`main.rs` 與型別產生器共用同一份，
 /// 所以不可能出現「command 加了但型別沒更新」。
 pub fn builder() -> Builder<tauri::Wry> {
@@ -455,6 +488,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         resource_tables,
         blank_resource,
         create_project,
+        start_mcp,
+        stop_mcp,
+        mcp_status,
+        mcp_config,
         apply_fix,
         undo,
         redo
@@ -470,6 +507,7 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
             app.manage(Mutex::new(Opened::default()));
+            app.manage(Mutex::new(mcp::Server::default()));
             Ok(())
         })
         .run(tauri::generate_context!())

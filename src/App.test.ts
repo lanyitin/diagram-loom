@@ -44,6 +44,10 @@ vi.mock('./lib/bindings', () => ({
     resourceTables: vi.fn(),
     blankResource: vi.fn(),
     createProject: vi.fn(),
+    mcpStatus: vi.fn(),
+    startMcp: vi.fn(),
+    stopMcp: vi.fn(),
+    mcpConfig: vi.fn(),
   },
 }))
 
