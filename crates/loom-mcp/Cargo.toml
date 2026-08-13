@@ -1,0 +1,15 @@
+[package]
+name = "loom-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# ⭐ 跟 loom-core 一樣，這裡也不准出現 tauri。
+#
+# MCP 是「另一個前端」——桌面 App 給人用，這個給 AI Agent 用，
+# 兩者共用的是 loom-core 那套規則，不是 Tauri。
+# 這條線讓工具的行為可以用 cargo test 驗證，不需要開視窗也不需要跑 server。
+[dependencies]
+loom-core = { path = "../loom-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
