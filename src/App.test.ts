@@ -26,21 +26,37 @@ vi.mock('./lib/bindings', () => ({
     previewImport: vi.fn(),
     applyImport: vi.fn(),
     cancelImport: vi.fn(),
+    previewEdit: vi.fn(),
+    applyEdit: vi.fn(),
+    applyFix: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
   },
 }))
 
-function 假快照(): Snapshot {
+function 假快照(extra: Partial<Snapshot> = {}): Snapshot {
   return {
     root: '/tmp/假的.loom',
     findings: [],
     rows: [],
     matrix: { relationships: [], environments: [], cells: [] },
+    dirty: false,
+    undoLabel: null,
+    redoLabel: null,
     project: {
       id: 'p', slug: 'f', name: '假專案',
       logical: { people: [], systems: [], containers: [], relationships: [] },
       environments: [{ id: 'env-prod', slug: 'prod', name: '正式' }],
     },
+    ...extra,
   } as unknown as Snapshot
+}
+
+/** 依按鈕上的字找它。位置會變，字不會。 */
+function 鈕(w: ReturnType<typeof mount>, 字: string) {
+  const b = w.findAll('header button').find((x) => x.text().includes(字))
+  expect(b, `找不到「${字}」按鈕`).toBeTruthy()
+  return b!
 }
 
 describe('視窗組裝', () => {
@@ -91,5 +107,66 @@ describe('視窗組裝', () => {
       .map((b) => b.text())
     expect(停用的).toContain('儲存')
     expect(停用的).toContain('匯入試算表…')
+  })
+
+  it('沒有未儲存的變更時儲存是停用的', () => {
+    // 亮著的儲存鍵等於一直在說「你有事沒做」，看久了就沒意義了。
+    store.snapshot = 假快照({ dirty: false })
+    expect(鈕(mount(App), '儲存').attributes('disabled')).toBeDefined()
+
+    store.snapshot = 假快照({ dirty: true })
+    const w = mount(App)
+    expect(鈕(w, '儲存').attributes('disabled')).toBeUndefined()
+    expect(w.find('.dirty').exists()).toBe(true)
+  })
+
+  it('復原與重做各自看自己有沒有東西可做', () => {
+    store.snapshot = 假快照({ undoLabel: '刪除連線', redoLabel: null })
+    const w = mount(App)
+
+    expect(鈕(w, '復原').attributes('disabled')).toBeUndefined()
+    expect(鈕(w, '復原').attributes('title')).toBe('復原：刪除連線')
+    expect(鈕(w, '重做').attributes('disabled')).toBeDefined()
+  })
+
+  it('按了復原就往 Rust 送，畫面不自己算', async () => {
+    store.snapshot = 假快照({ undoLabel: '修改用途' })
+    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
+
+    await 鈕(mount(App), '復原').trigger('click')
+    expect(復原).toHaveBeenCalled()
+  })
+
+  it('⌘Z 復原、⇧⌘Z 重做', async () => {
+    // 只有一顆按鈕的復原，使用者不會相信它——他會改成「不敢亂按」。
+    store.snapshot = 假快照({ undoLabel: '修改用途', redoLabel: '修改用途' })
+    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
+    const 重做 = vi.spyOn(store, '重做').mockResolvedValue(undefined)
+    mount(App, { attachTo: document.body })
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
+    expect(復原).toHaveBeenCalled()
+    expect(重做).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true }))
+    expect(重做).toHaveBeenCalled()
+  })
+
+  it('沒開專案時快捷鍵不做事', () => {
+    const 復原 = vi.spyOn(store, '復原').mockResolvedValue(undefined)
+    mount(App, { attachTo: document.body })
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
+    expect(復原).not.toHaveBeenCalled()
+  })
+
+  it('刪除確認框跟歡迎畫面互不影響', () => {
+    // 跟匯入精靈同一個坑：它是疊在上層的對話框，不是 v-if 鏈的一環。
+    store.snapshot = 假快照()
+    vi.spyOn(store, '預覽編輯').mockResolvedValue({ introduced: [], resolved: [] })
+    store.刪除中 = { environment: 'env-prod', connection: 'c1', label: 'a → b' }
+    const w = mount(App)
+    expect(w.find('.welcome').exists()).toBe(false)
+    expect(w.findComponent({ name: 'DeleteConfirm' }).find('.box').exists()).toBe(true)
   })
 })

@@ -20,7 +20,9 @@
 
 pub mod batch;
 pub mod coverage;
+pub mod edit;
 pub mod environment;
+pub mod history;
 pub mod id;
 pub mod importer;
 mod index;

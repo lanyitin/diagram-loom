@@ -17,9 +17,35 @@ export const commands = {
 	saveProject: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("save_project")),
 	/**  讀一張表，算出「如果匯進去會發生什麼」。**不改動任何東西。** */
 	previewImport: (path: string) => typedError<Plan, Failure>(__TAURI_INVOKE("preview_import", { path })),
-	/**  套用剛剛預覽過的那一份。 */
+	/**
+	 *  套用剛剛預覽過的那一份。
+	 * 
+	 *  走 `History::replace` 而不是直接換掉專案——匯入會動到成百上千個地方，
+	 *  是最需要「按錯了能退回去」的操作。
+	 */
 	applyImport: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_import")),
 	cancelImport: () => typedError<null, Failure>(__TAURI_INVOKE("cancel_import")),
+	/**
+	 *  「如果做這次修改，lint 會多出什麼、少掉什麼」。**不改動任何東西。**
+	 * 
+	 *  刪除之前一定要先問這個。判斷不在這裡——這一層只是轉接。
+	 */
+	previewEdit: (edit: Edit) => typedError<Impact, Failure>(__TAURI_INVOKE("preview_edit", { edit })),
+	applyEdit: (edit: Edit) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_edit", { edit })),
+	/**
+	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
+	 * 
+	 *  前端送回來的是**發現本身 + 使用者填了什麼**，不是 [`Edit`]——
+	 *  「L006 的答案要寫進哪個欄位」由 `loom_core::edit::edit_for` 決定。
+	 *  前端因此完全不需要知道 [`Edit`] 有哪些變體。
+	 */
+	applyFix: (finding: Finding, value: FixValue) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_fix", { finding, value })),
+	/**
+	 *  退回上一步。已經到底了就原樣回傳——這不是錯誤，
+	 *  使用者多按一次 Cmd+Z 不該看到紅字。
+	 */
+	undo: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("undo")),
+	redo: () => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("redo")),
 };
 
 /* Types */
@@ -60,6 +86,14 @@ export type ChangeKind = "added" | "updated";
  *  Lint 把貼同一個 `serves` 的連線攤開成一張圖，檢查從來源走不走得到目標。
  */
 export type Connection = Connection_Serialize | Connection_Deserialize;
+
+/**
+ *  連線的哪一端。萬用字元兩端都可能出現。
+ * 
+ *  名字不叫 `Side`，是為了不跟 `table::Side`（表格上一端的完整樣貌）撞名——
+ *  型別匯出到 TypeScript 之後是同一個命名空間，撞了就產不出來。
+ */
+export type ConnectionEnd = "from" | "to";
 
 /**  連線是正常路徑還是備援路徑。 */
 export type ConnectionKind = 
@@ -204,6 +238,64 @@ export type DeploymentNode_Serialize = {
 	children?: DeploymentNode_Serialize[],
 	instances?: ContainerInstance_Serialize[],
 };
+
+/**  對專案的一次修改。 */
+export type Edit = 
+/**
+ *  L006 的修法：補上某個 Endpoint 的實際位址。
+ * 
+ *  Endpoint 可能掛在 Instance、設備或外部系統落地上，所以只給 id，
+ *  由 [`apply`] 自己找。前端不需要知道它住在哪一層。
+ */
+({ setAddress: {
+	environment: Id,
+	endpoint: Id,
+	/**
+	 *  `None` 表示清空。清空是合法操作——它會讓 L006 重新叫，
+	 *  那正是「我還不知道位址」該有的狀態。
+	 */
+	address: string | null,
+} }) & { deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  L007 的修法：填上用途。
+ * 
+ *  `environment` 為 `None` 時指的是邏輯層的 Relationship。
+ */
+({ setPurpose: {
+	environment: Id | null,
+	subject: Id,
+	purpose: string,
+} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
+/**  L004 / L005 的修法：萬用字元的期望數量。 */
+({ setExpect: {
+	environment: Id,
+	connection: Id,
+	side: ConnectionEnd,
+	expect: number | null,
+} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
+/**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
+({ setStandalone: {
+	environment: Id,
+	/**  Instance 或外部系統落地的 id。 */
+	subject: Id,
+	standalone: boolean,
+} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
+/**  改成正常路徑或備援路徑。 */
+({ setConnectionKind: {
+	environment: Id,
+	connection: Id,
+	kind: ConnectionKind,
+} }) & { deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  刪掉一條環境層連線。
+ * 
+ *  這是目前唯一的刪除操作，而且刪除一定要先看 [`preview`]——
+ *  少一條連線正是本工具存在要抓的東西。
+ */
+({ deleteConnection: {
+	environment: Id,
+	connection: Id,
+} }) & { setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
 
 /**  動到的是什麼東西。畫面上用來分組。 */
 export type Element = "environment" | 
@@ -442,11 +534,28 @@ export type Failure = {
 };
 
 /**
- *  一項發現，外加它的嚴重度。
+ *  一項發現。
+ * 
+ *  欄位順序即排序順序，讓 lint 的輸出穩定可比對。
+ */
+export type Finding = {
+	rule: Rule,
+	/**  發生在哪個環境；邏輯層本身的問題為 `None`。 */
+	environment: Id | null,
+	/**  出問題的元素。 */
+	subject: Id,
+	detail: string,
+};
+
+/**
+ *  一項發現，外加它的嚴重度與修法。
  * 
  *  `Rule::severity()` 在 Rust 是一個方法，序列化不會帶過去。若讓前端自己
  *  抄一份「哪些規則算錯誤」的對照表，新增規則時那份一定會忘記更新，
  *  而且是**靜靜地**算錯數字。所以在這裡攤平成欄位。
+ * 
+ *  `fix` 同理：「L006 要填的是位址、L004 要填的是數字」是規則不是畫面，
+ *  由 `loom_core::edit::fix_for` 決定，前端只負責照著長出控制項。
  */
 export type FindingView = {
 	rule: Rule,
@@ -454,10 +563,48 @@ export type FindingView = {
 	environment: Id | null,
 	subject: Id,
 	detail: string,
+	/**
+	 *  這一項能不能用單一欄位修好，以及該長成什麼樣的輸入。
+	 *  `None` 表示要新增／改接連線，不是填一格能解決的。
+	 */
+	fix: Fix | null,
 };
+
+/**
+ *  這項發現該用哪種控制項來修。
+ * 
+ *  只描述「長什麼樣的輸入」，不描述畫面細節——畫面是前端的事，
+ *  但「L006 要填的是位址不是數字」是規則，屬於這裡。
+ */
+export type Fix = 
+/**  填一段文字（位址、用途）。 */
+({ text: {
+	/**  欄位提示，例如「10.0.1.11:6379」。 */
+	hint: string,
+	current: string | null,
+} }) & { count?: never; toggle?: never } | 
+/**  填一個數字（expect）。附上實際符合的數量當預設值。 */
+({ count: {
+	suggestion: number | null,
+} }) & { text?: never; toggle?: never } | 
+/**  一個開關（standalone）。 */
+({ toggle: {
+	label: string,
+} }) & { count?: never; text?: never };
+
+/**  使用者在 [`Fix`] 的控制項裡填的東西。 */
+export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };
 
 /**  元素的永久識別碼。建立後永不改變。 */
 export type Id = string;
+
+/**  [`preview`] 的結果：這次修改會弄壞什麼、會修好什麼。 */
+export type Impact = {
+	/**  套用後**新冒出來**的發現。刪除確認框要顯眼地列出這些。 */
+	introduced: Finding[],
+	/**  套用後**消失**的發現。 */
+	resolved: Finding[],
+};
 
 /**
  *  F5 等 VIP 設備。C4 的 `Infrastructure Node`。
@@ -795,6 +942,11 @@ export type Snapshot_Deserialize = {
 	matrix: Matrix,
 	/**  連線表用的列。跟矩陣一樣，是同一份資料的另一種排法。 */
 	rows: Row[],
+	/**  目前內容跟磁碟上不一樣。關視窗前要問的就是這個。 */
+	dirty: boolean,
+	/**  復原／重做選單要顯示的短標籤。`None` 表示按鈕要停用。 */
+	undoLabel: string | null,
+	redoLabel: string | null,
 };
 
 /**
@@ -810,6 +962,11 @@ export type Snapshot_Serialize = {
 	matrix: Matrix,
 	/**  連線表用的列。跟矩陣一樣，是同一份資料的另一種排法。 */
 	rows: Row[],
+	/**  目前內容跟磁碟上不一樣。關視窗前要問的就是這個。 */
+	dirty: boolean,
+	/**  復原／重做選單要顯示的短標籤。`None` 表示按鈕要停用。 */
+	undoLabel: string | null,
+	redoLabel: string | null,
 };
 
 /**  軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。 */

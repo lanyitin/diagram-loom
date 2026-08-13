@@ -5,7 +5,7 @@
  * 由 `tests/connection_table.rs` 顧著。
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import ConnectionTable from './ConnectionTable.vue'
@@ -127,8 +127,16 @@ describe('Lint 面板', () => {
   let store: ReturnType<typeof useProject>
 
   const 發現: Finding[] = [
-    { rule: 'L004', severity: 'error', environment: 'env-prod', subject: 'conn-1', detail: '期望 4 個，實際 3 個' },
-    { rule: 'L007', severity: 'warning', environment: 'env-dev', subject: 'conn-2', detail: '連線沒有填用途' },
+    {
+      rule: 'L004', severity: 'error', environment: 'env-prod', subject: 'conn-1',
+      detail: '期望 4 個，實際 3 個',
+      fix: { count: { suggestion: 3 } },
+    },
+    {
+      rule: 'L007', severity: 'warning', environment: 'env-dev', subject: 'conn-2',
+      detail: '連線沒有填用途',
+      fix: { text: { hint: '這條連線是做什麼用的', current: null } },
+    },
   ]
 
   beforeEach(() => {
@@ -154,12 +162,52 @@ describe('Lint 面板', () => {
     // 「知道有錯」到「看到那一列」之間不該需要自己找。
     store.面板展開 = true
     const w = mount(LintPanel)
-    w.findAll('.list tbody tr')[1]!.trigger('click')
+    w.findAll('.list tbody .detail')[1]!.trigger('click')
 
     expect(store.檢視).toBe('連線表')
     expect(store.只看有問題).toBe(true)
     expect(store.比對中的環境).toEqual(['env-dev'])
     expect(store.搜尋).toBe('')
+  })
+
+  it('修法的控制項完全由 Rust 送來的 fix 決定', async () => {
+    // 前端不認得規則代號。同一個面板，L004 長出數字框、L007 長出文字框，
+    // 差別只在 `fix` 的形狀——這裡若壞掉，代表有人在前端加了規則對照表。
+    store.面板展開 = true
+    const w = mount(LintPanel)
+
+    await w.findAll('.list .fix')[0]!.trigger('click')
+    expect(w.find('.editor input').attributes('type')).toBe('number')
+    // 實際符合幾個是 Rust 算的，直接當預設值，不叫使用者自己數。
+    expect((w.find('.editor input').element as HTMLInputElement).value).toBe('3')
+
+    await w.findAll('.list .fix')[1]!.trigger('click')
+    expect(w.find('.editor input').attributes('type')).toBe('text')
+    expect(w.find('.editor input').attributes('placeholder')).toBe('這條連線是做什麼用的')
+  })
+
+  it('填完送出的是發現本身加上值，不是前端拼的 Edit', async () => {
+    store.面板展開 = true
+    const 修好 = vi.spyOn(store, '修好').mockResolvedValue(undefined)
+    const w = mount(LintPanel)
+
+    await w.findAll('.list .fix')[1]!.trigger('click')
+    await w.find('.editor input').setValue('查快取')
+    await w.find('.editor form').trigger('submit')
+
+    expect(修好).toHaveBeenCalledWith(發現[1], { text: '查快取' })
+  })
+
+  it('沒有單欄位修法的那幾條不放假按鈕', () => {
+    // 按下去只會說「這個還沒做」的按鈕，比沒有按鈕更糟。
+    store.snapshot = 假快照([列('c1')], [
+      { rule: 'L002', severity: 'error', environment: 'env-prod', subject: 'r-1', detail: '走不通', fix: null },
+    ])
+    store.面板展開 = true
+    const w = mount(LintPanel)
+
+    expect(w.find('.list .fix').exists()).toBe(false)
+    expect(w.find('.list .act').text()).toContain('要改連線')
   })
 
   it('沒問題時說一句話而不是空清單', () => {

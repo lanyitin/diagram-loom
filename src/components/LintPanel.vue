@@ -10,11 +10,26 @@
  * 「L004 萬用字元期望 4 個」告訴你有問題，但沒告訴你在哪。
  * 點一下就跳到那個環境的連線表並且只留有問題的列——
  * 從「知道有錯」到「看到那一列」不該需要自己找。
+ *
+ * # 為什麼可以就地修
+ *
+ * 大部分的發現只差一格：位址、用途、期望數量、一個開關。
+ * 若要先跳到表格、找到那一列、再找到那一格，使用者會累到乾脆不修，
+ * 然後開始忽略 lint——那本工具就沒價值了。
+ *
+ * **這裡沒有任何「哪條規則要填什麼」的判斷。** 該長出什麼控制項寫在
+ * `finding.fix` 裡（Rust 算的），填完把值原封不動送回去，
+ * 由 Rust 的 `edit_for` 決定要寫進哪個欄位。
  */
+import { ref } from 'vue'
 import { useProject } from '../lib/store'
+import FixEditor from './FixEditor.vue'
 import type { Finding } from '../lib/model'
 
 const store = useProject()
+
+/** 目前展開修法的那一項。用索引就好——清單每次 lint 都會重算。 */
+const 修改中 = ref<number | null>(null)
 
 function 跳過去(f: Finding) {
   store.檢視 = '連線表'
@@ -37,16 +52,36 @@ function 跳過去(f: Finding) {
     <div v-if="store.面板展開" class="list">
       <table>
         <tbody>
-          <tr v-for="(f, i) in store.發現" :key="i" @click="跳過去(f)">
-            <td class="rule">
-              <span :class="['code', f.severity]">{{ f.rule }}</span>
-            </td>
-            <td class="mono env muted">{{ f.environment ? store.環境名(f.environment) : '邏輯層' }}</td>
-            <td class="mono subject">{{ f.subject }}</td>
-            <td class="detail">{{ f.detail }}</td>
-          </tr>
+          <template v-for="(f, i) in store.發現" :key="`${f.rule}-${f.subject}-${f.environment}`">
+            <tr>
+              <td class="rule">
+                <span :class="['code', f.severity]">{{ f.rule }}</span>
+              </td>
+              <td class="mono env muted">{{ f.environment ? store.環境名(f.environment) : '邏輯層' }}</td>
+              <td class="mono subject">{{ f.subject }}</td>
+              <td class="detail" @click="跳過去(f)">{{ f.detail }}</td>
+              <td class="act">
+                <button
+                  v-if="f.fix" class="fix" :disabled="store.忙碌中"
+                  @click="修改中 = 修改中 === i ? null : i"
+                >
+                  {{ 修改中 === i ? '取消' : '修…' }}
+                </button>
+                <!-- 沒有單欄位修法的（L001／L002／L003）不放假按鈕。
+                     一個按下去只會跳「這個還沒做」的按鈕，比沒有按鈕更糟。 -->
+                <span v-else class="muted hint">要改連線</span>
+              </td>
+            </tr>
+
+            <tr v-if="修改中 === i && f.fix" class="editor">
+              <td colspan="5">
+                <FixEditor :finding="f" :fix="f.fix" @done="修改中 = null" />
+              </td>
+            </tr>
+          </template>
+
           <tr v-if="store.發現.length === 0">
-            <td class="empty muted">這個專案目前沒有任何缺漏。</td>
+            <td class="empty muted" colspan="5">這個專案目前沒有任何缺漏。</td>
           </tr>
         </tbody>
       </table>
@@ -88,7 +123,6 @@ td {
   font-size: 13px;
 }
 tbody tr:hover td { background: var(--surface-2); }
-tbody tr { cursor: default; }
 
 .rule { width: 58px; }
 .code {
@@ -105,6 +139,13 @@ tbody tr { cursor: default; }
 
 .env { width: 72px; }
 .subject { width: 210px; overflow: hidden; text-overflow: ellipsis; }
-.detail { color: var(--ink-2); }
+.detail { color: var(--ink-2); cursor: pointer; }
+.act { width: 92px; text-align: right; }
+.hint { font-size: 11.5px; }
 .empty { text-align: center; padding: 28px; }
+
+.fix { padding: 1px 8px; font-size: 12px; }
+
+/* 修法就地展開。縮排對齊 detail 欄，看得出它屬於上面那一列。 */
+.editor td { background: var(--surface-2); padding: 8px 12px 10px 344px; }
 </style>

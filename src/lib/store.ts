@@ -10,7 +10,9 @@
 
 import { defineStore } from 'pinia'
 import { commands } from './bindings'
-import type { Cell, Environment, Finding, Id, Relationship, Row, Snapshot } from './model'
+import type {
+  Cell, Edit, Environment, Finding, FixValue, Id, Impact, Relationship, Row, Snapshot,
+} from './model'
 
 type 檢視 = '覆蓋矩陣' | '連線表'
 
@@ -25,6 +27,15 @@ interface State {
   只看有問題: boolean
   忙碌中: boolean
   錯誤: string | null
+  /** 使用者按了刪除、還沒確認的那一條。`null` 表示沒有對話框。 */
+  刪除中: 待刪 | null
+}
+
+/** 刪除確認框需要知道的：刪什麼，以及怎麼稱呼它。 */
+export interface 待刪 {
+  environment: Id
+  connection: Id
+  label: string
 }
 
 export const useProject = defineStore('project', {
@@ -38,6 +49,7 @@ export const useProject = defineStore('project', {
     只看有問題: false,
     忙碌中: false,
     錯誤: null,
+    刪除中: null,
   }),
 
   getters: {
@@ -101,6 +113,12 @@ export const useProject = defineStore('project', {
     警告數(): number {
       return this.發現.filter((f) => f.severity === 'warning').length
     },
+
+    /** 內容跟磁碟上不一樣。是 Rust 算的——前端沒有第二套判斷。 */
+    未儲存: (s): boolean => s.snapshot?.dirty ?? false,
+
+    可復原: (s): string | null => s.snapshot?.undoLabel ?? null,
+    可重做: (s): string | null => s.snapshot?.redoLabel ?? null,
   },
 
   actions: {
@@ -126,6 +144,53 @@ export const useProject = defineStore('project', {
     async 儲存() {
       if (!this.已開啟) return
       await this.執行(() => commands.saveProject())
+    },
+
+    async 套用編輯(edit: Edit) {
+      await this.執行(() => commands.applyEdit(edit))
+    },
+
+    /**
+     * 照著發現的 `fix` 填了一格，送回去。
+     *
+     * 送的是**發現本身 + 填的值**，不是一個 Edit——哪條規則要寫進哪個欄位
+     * 由 Rust 的 `edit_for` 決定。這裡多一行對照表，就是第二套規則的開始。
+     */
+    async 修好(finding: Finding, value: FixValue) {
+      await this.執行(() => commands.applyFix(finding, value))
+    },
+
+    /**
+     * 「這樣改會弄壞什麼」。刪除之前先問這個。
+     *
+     * 跟其他 action 不同，它**不換掉 snapshot**——它什麼都沒改。
+     * 失敗時回 null，呼叫端就不要往下走。
+     */
+    async 預覽編輯(edit: Edit): Promise<Impact | null> {
+      const 回應 = await commands.previewEdit(edit)
+      if (回應.status === 'ok') return 回應.data
+      this.錯誤 = (回應.error as { message?: string })?.message ?? String(回應.error)
+      return null
+    },
+
+    /** 確認刪除。對話框在此之前已經把影響給使用者看過了。 */
+    async 確認刪除() {
+      const 目標 = this.刪除中
+      if (!目標) return
+      this.刪除中 = null
+      await this.套用編輯({
+        deleteConnection: { environment: 目標.environment, connection: 目標.connection },
+      })
+    },
+
+    async 復原() {
+      if (!this.可復原) return
+      await this.執行(() => commands.undo())
+    },
+
+    async 重做() {
+      if (!this.可重做) return
+      await this.執行(() => commands.redo())
     },
 
     /** 三個 command 的錯誤處理與忙碌狀態都一樣，集中在這裡。 */

@@ -16,7 +16,7 @@
  */
 import { computed } from 'vue'
 import { useProject } from '../lib/store'
-import type { Side } from '../lib/model'
+import type { Row, Side } from '../lib/model'
 
 const store = useProject()
 
@@ -33,6 +33,15 @@ function 端(side: Side): string {
 }
 
 const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expect !== null))
+
+/** 只是打開確認框。真正刪掉在使用者看過影響之後。 */
+function 想刪(row: Row) {
+  store.刪除中 = {
+    environment: row.environment,
+    connection: row.id,
+    label: `${row.servesSlug ?? row.serves}：${端(row.from)} → ${端(row.to)}`,
+  }
+}
 </script>
 
 <template>
@@ -48,6 +57,7 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
           <th>目標位址</th>
           <th v-if="有數量的列" class="right">實際／期望</th>
           <th>用途</th>
+          <th class="act" />
         </tr>
       </thead>
       <tbody>
@@ -72,9 +82,16 @@ const 有數量的列 = computed(() => store.顯示的列.some((r) => r.to.expec
             </template>
           </td>
           <td class="muted">{{ row.purpose }}</td>
+          <!-- 刪除只在滑到那一列時才出現。它是這張表上唯一會弄丟資料的動作，
+               不該跟其他欄位一樣一直亮著等人誤觸。 -->
+          <td class="act">
+            <button class="del" :disabled="store.忙碌中" title="刪除這條連線" @click="想刪(row)">
+              ✕
+            </button>
+          </td>
         </tr>
         <tr v-if="store.顯示的列.length === 0">
-          <td :colspan="8" class="empty muted">沒有符合條件的連線。</td>
+          <td :colspan="9" class="empty muted">沒有符合條件的連線。</td>
         </tr>
       </tbody>
     </table>
@@ -123,6 +140,19 @@ tbody tr.fallback td:not(.sev):not(.kind) { opacity: .62; }
   font-size: 11px;
   color: var(--ink-3);
 }
+.act { width: 34px; padding-left: 0; padding-right: 8px; text-align: right; }
+.del {
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
+  opacity: 0;
+}
+tbody tr:hover .del { opacity: 1; }
+.del:hover { color: var(--broken); border-color: color-mix(in srgb, var(--broken) 45%, transparent); }
+/* 鍵盤操作看不到 hover，所以 focus 一樣要讓它現身。 */
+.del:focus-visible { opacity: 1; }
+
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .dot.error { background: var(--broken); }
 .dot.warning { background: var(--warn); }
