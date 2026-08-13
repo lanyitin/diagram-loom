@@ -15,11 +15,22 @@ import type {
   Snapshot,
 } from './model'
 
-type view = '覆蓋矩陣' | '資源' | '圖'
+/**
+ * 第一層：現在在做哪一種事。
+ *
+ * 「圖」**不是**「資源」的同輩。原本三個擺在同一排的後果，是工具列得寫
+ * 一句「如果在圖，就把搜尋與篩選藏起來」——因為圖上沒有「列」可以篩。
+ * 分成兩層之後，換模式就整列換掉，那句補丁不需要了。
+ */
+export type Mode = '總攬' | '圖'
+
+/** 第二層：同一份資料的兩種排法。只在「總攬」底下有意義。 */
+export type View = '覆蓋矩陣' | '資源'
 
 interface State {
   snapshot: Snapshot | null
-  view: view
+  mode: Mode
+  view: View
   /**
    * 資源檢視停在哪一個分頁（分頁的標題）。
    *
@@ -106,6 +117,7 @@ export interface PendingDelete {
 export const useProject = defineStore('project', {
   state: (): State => ({
     snapshot: null,
+    mode: '總攬',
     view: '覆蓋矩陣',
     resourceTab: null,
     panelOpen: false,
@@ -222,7 +234,10 @@ export const useProject = defineStore('project', {
       await this.run(() => commands.createProject(path, name))
       // 空專案沒有連線也沒有契約，矩陣是一片空白。直接帶到資源檢視，
       // 那裡每張表都會說「這是什麼、為什麼需要它」。
-      if (this.isOpen) this.view = '資源'
+      if (this.isOpen) {
+        this.mode = '總攬'
+        this.view = '資源'
+      }
     },
 
     async recheck() {

@@ -26,10 +26,16 @@ export type Direction = 'asc' | 'desc'
 /**
  * 哪一欄、哪個方向。
  *
- * 欄位的識別方式做成泛型：資源表用第幾欄（欄位是 Rust 給的字串陣列），
- * 連線表用欄名（它的欄位會依內容增減，用位置會對到別欄去）。
+ * **一律用欄名認，不用第幾欄。**
+ *
+ * 連線表本來就是這樣，因為它的「實際／期望」欄會依內容出現或消失，
+ * 用位置會排到別欄去，而且看起來像排錯了而不是抓錯欄。
+ *
+ * 資源表原本用第幾欄，在欄位還不能藏的時候沒問題。一旦使用者可以關掉
+ * 某幾欄，「畫面上第 3 欄」跟「`cells` 裡第 3 格」就不是同一欄了——
+ * 同一個坑，所以兩張表用同一個解法。
  */
-export interface Sort<C = number> {
+export interface Sort<C = string> {
   column: C
   direction: Direction
 }
@@ -76,13 +82,22 @@ function flatten(nodes: Node[], out: ResourceRow[] = []): ResourceRow[] {
  * 用 `localeCompare` 的 `numeric`：不然 `vm-10` 會排在 `vm-2` 前面，
  * 而機器名字幾乎都是這種帶編號的。
  */
-export function sortRows(rows: ResourceRow[], sort: Sort<number> | null): ResourceRow[] {
+export function sortRows(
+  rows: ResourceRow[],
+  sort: Sort | null,
+  columns: string[],
+): ResourceRow[] {
   if (!sort) return rows
+
+  // 欄名 → `cells` 裡的第幾格。這個轉換只在這裡做一次，呼叫端不必知道
+  // 資料的排法——那正是欄位可以藏起來之後最容易搞錯的地方。
+  const at = columns.indexOf(sort.column)
+  if (at < 0) return rows
 
   const sign = sort.direction === 'asc' ? 1 : -1
   const compare = (a: Node, b: Node) => {
-    const x = a.row.cells[sort.column] ?? ''
-    const y = b.row.cells[sort.column] ?? ''
+    const x = a.row.cells[at] ?? ''
+    const y = b.row.cells[at] ?? ''
     return sign * x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' })
   }
 

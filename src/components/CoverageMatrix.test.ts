@@ -74,6 +74,16 @@ function fakeSnapshot(): Snapshot {
   } as unknown as Snapshot
 }
 
+/**
+ * 環境那幾欄。前兩欄固定是契約與用途，其餘就是環境。
+ *
+ * 欄名列由共用的 `TableHead` 畫，所以不再有 `.env` 這個 class——
+ * 依位置取的理由是欄的**組成**本來就由這裡定義：契約、用途、然後每個環境一欄。
+ */
+function envColumns(w: ReturnType<typeof mount>) {
+  return w.findAll('thead th[data-column]').slice(2).map((t) => t.text())
+}
+
 describe('覆蓋矩陣', () => {
   let store: ReturnType<typeof useProject>
 
@@ -86,7 +96,30 @@ describe('覆蓋矩陣', () => {
   it('每條契約一列，每個環境一欄', () => {
     const w = mount(CoverageMatrix)
     expect(w.findAll('tbody tr')).toHaveLength(2)
-    expect(w.findAll('thead .env').map((t) => t.text())).toEqual(['prod', 'test', 'dev'])
+    expect(envColumns(w)).toEqual(['prod', 'test', 'dev'])
+  })
+
+  it('點環境那一欄，最糟的排前面', async () => {
+    // 點某個環境那一欄的人要找的就是「這個環境還缺什麼」，
+    // 不是照字母看熱鬧。跟連線表的「實際／期望」同一個約定。
+    const w = mount(CoverageMatrix)
+    const contracts = () => w.findAll('tbody tr').map((r) => r.findAll('td')[0]!.text())
+    const before = contracts()
+
+    await w.findAll('thead th[data-column]').at(-1)!.trigger('click')
+
+    const after = contracts()
+    expect(after).toHaveLength(before.length)
+    expect(new Set(after)).toEqual(new Set(before))
+    // 第一列在 dev 那一欄的狀態，要是所有列裡最糟的。
+    const worst = w.findAll('tbody tr')[0]!.findAll('.chip').at(-1)!
+    expect(worst.classes()).toContain('missing')
+  })
+
+  it('矩陣不放「欄位」選單', () => {
+    // 它的欄就是環境，而工具列上的環境勾選已經是那個開關了。
+    // 同一件事有兩個入口的話，使用者兩個都不會信。
+    expect(mount(CoverageMatrix).find('thead .cols').exists()).toBe(false)
   })
 
   it('缺漏的格子寫「未實現」而且不是實心的', () => {
@@ -123,7 +156,7 @@ describe('覆蓋矩陣', () => {
   it('勾選環境之後只剩勾起來的欄位', () => {
     store.selectedEnvironments = ['env-prod', 'env-dev']
     const w = mount(CoverageMatrix)
-    expect(w.findAll('thead .env').map((t) => t.text())).toEqual(['prod', 'dev'])
+    expect(envColumns(w)).toEqual(['prod', 'dev'])
   })
 
   it('只看有問題時會濾掉全綠的列', () => {

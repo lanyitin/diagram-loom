@@ -25,33 +25,36 @@ function tree(): ResourceRow[] {
   ]
 }
 
+/** 這幾張假表都只有一欄，就叫「名稱」。 */
+const COLUMNS = ['名稱']
+
 const names = (rows: ResourceRow[]) => rows.map((r) => r.cells[0])
 const shape = (rows: ResourceRow[]) => rows.map((r) => `${'  '.repeat(r.depth)}${r.cells[0]}`)
 
 describe('排序', () => {
   it('平的表就照那一欄排', () => {
     const rows = [row(['redis']), row(['apache']), row(['gateway'])]
-    expect(names(sortRows(rows, { column: 0, direction: 'asc' })))
+    expect(names(sortRows(rows, { column: '名稱', direction: 'asc' }, COLUMNS)))
       .toEqual(['apache', 'gateway', 'redis'])
   })
 
   it('倒過來排', () => {
     const rows = [row(['redis']), row(['apache']), row(['gateway'])]
-    expect(names(sortRows(rows, { column: 0, direction: 'desc' })))
+    expect(names(sortRows(rows, { column: '名稱', direction: 'desc' }, COLUMNS)))
       .toEqual(['redis', 'gateway', 'apache'])
   })
 
   it('編號照數字排，不照字串排', () => {
     // 不然 vm-10 會排在 vm-2 前面，而機器名字幾乎都是這種帶編號的。
     const rows = [row(['vm-10']), row(['vm-2']), row(['vm-1'])]
-    expect(names(sortRows(rows, { column: 0, direction: 'asc' })))
+    expect(names(sortRows(rows, { column: '名稱', direction: 'asc' }, COLUMNS)))
       .toEqual(['vm-1', 'vm-2', 'vm-10'])
   })
 
   it('只在兄弟之間排，不把樹拆散', () => {
     // 直接 sort 的話 ct-a 會跑到別的父節點底下，而縮排還在——
     // 畫面就會顯示一個錯的從屬關係。那比不能排序糟得多。
-    expect(shape(sortRows(tree(), { column: 0, direction: 'asc' }))).toEqual([
+    expect(shape(sortRows(tree(), { column: '名稱', direction: 'asc' }, COLUMNS))).toEqual([
       'dc-backup',
       '  vm-9',
       'dc-taipei',
@@ -62,7 +65,7 @@ describe('排序', () => {
   })
 
   it('沒指定就照 Rust 給的原始順序', () => {
-    expect(names(sortRows(tree(), null))).toEqual(names(tree()))
+    expect(names(sortRows(tree(), null, COLUMNS))).toEqual(names(tree()))
   })
 })
 
@@ -102,15 +105,23 @@ describe('點欄位標題', () => {
   it('點同一欄在遞增與遞減之間換，第三次回到原始順序', () => {
     // 一定要有辦法回到原始順序：Rust 給的順序是有意義的
     // （機器是樹、契約照定義順序），排過就回不去的話那個資訊就沒了。
-    let s = nextSort(null, 0)
-    expect(s).toEqual({ column: 0, direction: 'asc' })
-    s = nextSort(s, 0)
-    expect(s).toEqual({ column: 0, direction: 'desc' })
-    expect(nextSort(s, 0)).toBeNull()
+    let s = nextSort(null, '名稱')
+    expect(s).toEqual({ column: '名稱', direction: 'asc' })
+    s = nextSort(s, '名稱')
+    expect(s).toEqual({ column: '名稱', direction: 'desc' })
+    expect(nextSort(s, '名稱')).toBeNull()
   })
 
   it('點別欄就從遞增開始', () => {
-    expect(nextSort({ column: 0, direction: 'desc' }, 2))
-      .toEqual({ column: 2, direction: 'asc' })
+    expect(nextSort({ column: '名稱', direction: 'desc' }, '種類'))
+      .toEqual({ column: '種類', direction: 'asc' })
+  })
+
+  it('欄名對不上時原樣回傳，不會排到別欄去', () => {
+    // 欄位可以藏起來之後，排序的那一欄有可能已經不在畫面上了。
+    // 這時候什麼都不做才對——排到別欄去看起來會像排錯了。
+    const rows = [row(['redis']), row(['apache'])]
+    expect(names(sortRows(rows, { column: '不存在的欄', direction: 'asc' }, COLUMNS)))
+      .toEqual(['redis', 'apache'])
   })
 })

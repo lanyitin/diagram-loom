@@ -50,6 +50,8 @@ vi.mock('./lib/bindings', () => ({
     connectionChoices: vi.fn(),
     previewBatch: vi.fn(),
     resourceTables: vi.fn(),
+    diagramLinks: vi.fn(),
+    diagramContracts: vi.fn(),
     blankResource: vi.fn(),
     createProject: vi.fn(),
     mcpStatus: vi.fn(),
@@ -149,6 +151,57 @@ describe('視窗組裝', () => {
     const text = w.find('.welcome').text()
     expect(text).toContain('從零開始')
     expect(text).toContain('開啟現有專案')
+  })
+
+  /** 模式的兩顆鈕在標頭上，依字找。 */
+  function modeButton(w: ReturnType<typeof mount>, text: string) {
+    const b = w.findAll('header .mode button').find((x) => x.text() === text)
+    expect(b, `找不到模式「${text}」`).toBeTruthy()
+    return b!
+  }
+
+  it('模式切換在標頭上，跟復原／重做用一條線隔開', () => {
+    // 兩組鈕擠在一起會被看成一組四顆。
+    store.snapshot = fakeSnapshot()
+    const w = mount(App)
+
+    expect(w.findAll('header .mode button').map((b) => b.text())).toEqual(['總攬', '圖'])
+    expect(w.find('header .divider').exists()).toBe(true)
+  })
+
+  it('切到圖時整條工具列不見，不是把搜尋藏起來', async () => {
+    // 拆成兩層換掉的就是這塊補丁。搜尋與篩選是「列」的東西，
+    // 而圖上沒有列——留一個打了字不會有反應的輸入框比拿掉更糟。
+    store.snapshot = fakeSnapshot()
+    const w = mount(App)
+    expect(w.find('.toolbar').exists()).toBe(true)
+
+    await modeButton(w, '圖').trigger('click')
+
+    expect(store.mode).toBe('圖')
+    expect(w.find('.toolbar').exists()).toBe(false)
+    expect(w.findComponent({ name: 'DiagramView' }).exists()).toBe(true)
+    expect(w.findComponent({ name: 'CoverageMatrix' }).exists()).toBe(false)
+  })
+
+  it('圖是模式不是檢視：去圖上晃一圈回來，還停在原本那一頁', async () => {
+    // 這是拆開的實際好處。三個擠在同一排的時候，切到圖等於把
+    // 「我剛剛在看資源」這件事丟掉，回來只能重點一次。
+    store.snapshot = fakeSnapshot()
+    store.view = '資源'
+    vi.mocked(commands.resourceTables).mockResolvedValue({ status: 'ok', data: [] } as never)
+    const w = mount(App)
+
+    await modeButton(w, '圖').trigger('click')
+    await modeButton(w, '總攬').trigger('click')
+
+    expect(store.view).toBe('資源')
+    expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
+  })
+
+  it('沒開專案時不顯示模式切換', () => {
+    // 沒有專案就沒有圖可以看，也沒有東西可以復原。
+    expect(mount(App).find('header .mode').exists()).toBe(false)
   })
 
   it('切到資源檢視時另外兩個要收起來', () => {

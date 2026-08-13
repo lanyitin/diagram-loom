@@ -26,12 +26,14 @@
  * 分兩個地方放只是讓人多記一件事。它的欄位跟資源不一樣（兩端、用途、
  * 備援），所以那一頁交給 [`ConnectionTable`] 畫。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
-import { filterRows, nextSort, sortRows, type Sort } from '../lib/rows'
+import { filterRows, sortRows, type Sort } from '../lib/rows'
+import { useColumns } from '../lib/columns'
 import ConnectionTable from './ConnectionTable.vue'
-import type { ResourceRow, Table } from '../lib/model'
+import TableHead from './TableHead.vue'
+import type { ResourceRow, Table, TableGroup } from '../lib/model'
 
 const store = useProject()
 
@@ -44,8 +46,46 @@ const tables = ref<Table[]>([])
 const activeTab = ref<string>('')
 const sort = ref<Sort | null>(null)
 
-/** 分頁標題的清單。連線排在最後——它是環境層的東西。 */
-const tabs = computed(() => [...tables.value.map((t) => t.title), CONNECTIONS])
+/** 分組標題。Rust 只給代號，中文在畫面這一層。 */
+const GROUP_LABEL: Record<string, string> = {
+  logical: '邏輯層 · 母版',
+  environment: '環境層 · 分身',
+}
+
+/**
+ * 分頁列上的一頁。
+ *
+ * `table` 為 `null` 的只有連線——它的欄位跟資源不一樣（兩端、用途、備援），
+ * 所以那一頁交給 [`ConnectionTable`] 畫。
+ */
+interface Tab {
+  title: string
+  group: TableGroup
+  count: number
+  table: Table | null
+}
+
+/**
+ * 分頁列。順序完全照 Rust 給的，這裡不重排。
+ *
+ * 「環境」那張表（`group: 'project'`）**不進分頁列**——它列的是全部環境，
+ * 不隸屬於任何一個，而使用者要找它的時候會去按右邊的環境選單。
+ * 它從 `tables` 拿得到，由「管理環境…」開出來。
+ *
+ * 連線接在最後面。它不是 Rust 給的 `Table`，但**位置沒有選擇餘地**：
+ * 一條連線要兩端加上一條契約才開得了，所以它必然是環境層的最後一項。
+ */
+const tabs = computed<Tab[]>(() => [
+  ...tables.value
+    .filter((t) => t.group !== 'project')
+    .map((t) => ({ title: t.title, group: t.group, count: t.rows.length, table: t })),
+  {
+    title: CONNECTIONS,
+    group: 'environment' as TableGroup,
+    count: store.visibleRows.length,
+    table: null,
+  },
+])
 
 /** 環境層的表要看哪個環境。只有一個環境時不必問。 */
 const whichEnvironment = ref<string | null>(null)
@@ -53,6 +93,11 @@ const whichEnvironment = ref<string | null>(null)
 const onConnections = computed(() => activeTab.value === CONNECTIONS)
 const currentTable = computed<Table | null>(
   () => tables.value.find((t) => t.title === activeTab.value) ?? null,
+)
+
+/** 「環境」那張表。不在分頁列上，只在「管理環境…」那個對話框裡出現。 */
+const environmentTable = computed<Table | null>(
+  () => tables.value.find((t) => t.group === 'project') ?? null,
 )
 
 /**
@@ -64,14 +109,27 @@ const currentTable = computed<Table | null>(
 const visibleRows = computed<ResourceRow[]>(() => {
   const t = currentTable.value
   if (!t) return []
-  return sortRows(filterRows(t.rows, store.search), sort.value)
+  return sortRows(filterRows(t.rows, store.search), sort.value, t.columns)
 })
 
-function clickHeader(column: number) {
-  sort.value = nextSort(sort.value, column)
+/**
+ * 欄位偏好綁在 `kind` 上，不是分頁標題。
+ *
+ * 標題是給人看的字，哪天把「服務」改成別的用詞，使用者存下來的設定
+ * 就會整份對不上——而畫面看起來完全正常，只是他調過的東西全沒了。
+ */
+const columnKey = computed(() => currentTable.value?.kind ?? '')
+const { prefs, visible, toggle, setWidth, clearWidth } = useColumns(columnKey)
+const columns = computed(() => visible(currentTable.value?.columns ?? []))
+
+/** 一格在 `cells` 裡的第幾格。欄位可以藏之後，畫面順序不等於資料順序。 */
+function cellOf(row: ResourceRow, column: string): string {
+  return row.cells[currentTable.value?.columns.indexOf(column) ?? -1] ?? ''
 }
 
-// 換一頁就把排序重設。欄位不一樣，沿用上一頁的第幾欄沒有意義。
+const head = ref<InstanceType<typeof TableHead> | null>(null)
+
+// 換一頁就把排序重設。欄位不一樣，沿用上一頁的欄名沒有意義。
 watch(activeTab, () => { sort.value = null })
 
 // lint 面板會指定跳到某一頁（例如「連線」）。
@@ -83,11 +141,49 @@ async function reload() {
   const res = await commands.resourceTables(env)
   if (res.status === 'ok') {
     tables.value = res.data
-    if (!tabs.value.includes(activeTab.value)) activeTab.value = tabs.value[0] ?? CONNECTIONS
+    if (!tabs.value.some((t) => t.title === activeTab.value)) {
+      activeTab.value = tabs.value[0]?.title ?? CONNECTIONS
+    }
     store.resourceTab = activeTab.value
   } else {
     store.error = (res.error as { message?: string })?.message ?? String(res.error)
   }
+}
+
+/* ── 環境選單 ──────────────────────────────────────────────
+ *
+ * 選環境與「管理環境…」放在同一顆鈕底下，因為它們是同一個問題的兩半：
+ * 「我要看哪個環境」跟「到底有哪些環境」。分成兩個入口的話，第二個
+ * 會沒有地方放——它不屬於任何一張表。
+ */
+
+const envMenuOpen = ref(false)
+const managingEnvironments = ref(false)
+
+/** 邏輯層是母版，跟環境無關，所以那時候不列環境。 */
+const environmentMatters = computed(
+  () => Boolean(currentTable.value?.environment) || onConnections.value,
+)
+
+const currentEnvironment = computed(
+  () => whichEnvironment.value ?? store.environments[0]?.id ?? null,
+)
+
+function closeEnvMenu() {
+  envMenuOpen.value = false
+}
+
+function toggleEnvMenu() {
+  envMenuOpen.value = !envMenuOpen.value
+  // 點畫面別處就收起來。鍵盤的 Escape 由樣板上的 @keydown 處理。
+  if (envMenuOpen.value) window.addEventListener('click', closeEnvMenu, { once: true })
+}
+
+onUnmounted(() => window.removeEventListener('click', closeEnvMenu))
+
+function pickEnvironment(id: string) {
+  whichEnvironment.value = id
+  envMenuOpen.value = false
 }
 
 // 每次專案變動都重算。表格上的數字（幾台、幾段）就是 lint 在看的同一批資料，
@@ -108,32 +204,38 @@ function addConnection() {
   store.addingConnection = { environment: env, relationship: contract.value, label: rel?.slug ?? '' }
 }
 
-async function addNew() {
-  if (onConnections.value) {
+/**
+ * 新增一列。
+ *
+ * 三個動作都收 `table`，預設是現在那一頁——「管理環境…」那個對話框
+ * 用的是同一組，只是傳的是環境那張表。兩邊各寫一份的話，
+ * 遲早只有一邊記得「空白資源的 id 要跟 Rust 要」。
+ */
+async function addNew(table: Table | null = currentTable.value) {
+  if (!table) {
+    if (!onConnections.value) return
     contract.value = store.relationships[0]?.id ?? ''
     pickingContract.value = true
     return
   }
-  const t = currentTable.value
-  if (!t) return
-  const res = await commands.blankResource(t.kind, t.environment, null)
+  const res = await commands.blankResource(table.kind, table.environment, null)
   if (res.status !== 'ok') {
     store.error = (res.error as { message?: string })?.message ?? String(res.error)
     return
   }
-  store.editingResource = { resource: res.data, isNew: true, kind: t.title }
+  store.editingResource = { resource: res.data, isNew: true, kind: table.title }
 }
 
-function edit(row: ResourceRow) {
+function edit(row: ResourceRow, table: Table | null = currentTable.value) {
   // 表格每一列都帶著自己的 `Resource`，表單直接拿它當起點。
   // 讓前端從 project 裡自己撈的話，要知道每種資源住在哪一層——那是模型知識。
-  store.editingResource = { resource: row.resource, isNew: false, kind: currentTable.value?.title ?? '' }
+  store.editingResource = { resource: row.resource, isNew: false, kind: table?.title ?? '' }
 }
 
-function askDelete(row: ResourceRow) {
+function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
   store.deleting = {
     edit: { deleteResource: row.resource },
-    kind: currentTable.value?.title ?? '東西',
+    kind: table?.title ?? '東西',
     label: row.cells[0] ?? row.id,
   }
 }
@@ -141,33 +243,110 @@ function askDelete(row: ResourceRow) {
 
 <template>
   <div class="wrap">
+    <!-- 第三層：資源種類。導覽三層裡最安靜的一層。
+         母版與分身之間有一條線——那個分界是整個領域模型最重要的一件事，
+         畫成同一串等於在說「這些都差不多」。 -->
     <div class="tabs">
-      <button
-        v-for="t in tables" :key="t.title"
-        :class="{ on: activeTab === t.title }"
-        @click="activeTab = t.title"
-      >
-        {{ t.title }}
-        <span class="n">{{ t.rows.length }}</span>
-      </button>
-      <button :class="{ on: onConnections }" @click="activeTab = CONNECTIONS">
-        {{ CONNECTIONS }}
-        <span class="n">{{ store.visibleRows.length }}</span>
-      </button>
+      <template v-for="(t, i) in tabs" :key="t.title">
+        <span
+          v-if="t.group !== tabs[i - 1]?.group"
+          class="group"
+          :class="{ second: i > 0 }"
+        >{{ GROUP_LABEL[t.group] ?? '' }}</span>
+        <button
+          :class="{ on: activeTab === t.title }"
+          @click="activeTab = t.title"
+        >
+          {{ t.title }}
+          <span class="n">{{ t.count }}</span>
+        </button>
+      </template>
 
       <span class="grow" />
 
-      <!-- 環境層的表才需要問是哪個環境。邏輯層是母版，跟環境無關。 -->
-      <label v-if="(currentTable?.environment || onConnections) && store.environments.length > 1" class="pick">
-        環境
-        <select v-model="whichEnvironment">
-          <option v-for="e in store.environments" :key="e.id" :value="e.id">{{ e.slug }}</option>
-        </select>
-      </label>
+      <!-- 選環境與「管理環境…」在同一顆鈕底下：它們是同一個問題的兩半。 -->
+      <span v-if="store.environments.length" class="env" @keydown.esc="envMenuOpen = false">
+        <button
+          class="pick"
+          :aria-expanded="envMenuOpen"
+          @click.stop="toggleEnvMenu()"
+        >
+          環境<template v-if="environmentMatters">：{{ store.envName(currentEnvironment!) }}</template>
+          <span class="caret">▾</span>
+        </button>
+        <div v-if="envMenuOpen" class="menu" @click.stop>
+          <!-- 邏輯層是母版，跟環境無關，那時候列環境只會讓人以為
+               這一頁的內容會跟著變。 -->
+          <template v-if="environmentMatters && store.environments.length > 1">
+            <button
+              v-for="e in store.environments" :key="e.id"
+              @click="pickEnvironment(e.id)"
+            >
+              <span class="tick">{{ currentEnvironment === e.id ? '✓' : '' }}</span>
+              {{ e.slug }}
+            </button>
+            <span class="sep" />
+          </template>
+          <button class="manage" @click="envMenuOpen = false; managingEnvironments = true">
+            <span class="tick" />
+            管理環境…
+          </button>
+        </div>
+      </span>
 
       <button class="primary add" :disabled="store.busy" @click="addNew()">
         ＋ 新增{{ onConnections ? CONNECTIONS : currentTable?.title }}
       </button>
+    </div>
+
+    <!-- 「環境」那張表不在分頁列上，因為它列的是全部環境，不隸屬於任何一個。
+         使用者要找它的時候會去按環境選單，所以它就開在那裡。 -->
+    <div v-if="managingEnvironments" class="scrim" @click.self="managingEnvironments = false">
+      <section class="box wide" role="dialog" aria-modal="true" aria-label="管理環境">
+        <h2>管理環境</h2>
+        <p class="muted lead">
+          環境是分身的容器。這裡改的是<strong>有哪些環境</strong>，
+          不是某一個環境裡面有什麼。
+        </p>
+        <div class="env-rows">
+          <p v-if="!environmentTable?.rows.length" class="empty muted">
+            {{ environmentTable?.emptyHint }}
+          </p>
+          <table v-else>
+            <thead>
+              <tr>
+                <th class="sev" />
+                <th v-for="c in environmentTable.columns" :key="c">{{ c }}</th>
+                <th class="act" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in environmentTable.rows" :key="row.id">
+                <td class="sev">
+                  <span v-if="row.severity" :class="['dot', row.severity]" />
+                </td>
+                <td
+                  v-for="(cell, i) in row.cells" :key="i"
+                  :class="{ mono: i === 0, muted: i > 0 }"
+                >{{ cell }}</td>
+                <td class="act">
+                  <button class="icon" :disabled="store.busy" title="編輯" @click="edit(row, environmentTable)">✎</button>
+                  <button class="icon del" :disabled="store.busy" title="刪除" @click="askDelete(row, environmentTable)">✕</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer>
+          <button
+            class="primary"
+            :disabled="store.busy || !environmentTable"
+            @click="addNew(environmentTable)"
+          >＋ 新增環境</button>
+          <span class="grow" />
+          <button @click="managingEnvironments = false">關閉</button>
+        </footer>
+      </section>
     </div>
 
     <!-- 新增連線要先問補給哪一條契約。連線一定屬於某條契約——
@@ -212,28 +391,31 @@ function askDelete(row: ResourceRow) {
         {{ currentTable.rows.length }} 列。
       </p>
 
-      <table v-else>
-        <thead>
-          <tr>
-            <th class="sev" />
-            <th
-              v-for="(c, i) in currentTable.columns" :key="c"
-              class="sortable" :aria-sort="sort?.column === i ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'"
-              @click="clickHeader(i)"
-            >{{ c }}</th>
-            <th class="act" />
-          </tr>
-        </thead>
+      <table v-else :class="{ fixed: head?.frozen }">
+        <TableHead
+          ref="head"
+          :columns="currentTable.columns"
+          :visible="columns"
+          :prefs="prefs"
+          :sort="sort"
+          :table-key="currentTable.kind"
+          @update:sort="sort = $event"
+          @toggle="toggle"
+          @resize="setWidth"
+          @autofit="clearWidth"
+        >
+          <template #lead><th class="sev" /></template>
+        </TableHead>
         <tbody>
           <tr v-for="row in visibleRows" :key="row.id">
             <td class="sev">
               <span v-if="row.severity" :class="['dot', row.severity]" :title="'這一列有 lint 問題'" />
             </td>
             <td
-              v-for="(cell, i) in row.cells" :key="i"
+              v-for="(c, i) in columns" :key="c"
               :class="{ mono: i === 0, muted: i > 0 }"
               :style="i === 0 && row.depth ? { paddingLeft: `${12 + row.depth * 18}px` } : undefined"
-            >{{ cell }}</td>
+            >{{ cellOf(row, c) }}</td>
             <td class="act">
               <button class="icon" :disabled="store.busy" title="編輯" @click="edit(row)">✎</button>
               <button class="icon del" :disabled="store.busy" title="刪除" @click="askDelete(row)">✕</button>
@@ -271,29 +453,56 @@ function askDelete(row: ResourceRow) {
   color: var(--ink);
   font-weight: 600;
 }
-.n { margin-left: 5px; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.n { margin-left: 5px; font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 .grow { flex: 1; }
-.pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
 .add { font-size: 12.5px; padding: 3px 10px; }
 
-th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-th.sortable:hover { color: var(--ink); }
-/*
- * 箭頭用 CSS 畫，不放進標題的文字裡。
- *
- * 放進文字裡的話，欄位名稱就變成「名稱 ▴」——螢幕閱讀器會照唸，
- * 而排序狀態已經由 `aria-sort` 講過一次了。
- *
- * 一直佔著位置（透明的那個），不然排序時整排標題會左右跳。
- */
-th.sortable::after {
-  content: '▴';
-  margin-left: 4px;
-  font-size: 10px;
-  opacity: 0;
+/* 母版與分身的分界。第二組前面多一條線與一點呼吸空間。 */
+.group {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  color: var(--ink-4);
+  padding-right: 6px;
+  white-space: nowrap;
 }
-th.sortable[aria-sort='ascending']::after { opacity: 0.75; }
-th.sortable[aria-sort='descending']::after { content: '▾'; opacity: 0.75; }
+.group.second { margin-left: 10px; padding-left: 12px; border-left: 1px solid var(--rule); }
+
+/* ── 環境選單 ────────────────────────────────────────── */
+
+.env { position: relative; display: inline-flex; }
+.pick { font-size: 12px; padding: 3px 9px; }
+.caret { margin-left: 5px; color: var(--ink-4); }
+
+.menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 15;
+  min-width: 168px;
+  padding: 5px 0;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--raise);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+  text-align: left;
+}
+.menu button:hover { background: var(--surface-2); }
+.menu .tick { width: 12px; flex: none; color: var(--warp); font-weight: 700; }
+.menu .sep { display: block; height: 1px; margin: 5px 0; background: var(--rule); }
+.menu .manage { font-weight: 600; }
 
 .scrim {
   position: fixed;
@@ -313,6 +522,13 @@ th.sortable[aria-sort='descending']::after { content: '▾'; opacity: 0.75; }
   flex-direction: column;
   gap: 12px;
 }
+/* 管理環境那個框裡有一張表，比「挑一條契約」那個框寬。 */
+.box.wide { width: min(560px, 94%); }
+.env-rows { max-height: 300px; overflow: auto; border: 1px solid var(--rule-2); border-radius: 6px; }
+.env-rows .empty { padding: 24px 16px; text-align: center; line-height: 1.7; }
+.env-rows table { width: 100%; }
+.env-rows thead th { background: var(--surface-2); }
+
 .box h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .box p { margin: 0; }
 .lead { font-size: 12.5px; line-height: 1.7; }
@@ -326,6 +542,15 @@ th.sortable[aria-sort='descending']::after { content: '▾'; opacity: 0.75; }
 .empty { padding: 40px 24px; text-align: center; max-width: 46ch; margin: 0 auto; line-height: 1.7; }
 
 table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+/* 量完欄寬之後才切成 fixed——理由見 `TableHead.vue`。 */
+/* `width` 維持 `max-content`，不能改成 `100%`。
+   欄位很多的時候（每個環境一欄）這張表本來就比視窗寬，要橫向捲動；
+   改成 100% 會把它壓回視窗寬度，然後 fixed 佈局就開始把每一欄
+   截成刪節號——看起來像資料不見了。 */
+table.fixed { table-layout: fixed; }
+table.fixed td { overflow: hidden; text-overflow: ellipsis; }
+
+/* 欄名列由 `TableHead` 畫，它有自己的樣式。這裡只管內容與插進去的那幾格。 */
 th, td {
   text-align: left;
   padding: 0 12px;
@@ -333,25 +558,16 @@ th, td {
   border-bottom: 1px solid var(--rule-2);
   white-space: nowrap;
 }
-thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--rule);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .06em;
-  color: var(--ink-3);
-}
 tbody tr:hover td { background: var(--surface-2); }
 
 .sev { width: 26px; padding-right: 0; }
+thead .sev { background: var(--surface-2); border-bottom: 1px solid var(--rule); }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .dot.error { background: var(--broken); }
 .dot.warning { background: var(--warn); }
 
-.act { width: 62px; padding-left: 0; padding-right: 8px; text-align: right; }
+/* 欄名列的最後一格放「欄位」那顆鈕，所以這一欄要跟它一樣寬。 */
+.act { width: 66px; padding-left: 0; padding-right: 8px; text-align: right; }
 .icon {
   padding: 0 6px;
   border-color: transparent;

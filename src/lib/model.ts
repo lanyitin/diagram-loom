@@ -50,6 +50,7 @@ export type {
   Side,
   SideKind,
   Status,
+  TableGroup,
 } from './bindings'
 
 export type {

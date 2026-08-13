@@ -65,6 +65,9 @@ function openAddInstances(f: Finding) {
 }
 
 function jumpTo(f: Finding) {
+  // 模式也要一起帶回來。少了這一行，從「圖」點一項發現會什麼都不發生——
+  // 檢視換了，但畫面還停在圖上，而使用者只會看到「點了沒反應」。
+  store.mode = '總攬'
   store.view = '資源'
   store.resourceTab = '連線'
   store.search = ''

@@ -1794,11 +1794,35 @@ export type Status =
 /**  一種資源的一張表。 */
 export type Table = Table_Serialize | Table_Deserialize;
 
+/**
+ *  這張表歸哪一層管。
+ * 
+ *  # 為什麼這是模型知識，不是排版偏好
+ * 
+ *  **母版與分身的分界是整個領域模型最重要的一件事。** 分頁列若把兩者
+ *  畫成同一串，等於在跟使用者說「這些都差不多」。哪張表屬於哪一層
+ *  不是畫面決定的，所以由這裡講，前端只負責照著畫分隔線。
+ */
+export type TableGroup = 
+/**
+ *  專案層級：不屬於任何一層。
+ * 
+ *  只有「環境」這張表。它列的是**全部**環境，所以不隸屬於某一個環境；
+ *  但它也顯然不是邏輯層的東西。畫面上它不進分頁列，改由環境選單裡的
+ *  「管理環境…」開出來——那正是使用者會去找它的地方。
+ */
+"project" | 
+/**  邏輯層（母版）：定義「有哪些服務、誰要連誰」。 */
+"logical" | 
+/**  環境層（分身）：填「實際跑在哪台機器、IP 是什麼」。 */
+"environment";
+
 /**  一種資源的一張表。 */
 export type Table_Deserialize = {
 	kind: Kind,
 	/**  分頁上的字，例如「服務」。 */
 	title: string,
+	group: TableGroup,
 	columns: string[],
 	rows: ResourceRow_Deserialize[],
 	/**  這張表屬於哪個環境。邏輯層的表是 `None`。 */
@@ -1812,6 +1836,7 @@ export type Table_Serialize = {
 	kind: Kind,
 	/**  分頁上的字，例如「服務」。 */
 	title: string,
+	group: TableGroup,
 	columns: string[],
 	rows: ResourceRow_Serialize[],
 	/**  這張表屬於哪個環境。邏輯層的表是 `None`。 */

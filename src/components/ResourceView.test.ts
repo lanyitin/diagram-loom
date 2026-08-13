@@ -21,6 +21,7 @@ vi.mock('../lib/bindings', () => ({
 const containerTable: Table = {
   kind: 'container',
   title: '服務',
+  group: 'logical',
   columns: ['名稱', '顯示名', '所屬系統', 'prod'],
   environment: null,
   emptyHint: '還沒有任何服務。Redis、Consul 這種會接收請求的程序都算。',
@@ -45,12 +46,31 @@ const containerTable: Table = {
 const nodeTable: Table = {
   kind: 'node',
   title: '機器',
+  group: 'environment',
   columns: ['名稱', '種類', '上面跑的服務'],
   environment: 'env-prod',
   emptyHint: '站點、實體機、VM、Linux 容器都是機器。',
   rows: [
     { id: 'n-site', cells: ['dc-main', '站點', ''], depth: 0, severity: null, resource: {} },
     { id: 'n-vm', cells: ['vm-01', '虛擬機', 'redis-01'], depth: 1, severity: null, resource: {} },
+  ],
+} as unknown as Table
+
+const environmentTable: Table = {
+  kind: 'environment',
+  title: '環境',
+  group: 'project',
+  columns: ['名稱', '顯示名', '機器'],
+  environment: null,
+  emptyHint: '至少要有一個環境，lint 才有話說。',
+  rows: [
+    {
+      id: 'env-prod',
+      cells: ['prod', '正式環境', '3'],
+      depth: 0,
+      severity: null,
+      resource: { environment: { id: 'env-prod', slug: 'prod' } },
+    },
   ],
 } as unknown as Table
 
@@ -66,6 +86,13 @@ function fakeSnapshot(): Snapshot {
   } as unknown as Snapshot
 }
 
+/**
+ * 欄位偏好會寫進 localStorage，而 vitest 同一個檔案共用一份。
+ * 不清的話，某個測試藏掉的欄會跟著跑到下一個測試——症狀是那一欄
+ * 「莫名其妙不見了」，而排序看起來像壞掉。
+ */
+beforeEach(() => localStorage.clear())
+
 describe('資源檢視', () => {
   let store: ReturnType<typeof useProject>
 
@@ -74,7 +101,7 @@ describe('資源檢視', () => {
     store = useProject()
     store.snapshot = fakeSnapshot()
     vi.mocked(commands.resourceTables).mockResolvedValue({
-      status: 'ok', data: [containerTable, nodeTable],
+      status: 'ok', data: [environmentTable, containerTable, nodeTable],
     } as never)
   })
 
@@ -86,7 +113,8 @@ describe('資源檢視', () => {
 
   it('照 Rust 給的欄位畫，前端不認得那些欄位', async () => {
     const w = await openIt()
-    const headers = w.findAll('thead th').map((t) => t.text()).filter(Boolean)
+    // 只看真正的資料欄。最後那格是「欄位」選單，不是欄位。
+    const headers = w.findAll('thead th[data-column]').map((t) => t.text())
     expect(headers).toEqual(['名稱', '顯示名', '所屬系統', 'prod'])
     expect(w.findAll('tbody tr')).toHaveLength(2)
     expect(w.findAll('tbody tr')[0]!.text()).toContain('6 台')
@@ -98,6 +126,63 @@ describe('資源檢視', () => {
     expect(tabs[0]).toContain('服務')
     expect(tabs[0]).toContain('2')
     expect(tabs[1]).toContain('機器')
+  })
+
+  it('分頁分成母版與分身兩組', async () => {
+    // 這個分界是整個領域模型最重要的一件事。畫成同一串等於在跟使用者說
+    // 「這些都差不多」。
+    const w = await openIt()
+    const groups = w.findAll('.tabs .group').map((g) => g.text())
+    expect(groups).toEqual(['邏輯層 · 母版', '環境層 · 分身'])
+  })
+
+  it('「環境」不在分頁列上', async () => {
+    // 它列的是全部環境，不隸屬於任何一個。使用者要找它的時候會去按
+    // 環境選單，所以它就開在那裡。
+    const w = await openIt()
+    const titles = w.findAll('.tabs > button').map((b) => b.text())
+    expect(titles.some((t) => t.startsWith('環境'))).toBe(false)
+  })
+
+  it('「管理環境…」開出來的就是環境那張表', async () => {
+    const w = await openIt()
+    await w.find('.pick').trigger('click')
+    await w.find('.menu .manage').trigger('click')
+
+    const dialog = w.find('[aria-label="管理環境"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('prod')
+    expect(dialog.text()).toContain('正式環境')
+  })
+
+  it('在邏輯層那一頁時，選單不列環境', async () => {
+    // 邏輯層是母版，跟環境無關。列出來只會讓人以為這一頁的內容會跟著變。
+    store.snapshot!.project.environments = [
+      { id: 'env-prod', slug: 'prod', name: '正式' },
+      { id: 'env-test', slug: 'test', name: '測試' },
+    ] as never
+    const w = await openIt()
+    await w.find('.pick').trigger('click')
+
+    // 只剩「管理環境…」——它跟看哪個環境無關，任何時候都要拿得到。
+    expect(w.findAll('.menu button').map((b) => b.text())).toEqual(['管理環境…'])
+  })
+
+  it('切到環境層的分頁之後才問是哪個環境', async () => {
+    store.snapshot!.project.environments = [
+      { id: 'env-prod', slug: 'prod', name: '正式' },
+      { id: 'env-test', slug: 'test', name: '測試' },
+    ] as never
+    const w = await openIt()
+    await w.findAll('.tabs > button')[1]!.trigger('click')   // 機器
+    await w.find('.pick').trigger('click')
+
+    const items = w.findAll('.menu button')
+    expect(items.map((b) => b.text().replace('✓', '').trim()))
+      .toEqual(['prod', 'test', '管理環境…'])
+    // 現在停在哪一個要看得出來，不然選單只是一份清單。
+    expect(items[0]!.find('.tick').text()).toBe('✓')
+    expect(items[1]!.find('.tick').text()).toBe('')
   })
 
   it('有 lint 問題的列標出來', async () => {
@@ -180,7 +265,7 @@ describe('排序與搜尋', () => {
     store = useProject()
     store.snapshot = fakeSnapshot()
     vi.mocked(commands.resourceTables).mockResolvedValue({
-      status: 'ok', data: [containerTable, nodeTable],
+      status: 'ok', data: [environmentTable, containerTable, nodeTable],
     } as never)
   })
 
@@ -228,6 +313,45 @@ describe('排序與搜尋', () => {
     expect(w.findAll('thead th.sortable')[0]!.attributes('aria-sort')).toBe('none')
   })
 
+  it('藏起來的欄不畫，但資料沒有跟著位移', async () => {
+    // 這是欄位可以藏之後最容易搞錯的地方：畫面上的第 N 欄
+    // 不再等於 `cells` 裡的第 N 格。
+    const w = await openIt()
+    await w.find('thead .cols').trigger('click')
+
+    // 選單裡的順序就是資料的順序：名稱、顯示名、所屬系統、prod
+    await w.findAll('.pop button')[1]!.trigger('click')   // 關掉「顯示名」
+
+    expect(w.findAll('thead th[data-column]').map((t) => t.text()))
+      .toEqual(['名稱', '所屬系統', 'prod'])
+    // 「所屬系統」那格要還是 shop，不是被擠成「Redis 快取」。
+    expect(w.findAll('tbody tr')[0]!.findAll('td').map((t) => t.text()))
+      .toEqual(['', 'redis', 'shop', '6 台', '✎✕'])
+  })
+
+  it('第一欄不給關', async () => {
+    const w = await openIt()
+    await w.find('thead .cols').trigger('click')
+    expect(w.findAll('.pop button')[0]!.attributes('disabled')).toBeDefined()
+    expect(w.findAll('.pop button')[0]!.text()).toContain('固定')
+  })
+
+  it('藏掉正在排序的那一欄，排序也一起收掉', async () => {
+    // 不收的話列還是照那一欄排，但畫面上沒有任何東西能解釋這個順序——
+    // 沒有欄名、沒有箭頭，看起來就是列莫名其妙亂掉了。
+    const w = await openIt()
+    // 點兩次是遞減。遞增排出來剛好跟原始順序一樣，那樣就分不出
+    // 到底有沒有在排序了。
+    await w.findAll('thead th[data-column]')[1]!.trigger('click')   // 依「顯示名」遞增
+    await w.findAll('thead th[data-column]')[1]!.trigger('click')   // 遞減
+    expect(firstColumn(w)).toEqual(['order-api', 'redis'])
+
+    await w.find('thead .cols').trigger('click')
+    await w.findAll('.pop button')[1]!.trigger('click')             // 把那一欄關掉
+
+    expect(firstColumn(w)).toEqual(['redis', 'order-api'])
+  })
+
   it('上面那個搜尋框對資源也有效', async () => {
     store.search = 'order'
     const w = await openIt()
@@ -255,7 +379,7 @@ describe('連線分頁', () => {
     store = useProject()
     store.snapshot = fakeSnapshot()
     vi.mocked(commands.resourceTables).mockResolvedValue({
-      status: 'ok', data: [containerTable, nodeTable],
+      status: 'ok', data: [environmentTable, containerTable, nodeTable],
     } as never)
   })
 

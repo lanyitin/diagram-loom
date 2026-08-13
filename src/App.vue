@@ -98,6 +98,18 @@ onUnmounted(() => {
 
       <span class="grow" />
 
+      <!-- 第一層：模式。整個介面唯一有實心底的分段控制項——它是持續的狀態，
+           而旁邊的復原／重做是按一下就結束的動作，兩者長得不一樣才不會混。
+           擺在復原／重做左邊，讀起來是「我在哪裡 → 我剛做了什麼」。 -->
+      <div v-if="store.isOpen" class="mode" role="group" aria-label="模式">
+        <button
+          v-for="m in (['總攬', '圖'] as const)" :key="m"
+          :aria-pressed="store.mode === m"
+          @click="store.mode = m"
+        >{{ m }}</button>
+      </div>
+      <span v-if="store.isOpen" class="divider" />
+
       <div v-if="store.isOpen" class="seg">
         <button
           :disabled="!store.undoLabel || store.busy"
@@ -142,23 +154,32 @@ onUnmounted(() => {
     <p v-if="store.error" class="failure" role="alert">{{ store.error }}</p>
 
     <template v-if="store.isOpen">
-      <div class="toolbar">
-        <div class="seg">
+      <!--
+        工具列只屬於「總攬」。
+
+        圖模式**不畫這一列**，因為 `DiagramView` 自己就有一條控制列
+        （篩選、環境、幾條線、重畫），那些狀態全都是它的內部狀態。
+        把它們拉上來只會多一層 props，而換來的是同一個東西兩個家。
+
+        這也就是拆成兩層之後省掉的那塊補丁：以前三個檢視擠在同一排，
+        所以得寫「如果在圖，就把搜尋與篩選藏起來」——圖上沒有「列」可以篩，
+        留著只會讓人以為打了字圖會跟著變。
+      -->
+      <div v-if="store.mode === '總攬'" class="toolbar">
+        <!-- 第二層：檢視。同一份資料的兩種排法，比模式安靜一階。 -->
+        <div class="views" role="group" aria-label="檢視">
           <button
-            v-for="v in (['覆蓋矩陣', '資源', '圖'] as const)" :key="v"
-            :class="{ on: store.view === v }"
+            v-for="v in (['覆蓋矩陣', '資源'] as const)" :key="v"
+            :aria-pressed="store.view === v"
             @click="store.view = v"
           >{{ v }}</button>
         </div>
-        <!-- 搜尋與篩選是表格的東西。圖上沒有「列」可以篩，留著只會讓人
-             以為打了字圖會跟著變。 -->
-        <template v-if="store.view !== '圖'">
-          <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋名稱、位址或用途…'">
-          <label class="toggle">
-            <input v-model="store.onlyProblems" type="checkbox">
-            只看有問題
-          </label>
-        </template>
+
+        <input v-model="store.search" type="search" :placeholder="store.view === '覆蓋矩陣' ? '搜尋契約或用途…' : '搜尋名稱、位址或用途…'">
+        <label class="toggle">
+          <input v-model="store.onlyProblems" type="checkbox">
+          只看有問題
+        </label>
         <EnvPicker />
 
         <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
@@ -173,8 +194,6 @@ onUnmounted(() => {
           <template v-if="store.view === '覆蓋矩陣'">
             {{ store.visibleRelationships.length }} / {{ store.relationships.length }} 條契約
           </template>
-          <!-- 圖是一個環境一張，數「幾條連線」在這裡沒有意義。 -->
-          <template v-else-if="store.view === '圖'">一張圖只畫一個環境</template>
           <template v-else-if="store.resourceTab === '連線'">
             {{ store.visibleRows.length }} / {{ store.rows.length }} 條連線
           </template>
@@ -183,12 +202,16 @@ onUnmounted(() => {
 
       <!-- 聚焦到一項邏輯層的發現時，連線表本來就不會有列。
            留一片空白會讓人以為工具壞了，所以講清楚。 -->
-      <p v-if="store.focus && store.view === '資源' && store.resourceTab === '連線' && store.visibleRows.length === 0" class="notice">
+      <p
+        v-if="store.mode === '總攬' && store.focus && store.view === '資源'
+          && store.resourceTab === '連線' && store.visibleRows.length === 0"
+        class="notice"
+      >
         這一項不對應到任何一條實際連線——它是邏輯層的問題，或是那個元素根本沒被任何連線碰到。
       </p>
 
-      <CoverageMatrix v-if="store.view === '覆蓋矩陣'" />
-      <DiagramView v-else-if="store.view === '圖'" />
+      <DiagramView v-if="store.mode === '圖'" />
+      <CoverageMatrix v-else-if="store.view === '覆蓋矩陣'" />
       <ResourceView v-else />
 
       <LintPanel />
@@ -270,7 +293,49 @@ header {
 .toggle input { accent-color: var(--warp); }
 .count { font-size: 12px; }
 
-/* 檢視切換。兩個檢視是同一份資料的兩種排法，所以用分段控制項而不是分頁。 */
+/*
+ * 導覽的三層，一層比一層安靜。使用者不必記哪個是哪個，看粗細就知道自己在哪。
+ *
+ *   第一層 模式    `.mode`   實心底的膠囊         總攬 | 圖
+ *   第二層 檢視    `.views`  底線分頁             覆蓋矩陣 | 資源
+ *   第三層 種類    ResourceView 的 `.tabs`  安靜的文字鈕   系統 服務 契約…
+ *
+ * `.seg` 不在這個階梯上——它是**動作**的鈕群（復原／重做、介面大小），
+ * 不是「我在哪裡」。所以它跟模式長得不一樣是刻意的。
+ */
+.mode { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--ground); }
+.mode button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 3px 14px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.mode button:hover:not([aria-pressed='true']) { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.mode button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+/* 兩組鈕擠在一起會被看成一組四顆，所以中間要有一條線。 */
+.divider { width: 1px; align-self: stretch; margin: 3px 2px; background: var(--rule); }
+
+.views { display: flex; gap: 2px; align-self: stretch; margin: -8px 4px -8px 0; }
+.views button {
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 0 11px 2px;
+}
+.views button:hover { background: transparent; color: var(--ink); }
+.views button[aria-pressed='true'] { color: var(--ink); font-weight: 600; border-bottom-color: var(--warp); }
+
+/* 動作鈕群：復原／重做、介面大小。 */
 .seg { display: flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
 .seg button {
   border: 0;

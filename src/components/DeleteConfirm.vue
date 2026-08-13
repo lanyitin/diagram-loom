@@ -122,7 +122,7 @@ footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .danger-btn {
   background: var(--broken);
   border-color: var(--broken);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 </style>

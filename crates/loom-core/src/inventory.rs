@@ -42,6 +42,29 @@ pub struct ResourceRow {
     pub resource: Resource,
 }
 
+/// 這張表歸哪一層管。
+///
+/// # 為什麼這是模型知識，不是排版偏好
+///
+/// **母版與分身的分界是整個領域模型最重要的一件事。** 分頁列若把兩者
+/// 畫成同一串，等於在跟使用者說「這些都差不多」。哪張表屬於哪一層
+/// 不是畫面決定的，所以由這裡講，前端只負責照著畫分隔線。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum TableGroup {
+    /// 專案層級：不屬於任何一層。
+    ///
+    /// 只有「環境」這張表。它列的是**全部**環境，所以不隸屬於某一個環境；
+    /// 但它也顯然不是邏輯層的東西。畫面上它不進分頁列，改由環境選單裡的
+    /// 「管理環境…」開出來——那正是使用者會去找它的地方。
+    Project,
+    /// 邏輯層（母版）：定義「有哪些服務、誰要連誰」。
+    Logical,
+    /// 環境層（分身）：填「實際跑在哪台機器、IP 是什麼」。
+    Environment,
+}
+
 /// 一種資源的一張表。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -50,6 +73,7 @@ pub struct Table {
     pub kind: Kind,
     /// 分頁上的字，例如「服務」。
     pub title: String,
+    pub group: TableGroup,
     pub columns: Vec<String>,
     pub rows: Vec<ResourceRow>,
     /// 這張表屬於哪個環境。邏輯層的表是 `None`。
@@ -61,6 +85,14 @@ pub struct Table {
 /// 邏輯層的所有表，加上指定環境的所有表。
 ///
 /// `environment` 為 `None` 時只給邏輯層——剛開一個空專案就是這樣。
+///
+/// # 順序是相依順序，不是隨手排的
+///
+/// 每一張表都需要它前面那張先有東西：沒有系統就掛不了服務、沒有服務就
+/// 寫不出契約、沒有機器就放不了服務實體。所以**從頭讀到尾就是一份
+/// 「從零開始怎麼建」的說明書**，而畫面上的分頁列直接照這個順序畫。
+///
+/// 這也是為什麼順序訂在這裡而不是前端：它是相依關係，是模型知識。
 pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
     let findings = lint(project);
     let severity_of = |id: &Id| {
@@ -72,20 +104,25 @@ pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
     };
 
     let mut out = vec![
+        // 專案層級。不進分頁列，由環境選單的「管理環境…」開出來。
+        environments_table(project, &severity_of),
+        // 邏輯層（母版）。人不依賴任何東西，所以它最前面；
+        // 之後每一項都需要它前面那項先存在。
+        people_table(project, &severity_of),
         systems_table(project, &severity_of),
         containers_table(project, &severity_of),
         endpoint_defs_table(project, &severity_of),
         relationships_table(project, &severity_of),
-        people_table(project, &severity_of),
-        environments_table(project, &severity_of),
     ];
 
     if let Some(env_id) = environment
         && let Some(env) = project.environment(env_id)
     {
+        // 環境層（分身）。機器與設備是先有的地，服務實體與外部系統實體
+        // 才放得上去。
         out.push(nodes_table(env, &severity_of));
-        out.push(instances_table(project, env, &severity_of));
         out.push(infra_table(env, &severity_of));
+        out.push(instances_table(project, env, &severity_of));
         out.push(system_instances_table(project, env, &severity_of));
     }
     out
@@ -97,6 +134,7 @@ fn systems_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::System,
         title: "系統".into(),
+        group: TableGroup::Logical,
         columns: vec![
             "名稱".into(),
             "顯示名".into(),
@@ -144,6 +182,7 @@ fn containers_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Container,
         title: "服務".into(),
+        group: TableGroup::Logical,
         columns,
         environment: None,
         empty_hint: "還沒有任何服務。Redis、Consul 這種會接收請求的程序都算。".into(),
@@ -229,6 +268,7 @@ fn endpoint_defs_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::EndpointDef,
         title: "接點定義".into(),
+        group: TableGroup::Logical,
         columns: vec!["掛在誰身上".into(), "名稱".into(), "協定".into()],
         environment: None,
         empty_hint: "接點定義是「這個服務怎麼被連上」。契約要指定連到哪一個。".into(),
@@ -269,6 +309,7 @@ fn relationships_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Relationship,
         title: "契約".into(),
+        group: TableGroup::Logical,
         columns,
         environment: None,
         empty_hint: "契約是「誰要連誰」的母版。每個環境都必須實現，沒實現就會被 lint 抓出來。"
@@ -306,6 +347,7 @@ fn people_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Person,
         title: "人".into(),
+        group: TableGroup::Logical,
         columns: vec!["名稱".into(), "顯示名".into()],
         environment: None,
         empty_hint: "「使用者連上系統」是 C4 Context 圖最前面那一段，少了它整條流量就缺頭。".into(),
@@ -328,6 +370,7 @@ fn environments_table(project: &Project, sev: SeverityLookup<'_>) -> Table {
     Table {
         kind: Kind::Environment,
         title: "環境".into(),
+        group: TableGroup::Project,
         columns: vec![
             "名稱".into(),
             "顯示名".into(),
@@ -405,6 +448,7 @@ fn nodes_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -
     Table {
         kind: Kind::Node,
         title: "機器".into(),
+        group: TableGroup::Environment,
         columns: vec!["名稱".into(), "種類".into(), "上面跑的服務".into()],
         environment: Some(env.id.clone()),
         empty_hint: "站點、實體機、VM、Linux 容器都是機器。站點是拿來裝別的機器的。".into(),
@@ -460,6 +504,7 @@ fn instances_table(
     Table {
         kind: Kind::Instance,
         title: "服務實體".into(),
+        group: TableGroup::Environment,
         columns: vec![
             "名稱".into(),
             "哪個服務".into(),
@@ -494,6 +539,7 @@ fn infra_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -
     Table {
         kind: Kind::Infra,
         title: "設備".into(),
+        group: TableGroup::Environment,
         columns: vec!["名稱".into(), "VIP".into()],
         environment: Some(env.id.clone()),
         empty_hint: "F5 這類 VIP 設備。經過它的流量在模型裡會拆成兩段。".into(),
@@ -535,6 +581,7 @@ fn system_instances_table(
     Table {
         kind: Kind::SystemInstance,
         title: "外部系統實體".into(),
+        group: TableGroup::Environment,
         columns: vec!["名稱".into(), "對應系統".into(), "位址".into()],
         environment: Some(env.id.clone()),
         empty_hint:

@@ -51,6 +51,9 @@ function fakeSnapshot(rows: Row[], findings: Finding[] = []): Snapshot {
   } as unknown as Snapshot
 }
 
+/** 欄位偏好會寫進 localStorage，同一個檔案的測試共用一份。 */
+beforeEach(() => localStorage.clear())
+
 describe('連線表', () => {
   let store: ReturnType<typeof useProject>
 
@@ -58,6 +61,39 @@ describe('連線表', () => {
     setActivePinia(createPinia())
     store = useProject()
     store.snapshot = fakeSnapshot([rows('c1')])
+  })
+
+  it('挑欄位的選單裡有這張表全部的欄', () => {
+    const w = mount(ConnectionTable)
+    expect(w.findAll('.pop').length, '沒點就不該展開').toBe(0)
+
+    w.find('thead .cols').trigger('click')
+    return w.vm.$nextTick().then(() => {
+      expect(w.findAll('.pop button').map((b) => b.text().replace('固定', '').trim()))
+        .toEqual(['契約', '來源', '目標', '目標位址', '實際／期望', '用途'])
+    })
+  })
+
+  it('關掉一欄之後那一欄整條不見，其他欄的值不會位移', async () => {
+    // 欄位會依內容與使用者的選擇增減，所以一切都要用欄名認。
+    const w = mount(ConnectionTable)
+    await w.find('thead .cols').trigger('click')
+    await w.findAll('.pop button')[3]!.trigger('click')   // 關掉「目標位址」
+
+    expect(w.findAll('thead th[data-column]').map((t) => t.text()))
+      .toEqual(['契約', '來源', '目標', '實際／期望', '用途'])
+    expect(columnCell(w, '目標').text()).toBe('redis-* : client-port')
+    expect(columnCell(w, '用途').text()).toBe('讀寫快取')
+  })
+
+  it('「實際／期望」整欄不出現時，也不會出現在選單裡', async () => {
+    // 那不是使用者的偏好，是「這裡永遠是空白」。放進選單只會變成
+    // 一個勾了也看不到東西的選項。
+    store.snapshot = fakeSnapshot([rows('c1', { to: side('redis-01') })])
+    const w = mount(ConnectionTable)
+    await w.find('thead .cols').trigger('click')
+
+    expect(w.findAll('.pop button').map((b) => b.text())).not.toContain('實際／期望')
   })
 
   /** 依表頭名稱取儲存格，不用位置——加一欄就全錯的測試沒有價值。 */

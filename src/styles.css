@@ -7,27 +7,86 @@
  * 最重要的一條規矩：**狀態不能只靠顏色**。
  * 缺漏的格子要看起來是空的（虛線、無填色），壞掉的格子要有實心的色條。
  * 色盲的人、印出來的黑白文件、瞄一眼的人，都要分得出來。
+ *
+ * # 為什麼底色不是白的
+ *
+ * 這個工具會被一個人連續看好幾個小時，所以**降低眼睛疲勞排在視覺回饋前面**。
+ * 純白 `#ffffff` 是整個畫面面積最大的那一塊，等於一盞一直亮著的燈；
+ * 純黑底配純白字則會讓字糊出光暈。兩邊都往中間收：亮色的底是沒漂白的米白，
+ * 暗色的底是深暖灰。
+ *
+ * 一條可以拿去檢查任何新元件的規則：**面積越大的東西，顏色越少。**
+ * 整片的底是低彩度的中性色，飽和的顏色只留給格子裡那一小塊狀態標記——
+ * 底安靜，那一小塊才跳得出來。這兩件事不衝突，是同一根槓桿的兩端。
+ *
+ * # 對比刻意不是拉到最高
+ *
+ * 主要文字對底色約 11:1，不是黑配白的 16:1。那個差距不是清晰度，
+ * 是瞪久了會留殘影的硬度。11:1 遠超過 WCAG AA 要求的 4.5:1。
+ *
+ * 但**次要文字反而要往上調**：`--ink-3` 以前在白底上只有 3.4:1，
+ * 低於門檻。畫面上的灰字（用途、位址、欄名）到處都是，看不清楚就會瞇眼，
+ * 而瞇眼正是累的來源。現在它是 5.0:1，另外開一個 `--ink-4` 放
+ * **本來就不是字**的東西（小圓點、停用的圖示），那些不受文字門檻約束。
  */
 
+/*
+ * 等寬字打包進來，不連外。
+ *
+ * 這個畫面上有意義的內容幾乎都是等寬字：slug、IP、port、幾段幾台。
+ * Plex Mono 的 `0` 有斜線、`1 l I` 三個分得開——在滿螢幕 IP 位址的表格裡，
+ * 那是「找不找得到那一台」的差別。中文維持系統字型，不為了幾個欄名
+ * 扛下好幾 MB 的中文字檔。
+ *
+ * 授權：SIL OFL 1.1，全文在 `assets/fonts/LICENSE.txt`。
+ */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexMono-SemiBold.woff2") format("woff2");
+}
+
 :root {
-  --warp: #1D9E75;
-  --weft: #D85A30;
+  --warp: #16705a;
+  --weft: #af3f26;
 
   --ok: var(--warp);
-  --warn: #B07A0C;
+  --warn: #856009;
   --broken: var(--weft);
-  --missing: #A32C10;
+  /* 缺漏比壞掉常見得多，所以它比 --broken 鈍一階：一個有幾百條連線的
+     專案，滿畫面同一種紅會讓紅色不再有意義。形狀上它也不填色。 */
+  --missing: #9c4230;
 
-  --ink: #14201c;
-  --ink-2: #475852;
-  --ink-3: #7c8c86;
-  --ground: #f2f5f3;
-  --surface: #ffffff;
-  --surface-2: #f7faf8;
-  --rule: #d5ddd9;
-  --rule-2: #e8edeb;
+  --ink: #34312b;
+  --ink-2: #5d584d;
+  --ink-3: #6e6858;
+  /* 只給非文字用。當文字用會低於 4.5:1。 */
+  --ink-4: #97907e;
 
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --ground: #dedad1;
+  --surface: #f4f2eb;
+  --surface-2: #eae7de;
+  /* 唯一往上浮的一層：對話框與浮出選單。面積小，所以可以亮。 */
+  --raise: #faf9f4;
+
+  --rule: #d0cabc;
+  --rule-2: #e2ded2;
+
+  /* 放在 --warp / --weft 這種實心色塊上的字。
+     不能寫死 #fff——暗色模式的 --warp 是亮綠，白字在上面看不清楚。 */
+  --on-accent: #f4f2eb;
+  --shadow: rgba(52, 49, 43, .2);
+
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --sans: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
 
   --row: 34px;
@@ -48,19 +107,27 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --warp: #3fc294;
-    --weft: #ef7d52;
-    --warn: #d6a12c;
-    --missing: #f0664a;
+    --warp: #4fb08c;
+    --weft: #e07b5b;
+    --warn: #c69a3e;
+    --missing: #e08a76;
 
-    --ink: #e2e9e6;
-    --ink-2: #a5b5af;
-    --ink-3: #72817c;
-    --ground: #0e1413;
-    --surface: #151e1c;
-    --surface-2: #1a2422;
-    --rule: #2a3633;
-    --rule-2: #202a28;
+    --ink: #dad5c8;
+    --ink-2: #a09a8a;
+    --ink-3: #8e8878;
+    --ink-4: #635e51;
+
+    --ground: #191814;
+    --surface: #211f1a;
+    --surface-2: #1b1a15;
+    --raise: #2a2823;
+
+    --rule: #383429;
+    --rule-2: #2a2822;
+
+    /* 暗色模式的強調色是亮的，所以上面的字要暗，不是白。 */
+    --on-accent: #191814;
+    --shadow: rgba(0, 0, 0, .55);
   }
 }
 
@@ -115,10 +182,10 @@ button:focus-visible { outline: 2px solid var(--warp); outline-offset: 1px; }
 button.primary {
   background: var(--warp);
   border-color: var(--warp);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
-button.primary:hover:not(:disabled) { filter: brightness(1.06); background: var(--warp); color: #fff; }
+button.primary:hover:not(:disabled) { filter: brightness(1.06); background: var(--warp); color: var(--on-accent); }
 
 input[type="search"], input[type="text"] {
   font: inherit;

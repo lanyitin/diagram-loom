@@ -18,10 +18,52 @@
  * 缺漏的格子沒有填色、用虛線框，看起來就是**空的**；壞掉的格子有實心色條。
  * 印成黑白、或色覺不同的人，都還是分得出來。
  */
+import { computed, ref } from 'vue'
 import { useProject } from '../lib/store'
-import type { Cell, Id } from '../lib/model'
+import { useColumns } from '../lib/columns'
+import { sortBy, type Sort } from '../lib/rows'
+import TableHead from './TableHead.vue'
+import type { Cell, Id, Relationship } from '../lib/model'
 
 const store = useProject()
+
+const CONTRACT = '邏輯連線（契約）'
+const PURPOSE = '用途'
+
+/**
+ * 欄就是「契約、用途，加上每個環境一欄」。
+ *
+ * 環境那幾欄由工具列上的環境勾選決定，所以這張表**不放「欄位」選單**——
+ * 同一件事有兩個入口的話，使用者兩個都不會信。剩下的拖寬與排序照舊。
+ */
+const columns = computed(() => [
+  CONTRACT,
+  PURPOSE,
+  ...store.visibleEnvironments.map((e) => e.slug),
+])
+
+/**
+ * 環境那幾欄照「有多糟」排。
+ *
+ * 遞增就是**最糟的排前面**——點某個環境那一欄的人要找的就是那個環境
+ * 還缺什麼，不是照字母看熱鬧。跟連線表的「實際／期望」同一個約定。
+ */
+const RANK: Record<string, number> = { missing: 0, broken: 1, warning: 2, realized: 3 }
+
+const sort = ref<Sort | null>(null)
+
+function key(rel: Relationship, column: string): string | number {
+  if (column === CONTRACT) return rel.slug
+  if (column === PURPOSE) return rel.purpose
+  const env = store.visibleEnvironments.find((e) => e.slug === column)
+  if (!env) return 0
+  return RANK[store.cell(rel.id, env.id)?.status ?? 'missing'] ?? 0
+}
+
+const relationships = computed(() => sortBy(store.visibleRelationships, sort.value, key))
+
+const { prefs, visible, setWidth, clearWidth } = useColumns(ref('matrix'))
+const head = ref<InstanceType<typeof TableHead> | null>(null)
 
 /** 格子裡那行字。數字由 Rust 算好，這裡只負責排版。 */
 function summary(cell: Cell | undefined): string {
@@ -47,18 +89,21 @@ function description(cell: Cell | undefined, rel: Id, env: Id): string {
 
 <template>
   <div class="matrix">
-    <table>
-      <thead>
-        <tr>
-          <th class="rel">邏輯連線（契約）</th>
-          <th class="purpose">用途</th>
-          <th v-for="env in store.visibleEnvironments" :key="env.id" class="env">
-            {{ env.slug }}
-          </th>
-        </tr>
-      </thead>
+    <table :class="{ fixed: head?.frozen }">
+      <TableHead
+        ref="head"
+        :columns="columns"
+        :visible="visible(columns)"
+        :prefs="prefs"
+        :sort="sort"
+        :table-key="`matrix-${store.visibleEnvironments.length}`"
+        :menu="false"
+        @update:sort="sort = $event"
+        @resize="setWidth"
+        @autofit="clearWidth"
+      />
       <tbody>
-        <tr v-for="rel in store.visibleRelationships" :key="rel.id">
+        <tr v-for="rel in relationships" :key="rel.id">
           <td class="rel mono">{{ rel.slug }}</td>
           <td class="purpose muted">{{ rel.purpose }}</td>
           <td
@@ -97,7 +142,12 @@ table {
   min-width: 100%;
 }
 
-th, td {
+/* 量完欄寬之後才切成 fixed——理由見 `TableHead.vue`。
+   `width` 維持 `max-content`：環境勾多了這張表本來就比視窗寬。 */
+table.fixed { table-layout: fixed; }
+table.fixed td { overflow: hidden; text-overflow: ellipsis; }
+
+td {
   text-align: left;
   padding: 0 12px;
   height: var(--row);
@@ -105,20 +155,12 @@ th, td {
   white-space: nowrap;
 }
 
-thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--rule);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-/* 契約那欄橫向捲動時要釘住，否則捲到第 8 個環境就不知道自己在看哪一列。 */
+/*
+ * 契約那欄橫向捲動時要釘住，否則捲到第 8 個環境就不知道自己在看哪一列。
+ *
+ * 欄名列由 `TableHead` 畫，它只管「往上釘」（`top: 0`）——「往左釘」
+ * 是這張表獨有的需求，所以用 `:deep()` 從外面補第一格。
+ */
 .rel {
   position: sticky;
   left: 0;
@@ -127,12 +169,21 @@ thead th {
   border-right: 1px solid var(--rule);
   min-width: 240px;
 }
-thead .rel { z-index: 3; background: var(--surface-2); }
 tbody tr:hover .rel { background: var(--surface-2); }
 
+.matrix :deep(thead th:first-child) {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  border-right: 1px solid var(--rule);
+  min-width: 240px;
+}
+
 .purpose { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
-.env { min-width: 132px; }
 .cell { min-width: 132px; }
+/* 環境那幾欄的欄名也要有下限，不然只有 dev 這種短名字時欄會縮到
+   比格子裡的「2 段 · 3 台」還窄，量出來的寬度就是錯的。 */
+.matrix :deep(thead th:nth-child(n + 3)) { min-width: 132px; }
 tbody tr:hover td { background: var(--surface-2); }
 
 .empty { text-align: center; height: 96px; }
@@ -163,7 +214,7 @@ tbody tr:hover td { background: var(--surface-2); }
 
 /* 壞掉：實心的色條，看起來像警報。 */
 .chip.broken {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--broken);
   border-color: var(--broken);
   font-weight: 600;
