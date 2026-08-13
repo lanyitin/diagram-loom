@@ -231,7 +231,7 @@ fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
 
 #[test]
 fn 真實架構樣本可以完整讀回來() {
-    // `fixtures/通路系統.loom` 是照一個真實系統的架構建的（35 個落地、27 條連線、
+    // `fixtures/通路系統.loom` 是照一個真實系統的架構建的（35 個落地、29 條連線、
     // 兩層巢狀站點、一台 VM 跑兩個服務、同站優先加跨站備援）。
     // 假素材通常太乾淨，這份用來確認 YAML 佈局撐得住現實的形狀。
     //
@@ -247,7 +247,7 @@ fn 真實架構樣本可以完整讀回來() {
     let project = loom_core::repository::load_from_dir(&root).expect("讀得回來");
 
     assert_eq!(project.logical.containers.len(), 8);
-    assert_eq!(project.logical.relationships.len(), 10);
+    assert_eq!(project.logical.relationships.len(), 11);
     assert_eq!(project.environments.len(), 2);
 
     let 落地數: usize = project.environments[0]
@@ -266,7 +266,7 @@ fn 真實架構樣本可以完整讀回來() {
         vec![
             "L001 c-redis".to_string(),
             "L001 r-channel-連-redis".to_string(),
-            "L004 conn-test-06".to_string(),
+            "L004 conn-test-07".to_string(),
         ],
         "prod 必須完全乾淨，只有 test 環境刻意留的三個洞"
     );
