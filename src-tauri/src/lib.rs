@@ -86,6 +86,9 @@ pub struct FindingView {
     pub severity: Severity,
     pub environment: Option<loom_core::id::Id>,
     pub subject: loom_core::id::Id,
+    /// 問題出在連線的哪一端。前端不需要看懂它，但**必須原樣送回來**——
+    /// 兩端都是萬用字元時，少了它就分不出這一項在講哪一端。
+    pub end: Option<loom_core::environment::ConnectionEnd>,
     pub detail: String,
     /// 這一項能不能用單一欄位修好，以及該長成什麼樣的輸入。
     /// `None` 表示要新增／改接連線，不是填一格能解決的。
@@ -99,6 +102,7 @@ impl FindingView {
             severity: f.severity(),
             environment: f.environment.clone(),
             subject: f.subject.clone(),
+            end: f.end,
             detail: f.detail.clone(),
             fix: edit::fix_for(project, f),
         }
@@ -216,7 +220,7 @@ fn apply_edit(state: State<'_>, edit: Edit) -> Result<Snapshot, Failure> {
 fn apply_fix(state: State<'_>, finding: Finding, value: FixValue) -> Result<Snapshot, Failure> {
     let mut opened = 鎖(&state)?;
     let (root, history) = 開著的(&mut opened)?;
-    let edit = edit::edit_for(history.project(), &finding, &value)?;
+    let edit = edit::edit_for(&finding, &value)?;
     history.edit(&edit)?;
     Ok(snapshot(root, history))
 }

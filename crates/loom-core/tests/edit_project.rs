@@ -12,8 +12,8 @@
 mod common;
 
 use common::*;
-use loom_core::edit::{self, ConnectionEnd, Edit, EditError, Fix, FixValue};
-use loom_core::environment::{ConnectionKind, Endpointing, InstanceRef};
+use loom_core::edit::{self, Edit, EditError, Fix, FixValue};
+use loom_core::environment::{ConnectionEnd, ConnectionKind, Endpointing, InstanceRef};
 use loom_core::history::History;
 use loom_core::id::Id;
 use loom_core::lint::{Rule, lint};
@@ -346,7 +346,7 @@ fn 照著修法填一格_就能把一個壞掉的專案修乾淨() {
             Fix::Count { suggestion } => FixValue::Count(suggestion),
             Fix::Toggle { .. } => FixValue::Toggle(true),
         };
-        let e = edit::edit_for(&project, &f, &填什麼).expect("交不出 Edit");
+        let e = edit::edit_for(&f, &填什麼).expect("交不出 Edit");
         edit::apply(&mut project, &e).expect("套用失敗");
 
         修了 += 1;
@@ -364,7 +364,7 @@ fn 拿錯型別的值去填會被擋下來() {
     project.environments[2].nodes[1].instances[0].endpoints[0].address = None;
     let f = lint(&project).into_iter().next().unwrap();
 
-    assert!(edit::edit_for(&project, &f, &FixValue::Count(Some(3))).is_err());
+    assert!(edit::edit_for(&f, &FixValue::Count(Some(3))).is_err());
 }
 
 #[test]
@@ -397,6 +397,7 @@ fn 缺位址的修法會帶出目前的值() {
         rule: Rule::L006,
         environment: Some(Id::new(DEV)),
         subject: 端點.id.clone(),
+        end: None,
         detail: String::new(),
     };
 
@@ -448,4 +449,132 @@ fn 刪掉之後可以復原回來() {
     assert_eq!(h.project().environments[0].connections.len(), 3);
     assert!(lint(h.project()).is_empty(), "復原之後專案沒有回到乾淨狀態");
     assert!(!h.is_dirty());
+}
+
+/// 兩端都是萬用字元的連線。
+///
+/// 真實樣本裡的 `apigw-* → common-*` 就是這個形狀，而它揭露了一個
+/// 會靜靜出錯的 bug：發現沒說是哪一端，`edit_for` 只好挑「第一個萬用字元」，
+/// 於是修目標端的問題卻改到了來源端。使用者按下套用，錯誤還在，
+/// 而且因為來源端的值沒變、專案沒被改動，連存檔鍵都不會亮。
+mod 兩端都是萬用字元 {
+    use super::*;
+    use loom_core::environment::{Connection, ConnectionKind, Endpointing, InstanceRef};
+
+    /// prod：`api-* (1 台) → redis-* (3 台)`，兩端都寫萬用字元。
+    fn 專案(來源期望: u32, 目標期望: u32) -> loom_core::Project {
+        let mut project = healthy_project();
+        let prod = &mut project.environments[0];
+        // 只換掉快取那條（原本走 F5 分成兩段），金流那條留著，
+        // 否則會冒出一堆跟這組測試無關的 L001／L008。
+        prod.connections.retain(|c| c.serves == Id::new(REL_PAY));
+        prod.connections.push(Connection {
+            id: Id::new("conn-兩端"),
+            serves: Id::new(REL_CACHE),
+            purpose: "讀寫快取".into(),
+            kind: ConnectionKind::Primary,
+            from: Endpointing::Instance {
+                target: InstanceRef::Pattern {
+                    slug_pattern: "api-*".into(),
+                    within: None,
+                    expect: Some(來源期望),
+                },
+                endpoint: None,
+            },
+            to: Endpointing::Instance {
+                target: InstanceRef::Pattern {
+                    slug_pattern: "redis-*".into(),
+                    within: None,
+                    expect: Some(目標期望),
+                },
+                endpoint: Some(Id::new(REDIS_CLIENT)),
+            },
+        });
+        project
+    }
+
+    fn 期望值(project: &loom_core::Project) -> (Option<u32>, Option<u32>) {
+        let conn = project.environments[0]
+            .connections
+            .iter()
+            .find(|c| c.id == Id::new("conn-兩端"))
+            .expect("那條連線不見了");
+        let 拿 = |side: &Endpointing| match side {
+            Endpointing::Instance {
+                target: InstanceRef::Pattern { expect, .. },
+                ..
+            } => *expect,
+            _ => None,
+        };
+        (拿(&conn.from), 拿(&conn.to))
+    }
+
+    #[test]
+    fn 發現會指名是哪一端() {
+        // 來源寫 9（實際 1 台）、目標寫 9（實際 3 台）→ 兩項 L004。
+        // 沒有 end 的話這兩項的 rule 與 subject 完全一樣，分不出誰是誰。
+        let project = 專案(9, 9);
+        let 兩項: Vec<_> = lint(&project)
+            .into_iter()
+            .filter(|f| f.rule == Rule::L004)
+            .collect();
+
+        assert_eq!(兩項.len(), 2);
+        assert_eq!(兩項[0].end, Some(ConnectionEnd::From));
+        assert_eq!(兩項[1].end, Some(ConnectionEnd::To));
+    }
+
+    #[test]
+    fn 修目標端的問題不會改到來源端() {
+        // 來源端本來就對（1 台寫 1），只有目標端錯（3 台卻寫 9）。
+        let mut project = 專案(1, 9);
+        let f = lint(&project)
+            .into_iter()
+            .find(|f| f.rule == Rule::L004)
+            .unwrap();
+        assert_eq!(f.end, Some(ConnectionEnd::To));
+
+        let e = edit::edit_for(&f, &FixValue::Count(Some(3))).unwrap();
+        edit::apply(&mut project, &e).unwrap();
+
+        assert_eq!(期望值(&project), (Some(1), Some(3)), "改到了另一端");
+        assert_eq!(規則(&project), Vec::<Rule>::new());
+    }
+
+    #[test]
+    fn 建議的數字是那一端自己的數字() {
+        // 來源 1 台、目標 3 台。修目標端時輸入框該預帶 3，不是 1——
+        // 預帶 1 的話使用者按下套用反而製造出一個新的 L004。
+        let project = 專案(1, 9);
+        let f = lint(&project)
+            .into_iter()
+            .find(|f| f.rule == Rule::L004)
+            .unwrap();
+
+        assert_eq!(
+            edit::fix_for(&project, &f),
+            Some(Fix::Count {
+                suggestion: Some(3)
+            })
+        );
+    }
+
+    #[test]
+    fn 兩端都錯時各修各的() {
+        let mut project = 專案(9, 9);
+        for _ in 0..2 {
+            let f = lint(&project)
+                .into_iter()
+                .find(|f| f.rule == Rule::L004)
+                .unwrap();
+            let Some(Fix::Count { suggestion }) = edit::fix_for(&project, &f) else {
+                panic!("L004 應該是填一個數字");
+            };
+            let e = edit::edit_for(&f, &FixValue::Count(suggestion)).unwrap();
+            edit::apply(&mut project, &e).unwrap();
+        }
+
+        assert_eq!(期望值(&project), (Some(1), Some(3)));
+        assert_eq!(規則(&project), Vec::<Rule>::new());
+    }
 }

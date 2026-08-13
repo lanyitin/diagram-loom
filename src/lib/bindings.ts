@@ -30,7 +30,7 @@ export const commands = {
 	 * 
 	 *  刪除之前一定要先問這個。判斷不在這裡——這一層只是轉接。
 	 */
-	previewEdit: (edit: Edit) => typedError<Impact, Failure>(__TAURI_INVOKE("preview_edit", { edit })),
+	previewEdit: (edit: Edit) => typedError<Impact_Serialize, Failure>(__TAURI_INVOKE("preview_edit", { edit })),
 	applyEdit: (edit: Edit) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_edit", { edit })),
 	/**
 	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
@@ -39,7 +39,7 @@ export const commands = {
 	 *  「L006 的答案要寫進哪個欄位」由 `loom_core::edit::edit_for` 決定。
 	 *  前端因此完全不需要知道 [`Edit`] 有哪些變體。
 	 */
-	applyFix: (finding: Finding, value: FixValue) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_fix", { finding, value })),
+	applyFix: (finding: Finding_Deserialize, value: FixValue) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("apply_fix", { finding, value })),
 	/**
 	 *  退回上一步。已經到底了就原樣回傳——這不是錯誤，
 	 *  使用者多按一次 Cmd+Z 不該看到紅字。
@@ -88,10 +88,18 @@ export type ChangeKind = "added" | "updated";
 export type Connection = Connection_Serialize | Connection_Deserialize;
 
 /**
- *  連線的哪一端。萬用字元兩端都可能出現。
+ *  連線一端指向的 Instance：可以是一個，也可以是一整群。
+ *  連線的哪一端。
  * 
- *  名字不叫 `Side`，是為了不跟 `table::Side`（表格上一端的完整樣貌）撞名——
- *  型別匯出到 TypeScript 之後是同一個命名空間，撞了就產不出來。
+ *  # 為什麼需要指名
+ * 
+ *  一條連線的兩端**都可能是萬用字元**（`apigw-* → common-*`），
+ *  所以「這條連線的期望數量不對」是個不完整的說法——它沒說是哪一端。
+ *  Lint 的發現、以及照著發現去修的那次編輯，都必須指名，
+ *  否則就得用猜的，而猜錯會安靜地改到另一端。
+ * 
+ *  名字不叫 `Side`，是為了不跟 [`crate::table::Side`]（表格上一端的完整樣貌）
+ *  撞名——型別匯出到 TypeScript 之後是同一個命名空間，撞了就產不出來。
  */
 export type ConnectionEnd = "from" | "to";
 
@@ -538,14 +546,7 @@ export type Failure = {
  * 
  *  欄位順序即排序順序，讓 lint 的輸出穩定可比對。
  */
-export type Finding = {
-	rule: Rule,
-	/**  發生在哪個環境；邏輯層本身的問題為 `None`。 */
-	environment: Id | null,
-	/**  出問題的元素。 */
-	subject: Id,
-	detail: string,
-};
+export type Finding = Finding_Serialize | Finding_Deserialize;
 
 /**
  *  一項發現，外加它的嚴重度與修法。
@@ -562,12 +563,71 @@ export type FindingView = {
 	severity: Severity,
 	environment: Id | null,
 	subject: Id,
+	/**
+	 *  問題出在連線的哪一端。前端不需要看懂它，但**必須原樣送回來**——
+	 *  兩端都是萬用字元時，少了它就分不出這一項在講哪一端。
+	 */
+	end: ConnectionEnd | null,
 	detail: string,
 	/**
 	 *  這一項能不能用單一欄位修好，以及該長成什麼樣的輸入。
 	 *  `None` 表示要新增／改接連線，不是填一格能解決的。
 	 */
 	fix: Fix | null,
+};
+
+/**
+ *  一項發現。
+ * 
+ *  欄位順序即排序順序，讓 lint 的輸出穩定可比對。
+ */
+export type Finding_Deserialize = {
+	rule: Rule,
+	/**  發生在哪個環境；邏輯層本身的問題為 `None`。 */
+	environment: Id | null,
+	/**  出問題的元素。 */
+	subject: Id,
+	/**
+	 *  問題出在連線的哪一端。
+	 * 
+	 *  # 為什麼不能省
+	 * 
+	 *  一條連線的兩端都可能是萬用字元（`apigw-* → common-*`），
+	 *  於是同一條連線會產生**兩項 rule 與 subject 都相同的 L004**。
+	 *  少了這個欄位，「照著發現去修」就只能猜是哪一端——
+	 *  而猜錯會安靜地改到另一端，使用者按了套用卻什麼都沒發生。
+	 * 
+	 *  跟連線的端點無關的規則（L001／L006／L007／L008）是 `None`。
+	 */
+	end?: ConnectionEnd | null,
+	detail: string,
+};
+
+/**
+ *  一項發現。
+ * 
+ *  欄位順序即排序順序，讓 lint 的輸出穩定可比對。
+ */
+export type Finding_Serialize = {
+	rule: Rule,
+	/**  發生在哪個環境；邏輯層本身的問題為 `None`。 */
+	environment: Id | null,
+	/**  出問題的元素。 */
+	subject: Id,
+	/**
+	 *  問題出在連線的哪一端。
+	 * 
+	 *  # 為什麼不能省
+	 * 
+	 *  一條連線的兩端都可能是萬用字元（`apigw-* → common-*`），
+	 *  於是同一條連線會產生**兩項 rule 與 subject 都相同的 L004**。
+	 *  少了這個欄位，「照著發現去修」就只能猜是哪一端——
+	 *  而猜錯會安靜地改到另一端，使用者按了套用卻什麼都沒發生。
+	 * 
+	 *  跟連線的端點無關的規則（L001／L006／L007／L008）是 `None`。
+	 */
+	end?: ConnectionEnd | null,
+	detail: string,
 };
 
 /**
@@ -599,11 +659,22 @@ export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | 
 export type Id = string;
 
 /**  [`preview`] 的結果：這次修改會弄壞什麼、會修好什麼。 */
-export type Impact = {
+export type Impact = Impact_Serialize | Impact_Deserialize;
+
+/**  [`preview`] 的結果：這次修改會弄壞什麼、會修好什麼。 */
+export type Impact_Deserialize = {
 	/**  套用後**新冒出來**的發現。刪除確認框要顯眼地列出這些。 */
-	introduced: Finding[],
+	introduced: Finding_Deserialize[],
 	/**  套用後**消失**的發現。 */
-	resolved: Finding[],
+	resolved: Finding_Deserialize[],
+};
+
+/**  [`preview`] 的結果：這次修改會弄壞什麼、會修好什麼。 */
+export type Impact_Serialize = {
+	/**  套用後**新冒出來**的發現。刪除確認框要顯眼地列出這些。 */
+	introduced: Finding_Serialize[],
+	/**  套用後**消失**的發現。 */
+	resolved: Finding_Serialize[],
 };
 
 /**
@@ -638,10 +709,8 @@ export type InfrastructureNode_Serialize = {
 	endpoints?: Endpoint_Serialize[],
 };
 
-/**  連線一端指向的 Instance：可以是一個，也可以是一整群。 */
 export type InstanceRef = InstanceRef_Serialize | InstanceRef_Deserialize;
 
-/**  連線一端指向的 Instance：可以是一個，也可以是一整群。 */
 export type InstanceRef_Deserialize = 
 /**  指名一個 Instance。 */
 ({ one: Id }) & { pattern?: never } | 
@@ -677,7 +746,6 @@ export type InstanceRef_Deserialize =
 	expect?: number | null,
 } }) & { one?: never };
 
-/**  連線一端指向的 Instance：可以是一個，也可以是一整群。 */
 export type InstanceRef_Serialize = 
 /**  指名一個 Instance。 */
 ({ one: Id }) & { pattern?: never } | 

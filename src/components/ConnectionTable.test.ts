@@ -130,12 +130,12 @@ describe('Lint 面板', () => {
   const 發現: Finding[] = [
     {
       rule: 'L004', severity: 'error', environment: 'env-prod', subject: 'conn-1',
-      detail: '期望 4 個，實際 3 個',
+      end: 'to', detail: '期望 4 個，實際 3 個',
       fix: { count: { suggestion: 3 } },
     },
     {
       rule: 'L007', severity: 'warning', environment: 'env-dev', subject: 'conn-2',
-      detail: '連線沒有填用途',
+      end: null, detail: '連線沒有填用途',
       fix: { text: { hint: '這條連線是做什麼用的', current: null } },
     },
   ]
@@ -259,7 +259,7 @@ describe('Lint 面板', () => {
     store.snapshot = 假快照([列('c1')], [
       {
         rule: 'L008', severity: 'warning', environment: 'env-prod', subject: 'i-1',
-        detail: '沒人碰', fix: { toggle: { label: '刻意獨立（冷備機等）' } },
+        end: null, detail: '沒人碰', fix: { toggle: { label: '刻意獨立（冷備機等）' } },
       },
     ])
     store.面板展開 = true
@@ -277,7 +277,7 @@ describe('Lint 面板', () => {
   it('沒有單欄位修法的那幾條不放假按鈕', () => {
     // 按下去只會說「這個還沒做」的按鈕，比沒有按鈕更糟。
     store.snapshot = 假快照([列('c1')], [
-      { rule: 'L002', severity: 'error', environment: 'env-prod', subject: 'r-1', detail: '走不通', fix: null },
+      { rule: 'L002', severity: 'error', environment: 'env-prod', subject: 'r-1', end: null, detail: '走不通', fix: null },
     ])
     store.面板展開 = true
     const w = mount(LintPanel)

@@ -34,31 +34,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::Project;
 use crate::environment::{
-    ConnectionKind, DeploymentNode, Endpoint, Endpointing, Environment, InstanceRef,
+    ConnectionEnd, ConnectionKind, DeploymentNode, Endpoint, Endpointing, Environment, InstanceRef,
 };
 use crate::id::Id;
 use crate::lint::{self, Finding, Rule};
-
-/// 連線的哪一端。萬用字元兩端都可能出現。
-///
-/// 名字不叫 `Side`，是為了不跟 `table::Side`（表格上一端的完整樣貌）撞名——
-/// 型別匯出到 TypeScript 之後是同一個命名空間，撞了就產不出來。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub enum ConnectionEnd {
-    From,
-    To,
-}
-
-impl fmt::Display for ConnectionEnd {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConnectionEnd::From => write!(f, "來源"),
-            ConnectionEnd::To => write!(f, "目標"),
-        }
-    }
-}
 
 /// 對專案的一次修改。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -372,7 +351,7 @@ pub enum FixValue {
 /// 新增一條規則就要記得同步兩個地方，而漏掉的那次是靜靜地不作用。
 ///
 /// 所以前端全程不需要知道 [`Edit`] 有哪些變體。
-pub fn edit_for(project: &Project, finding: &Finding, value: &FixValue) -> Result<Edit, EditError> {
+pub fn edit_for(finding: &Finding, value: &FixValue) -> Result<Edit, EditError> {
     let 環境 = || {
         finding
             .environment
@@ -395,7 +374,11 @@ pub fn edit_for(project: &Project, finding: &Finding, value: &FixValue) -> Resul
         (Rule::L004 | Rule::L005, FixValue::Count(count)) => Ok(Edit::SetExpect {
             environment: 環境()?,
             connection: finding.subject.clone(),
-            side: 萬用字元在哪一端(project, finding)?,
+            // 用發現自己說的那一端，**不猜**。
+            // 兩端都可能是萬用字元（`apigw-* → common-*`），猜「第一個」
+            // 會安靜地改到另一端：使用者按了套用，錯誤還在，
+            // 而且因為專案根本沒被改動，連存檔鍵都不會亮。
+            side: finding.end.ok_or(EditError::NoFix(finding.rule))?,
             expect: *count,
         }),
         (Rule::L008, FixValue::Toggle(on)) => Ok(Edit::SetStandalone {
@@ -406,35 +389,6 @@ pub fn edit_for(project: &Project, finding: &Finding, value: &FixValue) -> Resul
         // 型別對不上（例如拿數字去填位址）或這條規則本來就沒有單欄位修法。
         _ => Err(EditError::NoFix(finding.rule)),
     }
-}
-
-/// 前端只填了一個數字，沒說是哪一端——因為那不該由它判斷。
-fn 萬用字元在哪一端(
-    project: &Project,
-    finding: &Finding,
-) -> Result<ConnectionEnd, EditError> {
-    let conn = 環境的(project, finding)
-        .and_then(|env| env.connections.iter().find(|c| c.id == finding.subject))
-        .ok_or_else(|| EditError::NoSuchConnection(finding.subject.clone()))?;
-
-    for (端, side) in [
-        (ConnectionEnd::From, &conn.from),
-        (ConnectionEnd::To, &conn.to),
-    ] {
-        if matches!(
-            side,
-            Endpointing::Instance {
-                target: InstanceRef::Pattern { .. },
-                ..
-            }
-        ) {
-            return Ok(端);
-        }
-    }
-    Err(EditError::NotAPattern {
-        connection: finding.subject.clone(),
-        side: ConnectionEnd::To,
-    })
 }
 
 /// 一項發現配上它的修法。`None` 表示這條規則沒辦法用單一欄位修好
@@ -466,22 +420,26 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
 fn 實際數量(project: &Project, finding: &Finding) -> Option<u32> {
     let env = 環境的(project, finding)?;
     let conn = env.connections.iter().find(|c| c.id == finding.subject)?;
-    for side in [&conn.from, &conn.to] {
-        if let Endpointing::Instance {
-            target:
-                InstanceRef::Pattern {
-                    slug_pattern,
-                    within,
-                    ..
-                },
-            ..
-        } = side
-        {
-            let index = crate::index::EnvIndex::build(project, env);
-            return Some(index.matching_within(slug_pattern, within.as_ref()).len() as u32);
-        }
-    }
-    None
+    // 看發現指名的那一端。兩端都是萬用字元時（`apigw-* → common-*`），
+    // 「第一個」會給出另一端的數字，使用者照著填反而製造出一個新的 L004。
+    let side = match finding.end? {
+        ConnectionEnd::From => &conn.from,
+        ConnectionEnd::To => &conn.to,
+    };
+    let Endpointing::Instance {
+        target:
+            InstanceRef::Pattern {
+                slug_pattern,
+                within,
+                ..
+            },
+        ..
+    } = side
+    else {
+        return None;
+    };
+    let index = crate::index::EnvIndex::build(project, env);
+    Some(index.matching_within(slug_pattern, within.as_ref()).len() as u32)
 }
 
 fn 環境的<'a>(project: &'a Project, finding: &Finding) -> Option<&'a Environment> {

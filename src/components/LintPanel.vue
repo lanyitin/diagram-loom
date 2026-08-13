@@ -62,7 +62,12 @@ function 跳過去(f: Finding) {
     <div v-if="store.面板展開" class="list">
       <table>
         <tbody>
-          <template v-for="(f, i) in store.發現" :key="`${f.rule}-${f.subject}-${f.environment}`">
+          <!-- key 要帶上 end：兩端都是萬用字元的連線會產生兩項 rule 與 subject
+               完全相同的 L004，少了 end 兩列就會撞 key。 -->
+          <template
+            v-for="(f, i) in store.發現"
+            :key="`${f.rule}-${f.environment}-${f.subject}-${f.end}`"
+          >
             <tr>
               <td class="rule">
                 <span :class="['code', f.severity]">{{ f.rule }}</span>

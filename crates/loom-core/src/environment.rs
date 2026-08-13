@@ -113,6 +113,34 @@ pub struct InfrastructureNode {
 }
 
 /// 連線一端指向的 Instance：可以是一個，也可以是一整群。
+/// 連線的哪一端。
+///
+/// # 為什麼需要指名
+///
+/// 一條連線的兩端**都可能是萬用字元**（`apigw-* → common-*`），
+/// 所以「這條連線的期望數量不對」是個不完整的說法——它沒說是哪一端。
+/// Lint 的發現、以及照著發現去修的那次編輯，都必須指名，
+/// 否則就得用猜的，而猜錯會安靜地改到另一端。
+///
+/// 名字不叫 `Side`，是為了不跟 [`crate::table::Side`]（表格上一端的完整樣貌）
+/// 撞名——型別匯出到 TypeScript 之後是同一個命名空間，撞了就產不出來。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionEnd {
+    From,
+    To,
+}
+
+impl std::fmt::Display for ConnectionEnd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectionEnd::From => write!(f, "來源"),
+            ConnectionEnd::To => write!(f, "目標"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]

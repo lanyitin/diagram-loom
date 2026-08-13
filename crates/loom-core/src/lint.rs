@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::Project;
-use crate::environment::{ContainerInstance, Endpointing, Environment, InstanceRef};
+use crate::environment::{ConnectionEnd, ContainerInstance, Endpointing, Environment, InstanceRef};
 use crate::id::Id;
 use crate::index::EnvIndex;
 use crate::logical::RelationshipEnd;
@@ -80,6 +80,18 @@ pub struct Finding {
     pub environment: Option<Id>,
     /// 出問題的元素。
     pub subject: Id,
+    /// 問題出在連線的哪一端。
+    ///
+    /// # 為什麼不能省
+    ///
+    /// 一條連線的兩端都可能是萬用字元（`apigw-* → common-*`），
+    /// 於是同一條連線會產生**兩項 rule 與 subject 都相同的 L004**。
+    /// 少了這個欄位，「照著發現去修」就只能猜是哪一端——
+    /// 而猜錯會安靜地改到另一端，使用者按了套用卻什麼都沒發生。
+    ///
+    /// 跟連線的端點無關的規則（L001／L006／L007／L008）是 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<ConnectionEnd>,
     pub detail: String,
 }
 
@@ -112,6 +124,7 @@ pub fn lint(project: &Project) -> Vec<Finding> {
                 rule: Rule::L007,
                 environment: None,
                 subject: rel.id.clone(),
+                end: None,
                 detail: format!("邏輯連線 {} 沒有填用途", rel.slug),
             });
         }
@@ -156,6 +169,7 @@ fn check_logical_realized(
                 rule: Rule::L001,
                 environment: Some(env.id.clone()),
                 subject: container.id.clone(),
+                end: None,
                 detail: format!(
                     "服務 {} 在環境 {} 沒有任何 Instance",
                     container.slug, env.slug
@@ -170,6 +184,7 @@ fn check_logical_realized(
                 rule: Rule::L001,
                 environment: Some(env.id.clone()),
                 subject: system.id.clone(),
+                end: None,
                 detail: format!(
                     "外部系統 {} 在環境 {} 沒有指定落地位址",
                     system.slug, env.slug
@@ -187,6 +202,7 @@ fn check_connections(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec
                 rule: Rule::L007,
                 environment: Some(env.id.clone()),
                 subject: conn.id.clone(),
+                end: None,
                 detail: "連線沒有填用途".into(),
             });
         }
@@ -196,12 +212,16 @@ fn check_connections(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec
                 rule: Rule::L003,
                 environment: Some(env.id.clone()),
                 subject: conn.id.clone(),
+                end: None,
                 detail: format!("連線指向不存在的邏輯連線 {}", conn.serves),
             });
         }
 
-        // 人住在邏輯層，`check_endpointing` 手上只有環境，所以在這裡查。
-        for side in [&conn.from, &conn.to] {
+        for (end, side) in [
+            (ConnectionEnd::From, &conn.from),
+            (ConnectionEnd::To, &conn.to),
+        ] {
+            // 人住在邏輯層，`check_endpointing` 手上只有環境，所以在這裡查。
             if let Endpointing::Person { person } = side
                 && !index.knows_person(person)
             {
@@ -209,24 +229,28 @@ fn check_connections(env: &Environment, index: &EnvIndex<'_>, findings: &mut Vec
                     rule: Rule::L003,
                     environment: Some(env.id.clone()),
                     subject: conn.id.clone(),
+                    end: Some(end),
                     detail: format!("連線指向不存在的 Person {person}"),
                 });
             }
-        }
 
-        check_endpointing(env, index, conn.id.clone(), &conn.from, findings);
-        check_endpointing(env, index, conn.id.clone(), &conn.to, findings);
+            check_endpointing(env, index, conn.id.clone(), end, side, findings);
+        }
     }
 }
 
+/// 一端的檢查。`end` 只是原樣帶進每一項發現裡——兩端都可能是萬用字元，
+/// 不指名的話「照著發現去修」就得用猜的。
 fn check_endpointing(
     env: &Environment,
     index: &EnvIndex<'_>,
     conn_id: Id,
+    end: ConnectionEnd,
     side: &Endpointing,
     findings: &mut Vec<Finding>,
 ) {
     let env_id = Some(env.id.clone());
+    let end = Some(end);
 
     match side {
         Endpointing::Instance { target, endpoint } => match target {
@@ -235,10 +259,18 @@ fn check_endpointing(
                     rule: Rule::L003,
                     environment: env_id,
                     subject: conn_id,
+                    end,
                     detail: format!("連線指向不存在的 Instance {id}"),
                 }),
                 Some(found) => {
-                    check_instance_has_endpoint(found, endpoint.as_ref(), env, conn_id, findings);
+                    check_instance_has_endpoint(
+                        found,
+                        endpoint.as_ref(),
+                        env,
+                        conn_id,
+                        end,
+                        findings,
+                    );
                 }
             },
             InstanceRef::Pattern {
@@ -255,6 +287,7 @@ fn check_endpointing(
                         rule: Rule::L003,
                         environment: env_id.clone(),
                         subject: conn_id.clone(),
+                        end,
                         detail: format!("within 指向不存在的部署節點 {node}"),
                     });
                 }
@@ -266,12 +299,14 @@ fn check_endpointing(
                         rule: Rule::L005,
                         environment: env_id.clone(),
                         subject: conn_id.clone(),
+                        end,
                         detail: format!("萬用字元 {slug_pattern} 沒有註明 expect 期望數量"),
                     }),
                     Some(want) if *want as usize != matched.len() => findings.push(Finding {
                         rule: Rule::L004,
                         environment: env_id.clone(),
                         subject: conn_id.clone(),
+                        end,
                         detail: match within {
                             Some(node) => format!(
                                 "萬用字元 {slug_pattern}（限定在 {node} 底下）期望 {want} 個，實際符合 {} 個",
@@ -292,6 +327,7 @@ fn check_endpointing(
                         endpoint.as_ref(),
                         env,
                         conn_id.clone(),
+                        end,
                         findings,
                     );
                 }
@@ -302,6 +338,7 @@ fn check_endpointing(
                 rule: Rule::L003,
                 environment: env_id,
                 subject: conn_id,
+                end,
                 detail: format!("連線指向不存在的設備 {node}"),
             }),
             Some(found) => {
@@ -312,6 +349,7 @@ fn check_endpointing(
                         rule: Rule::L003,
                         environment: env_id,
                         subject: conn_id,
+                        end,
                         detail: format!("設備 {} 上沒有 Endpoint {want}", found.slug),
                     });
                 }
@@ -326,6 +364,7 @@ fn check_endpointing(
                 rule: Rule::L003,
                 environment: env_id,
                 subject: conn_id,
+                end,
                 detail: format!("連線指向不存在的外部系統落地 {instance}"),
             }),
             Some(found) => {
@@ -336,6 +375,7 @@ fn check_endpointing(
                         rule: Rule::L003,
                         environment: env_id,
                         subject: conn_id,
+                        end,
                         detail: format!(
                             "外部系統 {} 上沒有對應 EndpointDef {want} 的 Endpoint",
                             found.slug
@@ -352,6 +392,7 @@ fn check_instance_has_endpoint(
     endpoint: Option<&Id>,
     env: &Environment,
     conn_id: Id,
+    end: Option<ConnectionEnd>,
     findings: &mut Vec<Finding>,
 ) {
     // 來源端的 endpoint 可以是 None（由作業系統分配 ephemeral port）。
@@ -368,6 +409,7 @@ fn check_instance_has_endpoint(
             rule: Rule::L003,
             environment: Some(env.id.clone()),
             subject: conn_id,
+            end,
             detail: format!(
                 "Instance {} 上沒有對應 EndpointDef {want} 的 Endpoint",
                 instance.slug
@@ -385,6 +427,7 @@ fn check_endpoint_addresses(env: &Environment, index: &EnvIndex<'_>, findings: &
                     rule: Rule::L006,
                     environment: Some(env.id.clone()),
                     subject: endpoint.id.clone(),
+                    end: None,
                     detail: format!("{}／{} 缺少位址", instance.slug, endpoint.slug),
                 });
             }
@@ -398,6 +441,7 @@ fn check_endpoint_addresses(env: &Environment, index: &EnvIndex<'_>, findings: &
                     rule: Rule::L006,
                     environment: Some(env.id.clone()),
                     subject: endpoint.id.clone(),
+                    end: None,
                     detail: format!("{}／{} 缺少位址", node.slug, endpoint.slug),
                 });
             }
@@ -411,6 +455,7 @@ fn check_endpoint_addresses(env: &Environment, index: &EnvIndex<'_>, findings: &
                     rule: Rule::L006,
                     environment: Some(env.id.clone()),
                     subject: endpoint.id.clone(),
+                    end: None,
                     detail: format!("{}／{} 缺少位址", system.slug, endpoint.slug),
                 });
             }
@@ -437,6 +482,7 @@ fn check_relationships_reachable(
                 rule: Rule::L001,
                 environment: Some(env.id.clone()),
                 subject: rel.id.clone(),
+                end: None,
                 detail: format!("邏輯連線 {} 在環境 {} 沒有任何實際連線", rel.slug, env.slug),
             });
             continue;
@@ -465,6 +511,7 @@ fn check_relationships_reachable(
                 rule: Rule::L002,
                 environment: Some(env.id.clone()),
                 subject: rel.id.clone(),
+                end: None,
                 detail: format!(
                     "邏輯連線 {} 在環境 {} 走不通：從來源出發到不了目標",
                     rel.slug, env.slug
@@ -579,6 +626,7 @@ fn check_orphan_instances(env: &Environment, index: &EnvIndex<'_>, findings: &mu
             rule: Rule::L008,
             environment: Some(env.id.clone()),
             subject: instance.id.clone(),
+            end: None,
             detail: format!("Instance {} 沒有被任何連線碰到", instance.slug),
         });
     }
@@ -591,6 +639,7 @@ fn check_orphan_instances(env: &Environment, index: &EnvIndex<'_>, findings: &mu
             rule: Rule::L008,
             environment: Some(env.id.clone()),
             subject: system.id.clone(),
+            end: None,
             detail: format!("外部系統 {} 沒有被任何連線碰到", system.slug),
         });
     }
