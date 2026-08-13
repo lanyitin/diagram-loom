@@ -43,6 +43,7 @@ use loom_core::plan::{self, Plan};
 use loom_core::repository;
 use loom_core::resource::{self, Kind, Resource};
 use loom_core::table::{self, Row};
+use loom_core::wiring;
 use serde::Serialize;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands};
@@ -444,6 +445,28 @@ fn save_project(state: State<'_>) -> Result<Snapshot, Failure> {
     Ok(snapshot(root, history))
 }
 
+/// 一個環境裡的連線展開成圖上要畫的線。
+///
+/// # 為什麼是獨立的 command，不塞進 [`Snapshot`]
+///
+/// 萬用字元是 N×M——12 台連 12 台就是 144 條。整份專案的展開結果
+/// 可能比模型本身還大，而它只有「圖」這個檢視在看。塞進 snapshot 的話
+/// 每一次編輯都要付這個代價。
+#[tauri::command]
+#[specta::specta]
+fn diagram_links(
+    state: State<'_>,
+    environment: loom_core::id::Id,
+) -> Result<Vec<wiring::Link>, Failure> {
+    let mut opened = lock_state(&state)?;
+    let (_, history) = opened_project(&mut opened)?;
+    let project = history.project();
+    let env = project.environment(&environment).ok_or_else(|| Failure {
+        message: format!("找不到環境 {environment}"),
+    })?;
+    Ok(wiring::links(project, env))
+}
+
 /// 打開給 AI Agent 用的本機端點。
 ///
 /// 判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
@@ -566,6 +589,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         connection_choices,
         preview_batch,
         resource_tables,
+        diagram_links,
         blank_resource,
         create_project,
         start_mcp,

@@ -38,6 +38,7 @@ pub mod resource;
 pub mod slug;
 pub mod store;
 pub mod table;
+pub mod wiring;
 
 use crate::environment::Environment;
 use crate::id::Id;

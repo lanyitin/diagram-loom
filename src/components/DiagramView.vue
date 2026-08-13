@@ -18,8 +18,10 @@
  * 而嵌入協定本來就是為跨來源設計的，主視窗的 CSP 也因此不會意外綁住它。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
 import { boundShapes, toXml } from '../lib/diagram'
+import type { Link } from '../lib/model'
 
 const store = useProject()
 
@@ -35,6 +37,15 @@ const PARAMS =
 const frame = ref<HTMLIFrameElement | null>(null)
 const ready = ref(false)
 const status = ref('')
+const links = ref<Link[]>([])
+const drawing = ref(false)
+
+/**
+ * 一條萬用字元連線是 N×M 條線——12 台連 12 台就是 144 條。
+ * 超過這個數字，圖已經沒有人讀得動了，該用篩選（尚未實作）而不是硬畫。
+ */
+const TOO_MANY = 600
+const tooMany = computed(() => links.value.length > TOO_MANY)
 
 /** 現在畫的是哪個環境。沒勾就畫第一個——一張圖只屬於一個環境。 */
 const environment = computed(() => store.visibleEnvironments[0] ?? store.environments[0] ?? null)
@@ -43,12 +54,27 @@ function send(message: unknown) {
   frame.value?.contentWindow?.postMessage(JSON.stringify(message), '*')
 }
 
-function loadModel() {
+async function loadModel() {
   const env = environment.value
-  if (!ready.value || !env || !store.snapshot) return
+  if (!ready.value || !env || !store.snapshot || drawing.value) return
+
+  drawing.value = true
+  try {
+    // 萬用字元展開成哪幾台是模型知識，所以由 Rust 算（`wiring.rs`）。
+    // 在這裡自己比對一次 slug，就會養出第二套「什麼叫比對得上」。
+    const res = await commands.diagramLinks(env.id)
+    if (res.status !== 'ok') {
+      store.error = (res.error as { message?: string })?.message ?? String(res.error)
+      return
+    }
+    links.value = res.data
+  } finally {
+    drawing.value = false
+  }
+
   send({
     action: 'load',
-    xml: toXml(store.snapshot.project, env),
+    xml: toXml(store.snapshot.project, env, links.value),
     // 沒有 save 事件，所以靠 autosave 才知道使用者動了什麼。
     autosave: 1,
   })
@@ -109,9 +135,15 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
     <template v-else>
       <div class="bar">
         <span class="muted">{{ environment.slug }}</span>
+        <span class="muted small">{{ links.length }} 條線</span>
+        <!-- 萬用字元是 N×M，所以「幾條連線」跟「圖上幾條線」差很多。
+             不講的話使用者只會覺得圖突然變成一團毛線，不知道為什麼。 -->
+        <span v-if="tooMany" class="warn small">
+          太多了，這張圖已經讀不動——篩選功能還沒做
+        </span>
         <span class="grow" />
         <span class="muted small">{{ status }}</span>
-        <button :disabled="!ready" @click="loadModel()">重畫</button>
+        <button :disabled="!ready || drawing" @click="loadModel()">重畫</button>
       </div>
       <iframe
         ref="frame"
@@ -138,6 +170,7 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
 .small { font-size: 11.5px; }
 
 .editor { flex: 1; min-height: 0; border: 0; width: 100%; }
+.warn { color: var(--broken); }
 
 .empty { padding: 40px 24px; text-align: center; max-width: 46ch; margin: 0 auto; line-height: 1.7; }
 </style>

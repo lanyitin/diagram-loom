@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { boundShapes, shapesOf, toXml } from './diagram'
-import type { Environment, Project } from './model'
+import { boundShapes, peopleOf, shapesOf, toXml } from './diagram'
+import type { Environment, Link, Project } from './model'
 
 function project(): Project {
   return {
@@ -21,7 +21,7 @@ function project(): Project {
     slug: 'shop',
     name: '網路商店',
     logical: {
-      people: [],
+      people: [{ id: 'per-1', slug: '客戶', name: '客戶' }],
       systems: [
         { id: 's-shop', slug: 'shop', name: '商店', external: false, endpoints: [] },
         { id: 's-pay', slug: 'payment', name: '金流系統', external: true, endpoints: [] },
@@ -70,6 +70,18 @@ function environment(): Environment {
   } as unknown as Environment
 }
 
+function link(over: Partial<Link>): Link {
+  return {
+    connection: 'conn-1',
+    from: 'i-redis',
+    to: 'n-f5',
+    fromPerson: false,
+    kind: 'primary',
+    purpose: '查快取',
+    ...over,
+  } as Link
+}
+
 describe('模型畫成圖', () => {
   it('每一種模型元素都畫得出來', () => {
     const shapes = shapesOf(project(), environment())
@@ -88,6 +100,19 @@ describe('模型畫成圖', () => {
     for (const s of shapesOf(project(), environment())) {
       expect(s.loomId, `${s.label} 沒有 loomId`).toBeTruthy()
     }
+  })
+
+  it('人刻意沒有 loomId', () => {
+    // 人住邏輯層、沒有落地，不在 reconcile::model_elements 裡。
+    // 給了 loomId 對帳就會說「圖上有這個、模型沒有」——一個假的缺漏。
+    const [actor] = peopleOf(project(), [link({ from: 'per-1', fromPerson: true })])
+    expect(actor!.id).toBe('per-1')
+    expect(actor!.loomId).toBeUndefined()
+  })
+
+  it('沒被連線用到的人不畫', () => {
+    // 部署圖上不該冒出一堆跟這個環境無關的角色。
+    expect(peopleOf(project(), [])).toEqual([])
   })
 
   it('同一個 loomId 不會出現兩次', () => {
@@ -116,6 +141,59 @@ describe('模型畫成圖', () => {
     const shapes = shapesOf(project(), environment())
     expect(shapes.find((s) => s.loomId === 'si-pay')!.style).toContain('dashed=1')
     expect(shapes.find((s) => s.loomId === 'i-redis')!.style).not.toContain('dashed=1')
+  })
+})
+
+describe('線', () => {
+  it('一條連線畫成一條線', () => {
+    const xml = toXml(project(), environment(), [link({})])
+    expect(xml).toContain('edge="1"')
+    expect(xml).toContain('loomKind="connection"')
+  })
+
+  it('萬用字元的 N×M 全部畫出來，共用同一個 loomId', () => {
+    // 3 台連 3 台是 9 條。lint 的可達性 BFS 就是這樣建圖的——
+    // 畫 1 條會讓人以為只有一對在通。
+    const links = [
+      link({ from: 'i-redis', to: 'n-f5' }),
+      link({ from: 'i-redis', to: 'si-pay' }),
+    ]
+    const xml = toXml(project(), environment(), links)
+    expect(xml.match(/edge="1"/g)).toHaveLength(2)
+    expect(xml.match(/loomId="conn-1"/g)).toHaveLength(2)
+  })
+
+  it('同一條連線的每條線，XML id 都不一樣', () => {
+    // 重複的 id 會讓 draw.io 只留一條，圖上就看起來少畫了。
+    const links = [
+      link({ from: 'i-redis', to: 'n-f5' }),
+      link({ from: 'i-redis', to: 'si-pay' }),
+    ]
+    const xml = toXml(project(), environment(), links)
+    const ids = [...xml.matchAll(/id="(conn-1:[^"]+)"/g)].map((m) => m[1])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('兩端畫不出來的線就不畫', () => {
+    // 指向不存在的形狀的線會變成一條飄在畫布上的浮線，
+    // 看起來像連到別的地方——比不畫更糟。
+    const xml = toXml(project(), environment(), [link({ to: '不存在' })])
+    expect(xml).not.toContain('edge="1"')
+  })
+
+  it('備援線看得出來跟平常的不一樣', () => {
+    // 一樣要建、防火牆一樣要開，但畫成一樣重的話讀不出主路徑。
+    const xml = toXml(project(), environment(), [link({ kind: 'fallback' })])
+    expect(xml).toMatch(/style="[^"]*dashed=1[^"]*"[^>]*edge="1"/)
+  })
+
+  it('人被連線用到時，圖上長出一個角色', () => {
+    const xml = toXml(project(), environment(), [
+      link({ from: 'per-1', fromPerson: true }),
+    ])
+    expect(xml).toContain('umlActor')
+    // 但它不帶 loomId，對帳看不見。
+    expect(xml).not.toContain('loomId="per-1"')
   })
 })
 
@@ -162,6 +240,17 @@ describe('XML', () => {
 })
 
 describe('從圖上讀回 loomId', () => {
+  it('同一條連線的 N×M 條線只算一次', () => {
+    // 模型側每條連線只有一個元素。不去重的話同一條會被數很多次，
+    // 對帳的衝突判斷跟著錯。
+    const links = [
+      link({ from: 'i-redis', to: 'n-f5' }),
+      link({ from: 'i-redis', to: 'si-pay' }),
+    ]
+    const xml = toXml(project(), environment(), links)
+    expect(boundShapes(xml).filter((s) => s.id === 'conn-1')).toHaveLength(1)
+  })
+
   it('挖得出來，而且只挖有綁定的', () => {
     // 沒有 loomId 的形狀是使用者自己畫的裝飾，對帳不該把它當成缺漏。
     const xml = `<mxfile><diagram><mxGraphModel><root>

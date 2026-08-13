@@ -31,6 +31,7 @@ export type {
   Id,
   Impact,
   Kind,
+  Link,
   Matrix,
   McpStatus,
   NodeKind,

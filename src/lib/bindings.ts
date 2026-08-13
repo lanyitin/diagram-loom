@@ -55,6 +55,16 @@ export const commands = {
 	 */
 	resourceTables: (environment: string | null) => typedError<Table_Serialize[], Failure>(__TAURI_INVOKE("resource_tables", { environment })),
 	/**
+	 *  一個環境裡的連線展開成圖上要畫的線。
+	 * 
+	 *  # 為什麼是獨立的 command，不塞進 [`Snapshot`]
+	 * 
+	 *  萬用字元是 N×M——12 台連 12 台就是 144 條。整份專案的展開結果
+	 *  可能比模型本身還大，而它只有「圖」這個檢視在看。塞進 snapshot 的話
+	 *  每一次編輯都要付這個代價。
+	 */
+	diagramLinks: (environment: Id) => typedError<Link[], Failure>(__TAURI_INVOKE("diagram_links", { environment })),
+	/**
 	 *  一個空白的新資源，給表單當起點。
 	 * 
 	 *  id 在這裡就發好，所以 `apply` 是決定性的——復原之後重做會得到
@@ -1128,6 +1138,30 @@ export type InstanceRef_Serialize =
 
 /**  [`blank`] 要建哪一種。跟 [`Resource`] 分開，因為前端要先選種類才有內容。 */
 export type Kind = "person" | "system" | "container" | "endpointDef" | "relationship" | "environment" | "node" | "infra" | "infraEndpoint" | "systemInstance";
+
+/**
+ *  圖上的一條線。
+ * 
+ *  `connection` **會重複**——一條萬用字元連線長出好幾條線。圖上的形狀
+ *  靠 `loomId` 唯一，線不靠。對帳那邊在收下之前會依 `connection` 去重。
+ */
+export type Link = {
+	/**  這條線屬於哪條實際連線。 */
+	connection: Id,
+	/**  起點的形狀 id。 */
+	from: Id,
+	/**  終點的形狀 id。 */
+	to: Id,
+	/**  起點是不是「人」。人不住在環境裡，圖上要另外補一個形狀。 */
+	fromPerson: boolean,
+	/**
+	 *  備援線在圖上要看得出來——它一樣要建、防火牆一樣要開，
+	 *  但把它跟平常的資料流畫成一樣重，圖會很吵而且讀不出主路徑。
+	 */
+	kind: ConnectionKind,
+	/**  線上的字。空白會被 L007 叫。 */
+	purpose: string,
+};
 
 /**  邏輯層的全部內容。 */
 export type Logical = Logical_Serialize | Logical_Deserialize;
