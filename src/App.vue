@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useProject } from './lib/store'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
+import CloseGuard from './components/CloseGuard.vue'
 import DeleteConfirm from './components/DeleteConfirm.vue'
 import EnvPicker from './components/EnvPicker.vue'
 import ImportWizard from './components/ImportWizard.vue'
@@ -90,7 +91,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
 
         <!-- 聚焦是從 lint 面板點過來的暫時狀態。看不見的篩選會讓人以為
              表格漏了東西，所以它必須寫在畫面上，而且一鍵拿得掉。 -->
-        <button v-if="store.聚焦" class="focus" @click="store.聚焦 = null">
+        <button v-if="store.聚焦 && store.檢視 === '連線表'" class="focus" @click="store.聚焦 = null">
           <span class="mono">{{ store.聚焦.label }}</span>
           <span class="x">✕</span>
         </button>
@@ -132,6 +133,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
 
     <ImportWizard v-if="store.匯入中" />
     <DeleteConfirm />
+    <CloseGuard />
   </div>
 </template>
 

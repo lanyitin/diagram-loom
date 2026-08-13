@@ -178,7 +178,7 @@ connections:
   to: !instance
     target: !pattern
       slug_pattern: common-*
-      expect: 2
+      expect: 1
     endpoint: e-common
 - id: conn-test-08
   serves: r-gateway-連-db

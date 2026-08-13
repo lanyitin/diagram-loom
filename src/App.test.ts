@@ -18,6 +18,12 @@ import { useProject } from './lib/store'
 import type { Snapshot } from './lib/model'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onCloseRequested: () => Promise.resolve(() => {}),
+    destroy: vi.fn(),
+  }),
+}))
 vi.mock('./lib/bindings', () => ({
   commands: {
     openProject: vi.fn(),
