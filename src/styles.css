@@ -42,6 +42,8 @@
    * **點得到跟看得到一樣重要**。
    */
   --zoom: 1;
+  /* --zoom 的倒數，由 ui.ts 一起算好。內嵌的 draw.io 用它抵銷縮放。 */
+  --unzoom: 1;
 }
 
 @media (prefers-color-scheme: dark) {

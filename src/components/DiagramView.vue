@@ -280,13 +280,18 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
   /*
    * 把介面縮放抵銷掉。
    *
-   * `#app` 上的 `zoom` 會一路蓋到 iframe，而 draw.io 用絕對像素在算它自己的
-   * 面板寬度——被 zoom 一乘，右邊的格式面板就會被擠成一條，只剩幾個核取方塊。
+   * `#app` 上的 `zoom` 會一路蓋到 iframe。draw.io 的版面是 CSS grid，
+   * 右邊那欄寫死 240px——它**沒有被擠扁，是被裁掉了**：iframe 內部的版面
+   * 比外面的框寬 15%，多出來的部分落在框外被 `overflow: hidden` 切掉，
+   * 所以只看得到格式面板最左邊那一條。
    *
-   * draw.io 有自己的縮放（右下角、⌘＋），所以這裡不需要我們的那一份。
-   * 這是 `zoom` 第二次咬人了，第一次是底下那條黑帶。
+   * draw.io 有自己的縮放（右下角、⌘＋），不需要我們這一份。
+   *
+   * ⚠️ 倒數在 `ui.ts` 算好，**不要寫成 `calc(1 / var(--zoom))`**：`zoom` 是個
+   * 老屬性，吃不吃 `calc()` 各家不一致，而解析失敗是靜悄悄的——整條被丟掉，
+   * 畫面照舊壞，看不出是這裡的問題。
    */
-  zoom: calc(1 / var(--zoom));
+  zoom: var(--unzoom);
 }
 
 .hint {

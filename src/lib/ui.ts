@@ -39,5 +39,15 @@ export function load(): Scale {
 export function apply(scale: Scale) {
   const zoom = SCALES.find((s) => s.value === scale)?.zoom ?? 1
   document.documentElement.style.setProperty('--zoom', String(zoom))
+  /*
+   * 倒數也一起算好。內嵌的 draw.io 要靠它把這份縮放抵銷掉
+   * （見 `DiagramView.vue`）。
+   *
+   * 為什麼不在 CSS 裡寫 `zoom: calc(1 / var(--zoom))`：`zoom` 是個老屬性，
+   * 各家對它吃不吃 `calc()` 沒有一致的答案。**解析失敗是靜悄悄的**——
+   * 那一行會被整條丟掉，畫面照舊壞，而你完全看不出是這裡的問題。
+   * 在這裡算好一個純數字就沒有這個風險。
+   */
+  document.documentElement.style.setProperty('--unzoom', String(1 / zoom))
   localStorage.setItem(KEY, scale)
 }

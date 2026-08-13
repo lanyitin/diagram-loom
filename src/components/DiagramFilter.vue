@@ -13,7 +13,7 @@
  * 連線數 0 的契約留在清單裡（Rust 那邊也刻意這樣做）。它從清單消失的話
  * 就永遠不會被勾到，而「這個環境少了什麼」正是這工具存在的理由。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Contract } from '../lib/model'
 
 const props = defineProps<{
@@ -30,6 +30,14 @@ const emit = defineEmits<{
   (e: 'update:problems', value: boolean): void
 }>()
 
+/**
+ * 收起來。draw.io 自己也有兩片面板要佔位置，三片一起擠的話畫布只剩中間一條。
+ *
+ * 收起來之後**篩選還在作用**，所以收合鈕上要標「還篩著幾條」——
+ * 不然使用者會忘記自己篩過，然後以為圖上就只有這些東西。
+ */
+const collapsed = ref(false)
+
 const filtering = computed(() => props.picked.length > 0 || props.problems)
 const broken = computed(() => props.contracts.filter((c) => c.problems).length)
 
@@ -42,7 +50,17 @@ function toggle(id: string) {
 </script>
 
 <template>
-  <aside class="panel">
+  <!-- 收起來的樣子。還篩著的話要在這裡講，不然使用者會忘記自己篩過。 -->
+  <button v-if="collapsed" class="tab" :title="filtering ? '篩選還在作用' : '打開篩選'" @click="collapsed = false">
+    <span class="glyph">☰</span>
+    <span v-if="filtering" class="on">{{ lit }}/{{ total }}</span>
+  </button>
+
+  <aside v-else class="panel">
+    <div class="top">
+      <strong class="title">篩選</strong>
+      <button class="link" @click="collapsed = true">收起</button>
+    </div>
     <label class="check lead">
       <input
         type="checkbox" :checked="problems"
@@ -85,6 +103,31 @@ function toggle(id: string) {
 </template>
 
 <style scoped>
+.tab {
+  flex: none;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  background: var(--surface-2);
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.tab .glyph { font-size: 14px; }
+.tab .on {
+  writing-mode: vertical-rl;
+  font-size: 10.5px;
+  color: var(--warp);
+  font-variant-numeric: tabular-nums;
+}
+
+.top { display: flex; align-items: baseline; gap: 8px; }
+.title { flex: 1; font-size: 12.5px; }
+
 .panel {
   width: 240px;
   flex: none;
