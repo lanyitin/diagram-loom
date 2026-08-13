@@ -43,9 +43,9 @@ struct Server {
     _runtime: tokio::runtime::Runtime,
 }
 
-fn start(token: &str) -> Server {
+fn start(token: Option<&str>) -> Server {
     let spy = Arc::new(Spy(Mutex::new(Vec::new())));
-    let app = router_for_test(token, spy.clone());
+    let app = router_for_test(token.map(str::to_string), spy.clone());
 
     let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -181,7 +181,7 @@ fn with_headers(headers: &[(String, String)]) -> Vec<(&str, &str)> {
 
 #[test]
 fn a_real_client_can_initialise_and_list_tools() {
-    let server = start(TOKEN);
+    let server = start(Some(TOKEN));
     let headers = handshake(&server, TOKEN);
 
     let (status, body) = post(
@@ -198,7 +198,7 @@ fn a_real_client_can_initialise_and_list_tools() {
 
 #[test]
 fn a_tool_call_reaches_the_workspace() {
-    let server = start(TOKEN);
+    let server = start(Some(TOKEN));
     let headers = handshake(&server, TOKEN);
 
     let (status, body) = post(
@@ -226,7 +226,7 @@ fn a_tool_call_reaches_the_workspace() {
 fn a_tool_failure_comes_back_as_a_result_not_a_protocol_error() {
     // 回成協定層錯誤的話多數客戶端會直接中斷，模型連修正的機會都沒有。
     // 而這裡的錯誤訊息全都是寫來讓它自己修正的。
-    let server = start(TOKEN);
+    let server = start(Some(TOKEN));
     let headers = handshake(&server, TOKEN);
 
     let (status, body) = post(
@@ -248,8 +248,36 @@ mod the_door_is_locked {
     use super::*;
 
     #[test]
+    fn without_a_token_anyone_local_gets_in() {
+        // 使用者可以關掉 token 檢查。關掉之後就真的不檢查——
+        // 這是刻意的取捨，不是漏洞（見 mcp.rs 的說明）。
+        let server = start(None);
+        let (status, body) = post(
+            &server,
+            &[],
+            &json!({"jsonrpc":"2.0","id":1,"method":"initialize",
+                    "params":{"protocolVersion":"2025-06-18","capabilities":{},
+                              "clientInfo":{"name":"t","version":"0"}}}),
+        );
+        assert_eq!(status, 200, "{body}");
+    }
+
+    #[test]
+    fn a_browser_is_still_blocked_even_with_the_token_check_off() {
+        // 這一道**不可關**。使用者關掉的是 token，不是「讓網頁進來」。
+        let server = start(None);
+        let (status, _) = post(
+            &server,
+            &[("Origin", "https://evil.example")],
+            &json!({"jsonrpc":"2.0","id":1,"method":"initialize"}),
+        );
+        assert_eq!(status, 403);
+        assert!(server.spy.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn no_token_is_rejected() {
-        let server = start(TOKEN);
+        let server = start(Some(TOKEN));
         let (status, _) = post(
             &server,
             &[],
@@ -264,7 +292,7 @@ mod the_door_is_locked {
 
     #[test]
     fn a_wrong_token_is_rejected() {
-        let server = start(TOKEN);
+        let server = start(Some(TOKEN));
         let (status, _) = post(
             &server,
             &[("Authorization", "Bearer wrong-token")],
@@ -277,7 +305,7 @@ mod the_door_is_locked {
     fn a_request_from_a_browser_is_rejected_even_with_the_right_token() {
         // 本機端點對網頁來說也是可達的（DNS rebinding）。原生的 MCP 客戶端
         // 不會送 Origin，所以「有 Origin 就拒絕」是一條乾淨的界線。
-        let server = start(TOKEN);
+        let server = start(Some(TOKEN));
         let (status, _) = post(
             &server,
             &[

@@ -2,17 +2,16 @@
 /**
  * 讓 AI Agent 接進來。
  *
- * # 為什麼預設關閉，而且要按一下才看得到 token
+ * # 設定是 App 層級的
  *
- * 打開之後，本機會多一個**可以改你檔案的端點**。那不是一個該安靜發生的事。
+ * 埠、token、自動啟用都跟著**這台機器**，不跟著專案。理由是
+ * Agent 那邊的設定裡只有一個 URL——跟著專案走的話，切一次專案
+ * 那份設定就失效，而「不用每次重貼」正是這些設定存在的唯一理由。
  *
- * token 每次啟用重新產生、不存檔——關掉 App 就該預期這個門關了。
- * 所以這裡也不「記住上次的設定」：下次要用就再打開一次。
+ * # 三道鎖，只有一道可以關
  *
- * # Agent 改的東西不會自動存檔
- *
- * 它走的是跟畫面同一條復原鏈，所以你看得到、退得掉、要存才存。
- * 這句話寫在畫面上，因為那是使用者最需要先知道的事。
+ * 綁 `127.0.0.1` 與擋 `Origin` 是無條件的。token 可以關掉，
+ * 而畫面上要直說關掉之後少了什麼——不能讓人以為自己還有三道。
  */
 import { ref, watch } from 'vue'
 import { commands } from '../lib/bindings'
@@ -21,13 +20,58 @@ import type { McpStatus } from '../lib/model'
 
 const store = useProject()
 
-const status = ref<McpStatus>({ running: false, url: null })
+const status = ref<McpStatus>({
+  running: false, url: null, preferredPort: null, requireToken: true, autostart: false,
+})
 const config = ref<string | null>(null)
 const copied = ref(false)
 
+/** 埠的輸入框。空字串＝交給作業系統挑。 */
+const portInput = ref('')
+
+function take(next: McpStatus) {
+  status.value = next
+  portInput.value = next.preferredPort === null ? '' : String(next.preferredPort)
+}
+
 async function refresh() {
   const res = await commands.mcpStatus()
-  if (res.status === 'ok') status.value = res.data
+  if (res.status === 'ok') take(res.data)
+  if (status.value.running) await reveal()
+}
+
+/** 改設定。端點在跑的話 Rust 那邊會重開——埠與 token 是啟動時決定的。 */
+async function apply(next: Partial<{ port: number | null; requireToken: boolean; autostart: boolean }>) {
+  const port = 'port' in next ? next.port! : parsePort()
+  const res = await commands.setMcpConfig(
+    port,
+    next.requireToken ?? status.value.requireToken,
+    next.autostart ?? status.value.autostart,
+  )
+  if (res.status !== 'ok') {
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
+    await refresh()
+    return
+  }
+  take(res.data)
+  copied.value = false
+  if (status.value.running) await reveal()
+}
+
+function parsePort(): number | null {
+  const n = Number(portInput.value.trim())
+  return portInput.value.trim() === '' || !Number.isInteger(n) || n < 1 || n > 65535 ? null : n
+}
+
+async function regenerate() {
+  const res = await commands.regenerateMcpToken()
+  if (res.status !== 'ok') {
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
+    return
+  }
+  take(res.data)
+  copied.value = false
+  if (status.value.running) await reveal()
 }
 
 watch(() => store.agentPanelOpen, (open) => { if (open) void refresh() }, { immediate: true })
@@ -38,7 +82,7 @@ async function toggle() {
     store.error = (res.error as { message?: string })?.message ?? String(res.error)
     return
   }
-  status.value = res.data
+  take(res.data)
   config.value = null
   copied.value = false
   if (status.value.running) await reveal()
@@ -71,8 +115,40 @@ async function copy() {
         <span>{{ status.running ? '已開啟' : '關閉中' }}</span>
       </label>
 
+      <div class="settings">
+        <label class="field">
+          <span>埠</span>
+          <input
+            v-model="portInput" type="text" inputmode="numeric" class="mono"
+            placeholder="留空＝每次由系統挑" @change="apply({})"
+          >
+        </label>
+        <p class="muted tip">
+          固定一個埠，Agent 那邊的設定就不必每次重開都重貼。被別的程式佔用時會直接報錯，
+          <strong>不會偷偷換一個</strong>——偷偷換的話你的設定會安靜地連到空氣。
+        </p>
+
+        <label class="check">
+          <input
+            type="checkbox" :checked="status.requireToken"
+            @change="apply({ requireToken: ($event.target as HTMLInputElement).checked })"
+          >
+          需要 token
+        </label>
+        <label class="check">
+          <input
+            type="checkbox" :checked="status.autostart"
+            @change="apply({ autostart: ($event.target as HTMLInputElement).checked })"
+          >
+          開啟 App 時自動啟用
+        </label>
+      </div>
+
       <template v-if="status.running">
-        <p class="muted small">把這一段貼進 Agent 的 MCP 設定裡：</p>
+        <div class="row">
+          <p class="muted small grow">把這一段貼進 Agent 的 MCP 設定裡：</p>
+          <button v-if="status.requireToken" @click="regenerate()">換一組 token</button>
+        </div>
         <pre class="mono config">{{ config ?? '取得中…' }}</pre>
         <div class="row">
           <button :disabled="!config" @click="copy()">{{ copied ? '已複製' : '複製設定' }}</button>
@@ -80,10 +156,15 @@ async function copy() {
         </div>
       </template>
 
-      <!-- 這兩件事使用者一定要先知道，不能藏在文件裡。 -->
+      <!-- 這幾件事使用者一定要先知道，不能藏在文件裡。 -->
       <ul class="notes">
         <li><strong>不會自動存檔。</strong>Agent 改的東西會標成「未儲存」，你看過再決定；⌘Z 也退得掉。</li>
-        <li><strong>只有這台機器連得到</strong>，而且需要上面那組 token。關掉 App 這個門就關了。</li>
+        <li><strong>只有這台機器連得到，而且瀏覽器裡的網頁打不到。</strong>這兩道關不掉。</li>
+        <li v-if="!status.requireToken" class="warn">
+          <strong>token 檢查是關的。</strong>這台機器上的<strong>任何</strong>程式都能改這份專案。
+          單人使用的機器影響不大（那些程式本來就讀得到你的檔案），
+          但共用的機器上別關。
+        </li>
       </ul>
 
       <footer>
@@ -135,6 +216,17 @@ p { margin: 0; }
   user-select: text;
 }
 .row { display: flex; align-items: center; gap: 10px; }
+.grow { flex: 1; }
+
+.settings { display: flex; flex-direction: column; gap: 8px; }
+.field { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.field > span { width: 2.5em; flex: none; color: var(--ink-2); }
+.field input { width: 12em; }
+.tip { font-size: 11.5px; line-height: 1.6; color: var(--ink-3); }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.check input { accent-color: var(--warp); }
+
+.notes .warn { color: var(--broken); }
 
 .notes {
   margin: 0;

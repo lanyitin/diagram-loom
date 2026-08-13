@@ -86,6 +86,14 @@ export const commands = {
 	 */
 	mcpConfig: () => typedError<string | null, Failure>(__TAURI_INVOKE("mcp_config")),
 	/**
+	 *  改 AI 助手的偏好：埠、要不要 token、要不要自動啟用。
+	 * 
+	 *  端點正在跑的話會重開——埠與 token 都是啟動時決定的。
+	 */
+	setMcpConfig: (port: number | null, requireToken: boolean, autostart: boolean) => typedError<McpStatus, Failure>(__TAURI_INVOKE("set_mcp_config", { port, requireToken, autostart })),
+	/**  換一組新的 token。舊的立刻失效。 */
+	regenerateMcpToken: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("regenerate_mcp_token")),
+	/**
 	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
 	 * 
 	 *  前端送回來的是**發現本身 + 使用者填了什麼**，不是 [`Edit`]——
@@ -1151,12 +1159,16 @@ export type Matrix = {
 };
 
 /**
- *  前端要顯示的狀態。**不含 token**——狀態會被畫面到處傳，
+ *  前端要顯示的東西。**不含 token**——狀態會被畫面到處傳，
  *  而 token 只該在使用者主動要求時出現一次（見 [`config_snippet`]）。
  */
 export type McpStatus = {
 	running: boolean,
 	url: string | null,
+	/**  想用的埠。`None` 表示交給作業系統挑。 */
+	preferredPort: number | null,
+	requireToken: boolean,
+	autostart: boolean,
 };
 
 /**  運算載體的種類。 */

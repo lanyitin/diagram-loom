@@ -460,6 +460,27 @@ fn mcp_status(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
     mcp::status_of(&app).map_err(Into::into)
 }
 
+/// 改 AI 助手的偏好：埠、要不要 token、要不要自動啟用。
+///
+/// 端點正在跑的話會重開——埠與 token 都是啟動時決定的。
+#[tauri::command]
+#[specta::specta]
+fn set_mcp_config(
+    app: tauri::AppHandle,
+    port: Option<u16>,
+    require_token: bool,
+    autostart: bool,
+) -> Result<mcp::McpStatus, Failure> {
+    mcp::set_config(&app, port, require_token, autostart).map_err(Into::into)
+}
+
+/// 換一組新的 token。舊的立刻失效。
+#[tauri::command]
+#[specta::specta]
+fn regenerate_mcp_token(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
+    mcp::regenerate_token(&app).map_err(Into::into)
+}
+
 /// 給使用者複製到 Agent 設定檔裡的那一段 JSON。**含 token。**
 ///
 /// token 只從這裡出去，狀態查詢不會帶——狀態會被畫面到處傳，
@@ -492,6 +513,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         stop_mcp,
         mcp_status,
         mcp_config,
+        set_mcp_config,
+        regenerate_mcp_token,
         apply_fix,
         undo,
         redo
@@ -508,6 +531,10 @@ pub fn run() {
             builder.mount_events(app);
             app.manage(Mutex::new(Opened::default()));
             app.manage(Mutex::new(mcp::Server::default()));
+            // 使用者上次打開過就自動打開。一個每次都要重設的偏好等於沒有偏好。
+            if mcp::config(&app.handle().clone()).autostart {
+                let _ = mcp::start(&app.handle().clone());
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

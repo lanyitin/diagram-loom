@@ -48,6 +48,8 @@ vi.mock('./lib/bindings', () => ({
     startMcp: vi.fn(),
     stopMcp: vi.fn(),
     mcpConfig: vi.fn(),
+    setMcpConfig: vi.fn(),
+    regenerateMcpToken: vi.fn(),
   },
 }))
 
