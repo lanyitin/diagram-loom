@@ -23,6 +23,18 @@ pub enum NodeKind {
     LinuxContainer,
 }
 
+impl std::fmt::Display for NodeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            NodeKind::Site => "站點",
+            NodeKind::Physical => "實體機",
+            NodeKind::VirtualMachine => "虛擬機",
+            NodeKind::LinuxContainer => "Linux 容器",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Endpoint 在某環境的實際樣貌：定義加上位址。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -112,7 +124,6 @@ pub struct InfrastructureNode {
     pub endpoints: Vec<Endpoint>,
 }
 
-/// 連線一端指向的 Instance：可以是一個，也可以是一整群。
 /// 連線的哪一端。
 ///
 /// # 為什麼需要指名
@@ -141,6 +152,7 @@ impl std::fmt::Display for ConnectionEnd {
     }
 }
 
+/// 連線一端指向的 Instance：可以是一個，也可以是一整群。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]

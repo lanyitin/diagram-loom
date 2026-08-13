@@ -44,6 +44,19 @@ pub enum Rule {
     L007,
     /// 某 Instance 沒有被任何連線碰到。
     L008,
+    /// 模型元素指向一個不存在的模型元素。
+    ///
+    /// # 為什麼需要一條獨立的規則
+    ///
+    /// L003 管的是「**連線**指到不存在的東西」。但元素之間也互相指：
+    /// 落地指著服務、契約指著服務與接點、接點指著接點定義。
+    ///
+    /// 沒有這條的話，刪掉一個服務會**安靜地**留下一批指著空氣的落地——
+    /// lint 一句話都不說，而那正是這個工具存在要抓的東西。
+    /// 所以它是「可以刪除邏輯層元素」的前置條件，不是加分項。
+    ///
+    /// 代號接在 draw.io 那三條（L009–L011）後面，是因為那三條先被寫進文件。
+    L012,
 }
 
 impl Rule {
@@ -57,12 +70,15 @@ impl Rule {
             Rule::L006 => "L006",
             Rule::L007 => "L007",
             Rule::L008 => "L008",
+            Rule::L012 => "L012",
         }
     }
 
     pub fn severity(self) -> Severity {
         match self {
-            Rule::L001 | Rule::L002 | Rule::L003 | Rule::L004 | Rule::L006 => Severity::Error,
+            Rule::L001 | Rule::L002 | Rule::L003 | Rule::L004 | Rule::L006 | Rule::L012 => {
+                Severity::Error
+            }
             Rule::L005 | Rule::L007 | Rule::L008 => Severity::Warning,
         }
     }
@@ -130,6 +146,8 @@ pub fn lint(project: &Project) -> Vec<Finding> {
         }
     }
 
+    check_logical_references(project, &mut findings);
+
     for env in &project.environments {
         lint_environment(project, env, &mut findings);
     }
@@ -147,6 +165,169 @@ fn lint_environment(project: &Project, env: &Environment, findings: &mut Vec<Fin
     check_endpoint_addresses(env, &index, findings);
     check_relationships_reachable(project, env, &index, findings);
     check_orphan_instances(env, &index, findings);
+    check_environment_references(project, env, findings);
+}
+
+/// L012（邏輯層）：契約與服務指到的東西要真的存在。
+///
+/// 這一整組是「刪除」的安全網。使用者刪掉一個服務之後，指著它的東西
+/// 不會自己消失——但至少要**叫出來**，而不是安靜地留在專案裡。
+fn check_logical_references(project: &Project, findings: &mut Vec<Finding>) {
+    let logical = &project.logical;
+
+    for c in &logical.containers {
+        if !logical.systems.iter().any(|s| s.id == c.system) {
+            findings.push(Finding {
+                rule: Rule::L012,
+                environment: None,
+                subject: c.id.clone(),
+                end: None,
+                detail: format!("服務 {} 屬於一個不存在的系統 {}", c.slug, c.system),
+            });
+        }
+    }
+
+    for rel in &logical.relationships {
+        for (end, which) in [
+            (&rel.from, ConnectionEnd::From),
+            (&rel.to, ConnectionEnd::To),
+        ] {
+            if let Some(缺的) = 契約端不存在(logical, end) {
+                findings.push(Finding {
+                    rule: Rule::L012,
+                    environment: None,
+                    subject: rel.id.clone(),
+                    end: Some(which),
+                    detail: format!("契約 {} 的{which}端指向不存在的{缺的}", rel.slug),
+                });
+            }
+        }
+
+        // `to_endpoint` 必須是**目標那一端身上**的接點定義。指到別人身上的
+        // 一樣算壞掉——連線展開時會找不到對應的實際 endpoint。
+        if !目標身上有這個接點(logical, rel) {
+            findings.push(Finding {
+                rule: Rule::L012,
+                environment: None,
+                subject: rel.id.clone(),
+                end: Some(ConnectionEnd::To),
+                detail: format!(
+                    "契約 {} 的目標身上沒有接點定義 {}",
+                    rel.slug, rel.to_endpoint
+                ),
+            });
+        }
+    }
+}
+
+fn 契約端不存在(logical: &crate::logical::Logical, end: &RelationshipEnd) -> Option<String> {
+    match end {
+        RelationshipEnd::Container(id) => {
+            (!logical.containers.iter().any(|c| &c.id == id)).then(|| format!("服務 {id}"))
+        }
+        RelationshipEnd::System(id) => {
+            (!logical.systems.iter().any(|s| &s.id == id)).then(|| format!("系統 {id}"))
+        }
+        RelationshipEnd::Person(id) => {
+            (!logical.people.iter().any(|p| &p.id == id)).then(|| format!("人 {id}"))
+        }
+    }
+}
+
+fn 目標身上有這個接點(
+    logical: &crate::logical::Logical,
+    rel: &crate::logical::Relationship,
+) -> bool {
+    match &rel.to {
+        RelationshipEnd::Container(id) => logical
+            .containers
+            .iter()
+            .find(|c| &c.id == id)
+            // 服務本身就不存在的話，已經有另一項發現在講了，這裡不重複叫。
+            .is_none_or(|c| c.endpoints.iter().any(|e| e.id == rel.to_endpoint)),
+        RelationshipEnd::System(id) => logical
+            .systems
+            .iter()
+            .find(|s| &s.id == id)
+            .is_none_or(|s| s.endpoints.iter().any(|e| e.id == rel.to_endpoint)),
+        // 人沒有接點，那是模型層級的錯，交給 `契約端不存在` 之外的規則管。
+        RelationshipEnd::Person(_) => true,
+    }
+}
+
+/// L012（環境層）：落地與接點指到的邏輯層元素要真的存在。
+fn check_environment_references(project: &Project, env: &Environment, findings: &mut Vec<Finding>) {
+    let logical = &project.logical;
+
+    for instance in env.instances() {
+        let 服務 = logical.container(&instance.container);
+        if 服務.is_none() {
+            findings.push(Finding {
+                rule: Rule::L012,
+                environment: Some(env.id.clone()),
+                subject: instance.id.clone(),
+                end: None,
+                detail: format!(
+                    "落地 {} 指向不存在的服務 {}",
+                    instance.slug, instance.container
+                ),
+            });
+        }
+        for ep in &instance.endpoints {
+            檢查接點定義(
+                ep,
+                服務.map(|c| c.endpoints.as_slice()),
+                &instance.slug,
+                env,
+                findings,
+            );
+        }
+    }
+
+    for si in &env.systems {
+        let 系統 = logical.systems.iter().find(|s| s.id == si.system);
+        if 系統.is_none() {
+            findings.push(Finding {
+                rule: Rule::L012,
+                environment: Some(env.id.clone()),
+                subject: si.id.clone(),
+                end: None,
+                detail: format!("落地 {} 指向不存在的外部系統 {}", si.slug, si.system),
+            });
+        }
+        for ep in &si.endpoints {
+            檢查接點定義(
+                ep,
+                系統.map(|s| s.endpoints.as_slice()),
+                &si.slug,
+                env,
+                findings,
+            );
+        }
+    }
+}
+
+/// 設備的 endpoint 沒有 `def`（設備不對應任何邏輯層元素），所以只查有填的。
+fn 檢查接點定義(
+    ep: &crate::environment::Endpoint,
+    defs: Option<&[crate::logical::EndpointDef]>,
+    擁有者: &str,
+    env: &Environment,
+    findings: &mut Vec<Finding>,
+) {
+    let Some(def) = &ep.def else { return };
+    // 擁有者本身就不存在的話已經報過了，不重複叫。
+    let Some(defs) = defs else { return };
+
+    if !defs.iter().any(|d| &d.id == def) {
+        findings.push(Finding {
+            rule: Rule::L012,
+            environment: Some(env.id.clone()),
+            subject: ep.id.clone(),
+            end: None,
+            detail: format!("{擁有者}／{} 指向不存在的接點定義 {def}", ep.slug),
+        });
+    }
 }
 
 /// L001：邏輯層的東西在每個環境都要落地。

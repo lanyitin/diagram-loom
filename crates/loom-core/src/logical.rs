@@ -25,6 +25,21 @@ pub enum Protocol {
     File,
 }
 
+impl std::fmt::Display for Protocol {
+    /// 給畫面看的名字。序列化用的是 serde 的 kebab-case，兩者刻意分開——
+    /// 檔案格式改了會壞掉，顯示文字改了不會。
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Protocol::Tcp => "TCP",
+            Protocol::Udp => "UDP",
+            Protocol::UnixSocket => "Unix socket",
+            Protocol::Jdbc => "JDBC",
+            Protocol::File => "檔案",
+        };
+        f.write_str(s)
+    }
+}
+
 /// 真人使用者。C4 的 `Person`，只出現在 Context 圖。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

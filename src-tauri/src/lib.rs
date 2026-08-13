@@ -30,9 +30,11 @@ use loom_core::coverage::{self, Matrix};
 use loom_core::edit::{self, Edit, Fix, FixValue, Impact};
 use loom_core::history::History;
 use loom_core::importer;
+use loom_core::inventory::{self, Table};
 use loom_core::lint::{self, Finding, Rule, Severity};
 use loom_core::plan::{self, Plan};
 use loom_core::repository;
+use loom_core::resource::{self, Kind, Resource};
 use loom_core::table::{self, Row};
 use serde::Serialize;
 use tauri::Manager;
@@ -285,6 +287,70 @@ fn preview_batch(
     batch::plan(project, env, &spec).map_err(Into::into)
 }
 
+/// 資源清單：每種資源一張表。
+///
+/// 欄位與格子都是 Rust 算好的——「這個服務在各環境幾台」要走一次落地比對，
+/// 那是模型知識，放前端就是把 `coverage` 再寫一遍。
+#[tauri::command]
+#[specta::specta]
+fn resource_tables(
+    state: State<'_>,
+    environment: Option<loom_core::id::Id>,
+) -> Result<Vec<Table>, Failure> {
+    let mut opened = 鎖(&state)?;
+    let (_, history) = 開著的(&mut opened)?;
+    Ok(inventory::tables(history.project(), environment.as_ref()))
+}
+
+/// 一個空白的新資源，給表單當起點。
+///
+/// id 在這裡就發好，所以 `apply` 是決定性的——復原之後重做會得到
+/// 同一個元素，而不是一個新 UUID。
+#[tauri::command]
+#[specta::specta]
+fn blank_resource(
+    kind: Kind,
+    environment: Option<loom_core::id::Id>,
+    owner: Option<loom_core::id::Id>,
+) -> Result<Resource, Failure> {
+    Ok(resource::blank(kind, environment, owner))
+}
+
+/// 在一個空資料夾裡開一個新專案。
+///
+/// # 為什麼要求資料夾是空的
+///
+/// 這個操作會在裡面寫 `project.yaml` 與 `logical/`。選到一個已經有東西的
+/// 資料夾（例如使用者的家目錄）就會蓋掉別人的檔案，而那沒辦法復原。
+#[tauri::command]
+#[specta::specta]
+fn create_project(state: State<'_>, path: String, name: String) -> Result<Snapshot, Failure> {
+    let root = PathBuf::from(&path);
+    if root.exists()
+        && std::fs::read_dir(&root)
+            .map_err(|e| Failure {
+                message: format!("讀不到 {path}：{e}"),
+            })?
+            .next()
+            .is_some()
+    {
+        return Err(Failure {
+            message: format!("{path} 不是空的。新專案要開在空資料夾裡，才不會蓋掉裡面的東西。"),
+        });
+    }
+
+    let project = resource::new_project(&name);
+    repository::save_to_dir(&project, &root)?;
+
+    let history = History::opened(project);
+    let out = snapshot(&root, &history);
+    let mut opened = 鎖(&state)?;
+    opened.root = Some(root);
+    opened.history = Some(history);
+    opened.pending = None;
+    Ok(out)
+}
+
 /// 退回上一步。已經到底了就原樣回傳——這不是錯誤，
 /// 使用者多按一次 Cmd+Z 不該看到紅字。
 #[tauri::command]
@@ -386,6 +452,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         propose_connection,
         connection_choices,
         preview_batch,
+        resource_tables,
+        blank_resource,
+        create_project,
         apply_fix,
         undo,
         redo

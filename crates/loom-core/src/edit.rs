@@ -38,6 +38,7 @@ use crate::environment::{
 };
 use crate::id::Id;
 use crate::lint::{self, Finding, Rule};
+use crate::resource::Resource;
 
 /// 對專案的一次修改。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,9 +113,27 @@ pub enum Edit {
     },
     /// 刪掉一條環境層連線。
     ///
-    /// 這是目前唯一的刪除操作，而且刪除一定要先看 [`preview`]——
-    /// 少一條連線正是本工具存在要抓的東西。
+    /// 刪除一定要先看 [`preview`]——少一條連線正是本工具存在要抓的東西。
     DeleteConnection { environment: Id, connection: Id },
+
+    // ── 資源的增改刪 ──
+    //
+    // 八種資源乘上三種操作是二十四個變體。收成
+    // [`crate::resource::Resource`]（是什麼）加上這三個（要做什麼），
+    // 復原標籤與驗證都只寫一次。
+    /// 新增一個模型元素。id 由 [`crate::resource::blank`] 先發好。
+    AddResource(Resource),
+    /// 整份換掉一個模型元素。
+    ///
+    /// 帶完整的值而不是欄位差異：整份換掉的語意最單純，
+    /// 而復原本來就是存整份快照，省不了什麼。
+    UpdateResource(Resource),
+    /// 刪掉一個模型元素。
+    ///
+    /// **不連帶刪除。** 指著它的東西會變成懸空，由 L012 叫出來
+    /// （見 `docs/decisions.md`）。連帶刪除可能一次消失幾十個東西，
+    /// 而這工具的重點就是「怕漏」。
+    DeleteResource(Resource),
 }
 
 impl Edit {
@@ -129,6 +148,9 @@ impl Edit {
             Edit::AddConnection { .. } => "新增連線",
             Edit::AddInstances { .. } => "批次建立機器",
             Edit::DeleteConnection { .. } => "刪除連線",
+            Edit::AddResource(r) => r.kind_name_label("新增"),
+            Edit::UpdateResource(r) => r.kind_name_label("修改"),
+            Edit::DeleteResource(r) => r.kind_name_label("刪除"),
         }
     }
 }
@@ -147,8 +169,18 @@ pub enum EditError {
     },
     /// 這條規則沒有「填一格就好」的修法。
     NoFix(Rule),
-    /// 這個 id 已經有一條連線了。
+    /// 這個 id 已經有一條連線／一個元素了。
     AlreadyExists(Id),
+    /// 名稱是空的。空名字在畫面上是一列空白，找不到也刪不掉。
+    EmptySlug(&'static str),
+    /// 名稱撞到別人了。
+    ///
+    /// slug 是人看的識別，而萬用字元比對的就是它——兩個同名的東西
+    /// 會讓 `expect` 數錯，而使用者以為那是兩個不同的東西。
+    SlugTaken {
+        kind: &'static str,
+        slug: String,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -163,7 +195,11 @@ impl fmt::Display for EditError {
                 f,
                 "連線 {connection} 的{side}端不是萬用字元，沒有期望數量可以設定"
             ),
-            EditError::AlreadyExists(id) => write!(f, "{id} 這條連線已經存在"),
+            EditError::AlreadyExists(id) => write!(f, "{id} 已經存在"),
+            EditError::EmptySlug(kind) => write!(f, "{kind}的名稱不能是空的"),
+            EditError::SlugTaken { kind, slug } => {
+                write!(f, "已經有一個叫 {slug} 的{kind}了")
+            }
             EditError::NoFix(rule) => {
                 write!(f, "{} 沒有填一格就能解決的修法", rule.code())
             }
@@ -338,6 +374,10 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             放進去.extend(nodes.iter().cloned());
             Ok(())
         }
+
+        Edit::AddResource(r) => crate::resource::add(project, r),
+        Edit::UpdateResource(r) => crate::resource::update(project, r),
+        Edit::DeleteResource(r) => crate::resource::delete(project, r),
 
         Edit::DeleteConnection {
             environment,
@@ -519,9 +559,9 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
         }
         // 剩下的 L001 是外部系統沒指定落地位址，那還沒做。
         Rule::L001 | Rule::L002 => None,
-        // L003 是「指到了不存在的東西」，要改的是既有連線的接法，
-        // 不是新增一條。留給之後的「改接」功能。
-        Rule::L003 => None,
+        // L003 要改既有連線的接法、L012 要改元素之間的指向——
+        // 兩者都不是填一格或新增一個，留給之後的「改接」功能。
+        Rule::L003 | Rule::L012 => None,
     }
 }
 
