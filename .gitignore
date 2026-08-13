@@ -9,8 +9,10 @@ dist
 # 真實去識別化樣本：即使改過 IP，架構形狀仍屬敏感資訊
 /fixtures/real/
 
-# draw.io 靜態檔由建置流程下載
-/vendor/drawio/
+# draw.io 靜態檔由建置流程下載。
+# 不加結尾斜線是刻意的：在 git worktree 裡通常會把它做成指向主 checkout
+# 的**軟連結**（152 MB 不值得複製一份），而 `drawio/` 只比對得到目錄。
+/vendor/drawio
 
 .DS_Store
 src-tauri/target/
