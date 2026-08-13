@@ -12,6 +12,10 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 
 `lint` 是你的自我檢查。**每建完一批就叫一次。**
 
+「數百條」不是形容詞，是規模。所以有一件事要先講：**一次送一批**，
+見下面那一節。一個一個送每次都會成功，不會有任何錯誤訊息提醒你，
+但你會建到一半就把使用者的時間耗光。
+
 ## 兩層模型
 
 | | | |
@@ -27,9 +31,34 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 - **服務（Container）** 是**會接收請求的程序**——Redis、Consul、你的 API。不是 Docker 容器。
 - **機器（Deployment Node）** 才是實體機／VM／Linux 容器。站點（機房）也是機器的一種，用來裝別的機器。
 
+## 一次送一批，不要一個一個送
+
+**這是這份 skill 最重要的一句話。** `create` 與 `add_connection` 都收
+`items` 陣列，你這一輪想建的東西全部放進去。
+
+一趟一百個跟一趟一個花的時間差不多，而一個一個送要走一百趟。一個大型
+系統有數百條連線，一條一趟的話你會建到一半就把使用者的時間耗光。
+
+**同一批裡後面的可以指名前面的。** 所以整個邏輯層——系統、服務、接點定義、
+契約——可以塞進**同一次呼叫**：
+
+```
+create  items: [
+  {kind: system,       fields: {slug: shop, ...}},
+  {kind: container,    fields: {slug: apache, system: shop}},    ← 指名上一項
+  {kind: endpoint_def, fields: {owner: apache, slug: http, ...}},
+  {kind: relationship, fields: {from: "container:apache", ...}}, ← 指名上面的
+]
+```
+
+有一項失敗就**整批不建**，並且告訴你是第幾項、為什麼。改掉那一項再整批
+送一次即可。沒有「建了一半」這種狀態，所以不必為了保險而拆小。
+
+整批也算**一步**：使用者按一次 ⌘Z 就能全部退掉。
+
 ## 順序
 
-前面的是後面的前提，跳過去會失敗：
+前面的是後面的前提。放在同一批裡的話，照這個順序**排列**就好：
 
 ```
 1. describe          先看現在有什麼，不要重複建立
@@ -38,8 +67,9 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 4. endpoint_def      接點定義（契約要指定連到哪一個）
 5. relationship      契約：誰連誰
 6. environment       環境
-7. create_nodes      機器與服務實體
-8. add_connection    在環境裡實現契約
+   ── 以上通常一次 create 就送完 ──
+7. create_nodes      機器與服務實體（一個服務一次，它會照樣板配 IP）
+8. add_connection    在環境裡實現契約（整個環境的連線一次送完）
 9. lint              收工前確認
 ```
 
@@ -63,13 +93,17 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 
 ### ① 經過設備要拆成兩段
 
-資料上寫「Apache 連到 Gateway，走 F5」。模型裡是**兩條連線，同一個契約**：
+資料上寫「Apache 連到 Gateway，走 F5」。模型裡是**兩條連線，同一個契約**。
+兩段放在同一批裡：
 
 ```
-add_connection  relationship: apache-to-gateway
-                from: apache-*        to: f5-01 : vip-gateway
-add_connection  relationship: apache-to-gateway
-                from: f5-01           to: gateway-*
+add_connection  environment: prod
+                items: [
+                  {relationship: apache-to-gateway,
+                   from: apache-*, to: "f5-01 : vip-gateway"},
+                  {relationship: apache-to-gateway,
+                   from: f5-01,    to: gateway-*},
+                ]
 ```
 
 只建第一段的話，`lint` 會說 L002 走不通——那正是它該抓的。
@@ -95,6 +129,27 @@ gateway-* @ dc-dr   → channel-* @ dc-main     fallback: true
 寫成一條扁平的 `gateway-* → channel-*` 也會通過 lint，但那樣就**看不出
 跨中心那條路有沒有真的開通**——而防火牆規則最常漏的就是那條。
 
+## 要改結構的時候
+
+發現前面建錯了要重來，**不要建議使用者重開一個新專案**。刪得掉。
+
+`delete` 是兩步：
+
+```
+第一步   delete  ids: [...], cascade: true            ← 只給你看，不動任何東西
+第二步   delete  ids: [...], cascade: true, confirm: true
+```
+
+`cascade: true` 會把「刪了這個之後會變成廢的東西」一路掃出來——指著空氣的
+契約、連線、服務實體。刪一個系統可能連帶三十個元素，一次清乾淨，
+而且**整批算一步**，⌘Z 退得回去。
+
+⚠ 預覽不是形式。cascade 一次可能消失幾十個東西，**看清楚再確認**。
+如果預覽裡有你沒預期的東西，那通常代表你對模型的理解有誤，先問使用者。
+
+不加 `cascade` 就是只刪你指名的，懸空的留給 lint（L012）叫。人在畫面上
+一個一個處理時那樣才對，但你要大改結構的話會很痛苦。
+
 ## 錯誤訊息是給你看的
 
 工具的錯誤都附上候選與下一步。照著做，不要重試同一件事：
@@ -103,7 +158,11 @@ gateway-* @ dc-dr   → channel-* @ dc-main     fallback: true
 找不到系統 shopp。有的是：shop
 服務 redis 還沒有任何接點定義。先 create endpoint_def。
 服務 redis 有 2 個接點，要指定哪一個：client-port、cluster-bus
+第 37 項（共 120 項）失敗了：已經有一個叫 redis 的服務了
 ```
+
+最後那一種是批次專屬的：**整批都沒有建**，改掉第 37 項再整批送一次。
+不要改成一項一項送——那樣只是把一個好修的錯誤換成一百趟來回。
 
 ## 收工
 

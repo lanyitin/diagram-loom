@@ -10,63 +10,13 @@
 //!
 //! 「找不到 redis」這種錯誤等於沒有——它只會再猜一次。
 
-use serde_json::{Value, json};
+mod common;
 
-use loom_core::Project;
-use loom_core::edit::Edit;
-use loom_core::history::History;
-use loom_core::id::Id;
+use serde_json::json;
+
+use common::*;
 use loom_core::lint::lint;
-use loom_core::logical::Logical;
 use loom_mcp::{Workspace, tools};
-
-/// 最小的 Workspace：一個 History，跟桌面 App 用的是同一個型別。
-struct Desk(Option<History>);
-
-impl Workspace for Desk {
-    fn project(&self) -> Option<&Project> {
-        self.0.as_ref().map(History::project)
-    }
-    fn edit(&mut self, edit: &Edit) -> Result<(), String> {
-        self.0
-            .as_mut()
-            .ok_or("沒有開專案")?
-            .edit(edit)
-            .map_err(|e| e.to_string())
-    }
-}
-
-fn empty() -> Desk {
-    Desk(Some(History::opened(Project {
-        id: Id::generate(),
-        slug: "new".into(),
-        name: "全新專案".into(),
-        logical: Logical {
-            people: vec![],
-            systems: vec![],
-            containers: vec![],
-            relationships: vec![],
-        },
-        environments: vec![],
-    })))
-}
-
-/// 叫一個工具，成功就回文字，失敗就 panic 並附上原因。
-fn ok(ws: &mut Desk, name: &str, args: Value) -> String {
-    tools::call(ws, name, &args).unwrap_or_else(|e| panic!("{name} 失敗了：{e}"))
-}
-
-/// 叫一個工具並預期失敗，回錯誤訊息。
-fn err(ws: &mut Desk, name: &str, args: Value) -> String {
-    match tools::call(ws, name, &args) {
-        Err(e) => e,
-        Ok(text) => panic!("{name} 竟然成功了：{text}"),
-    }
-}
-
-fn create(ws: &mut Desk, kind: &str, fields: Value) -> String {
-    ok(ws, "create", json!({ "kind": kind, "fields": fields }))
-}
 
 #[test]
 fn an_agent_can_build_a_clean_project_from_prose() {
@@ -525,13 +475,16 @@ mod what_the_agent_is_told {
     use super::*;
 
     #[test]
-    fn the_instructions_carry_the_three_house_rules() {
+    fn the_instructions_carry_the_four_house_rules() {
         // 這段是 Agent 唯一會無條件讀到的說明——工具的描述要它主動看，
-        // 這段不用。所以最重要的三件事一定要在裡面。
+        // 這段不用。所以最重要的四件事一定要在裡面。
         let text = loom_mcp::INSTRUCTIONS;
         assert!(text.contains("describe"), "沒叫它先看現況");
         assert!(text.contains("lint"), "沒叫它自我檢查");
         assert!(text.contains("不會自動存檔"), "沒說清楚存檔是人的決定");
+        // 這一條特別容易漏掉，因為一個一個送**每次都會成功**——
+        // 沒有任何錯誤訊息會提醒它這樣很慢。
+        assert!(text.contains("一次送一批"), "沒叫它批次送");
     }
 
     #[test]
