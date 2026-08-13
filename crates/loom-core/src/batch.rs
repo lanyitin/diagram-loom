@@ -50,13 +50,17 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::environment::{ContainerInstance, DeploymentNode, Endpoint, NodeKind};
 use crate::id::Id;
 use crate::logical::Protocol;
 use crate::slug;
 
 /// 要在每個 Instance 上建立的 Endpoint。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub struct EndpointPlan {
     /// 對應邏輯層的 `EndpointDef`。
     pub def: Id,
@@ -65,21 +69,26 @@ pub struct EndpointPlan {
 }
 
 /// 一次批次建立的規格。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 數字用 `u32` 而不是 `usize`：它們是「要建幾台」「從幾號開始」，
+/// 不是記憶體索引。而且 `usize` 匯不出 TypeScript（specta 怕 BigInt 精度）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub struct BatchSpec {
-    pub count: usize,
+    pub count: u32,
     /// Instance 的名稱樣板，例如 `redis-{n}`。
     pub name_template: String,
     /// 承載機器的名稱樣板，例如 `vm-redis-{n}`。
     pub node_template: String,
     /// `{n}` 的起始值。
-    pub start: usize,
+    pub start: u32,
     /// `{n}` 的補零寬度。`2` 會產生 `01`、`02`。
-    pub pad: usize,
+    pub pad: u32,
     /// 位址樣板，例如 `10.0.1.{ip}:6379`。
     pub address_template: String,
     /// `{ip}` 的起始值。
-    pub ip_start: usize,
+    pub ip_start: u32,
     pub node_kind: NodeKind,
     pub container: Id,
     pub endpoint: EndpointPlan,
@@ -95,6 +104,15 @@ pub enum BatchError {
     UnclosedPlaceholder,
     /// 產生出重複的名稱。通常是名稱樣板忘了放 `{n}`。
     DuplicateName(String),
+    /// 這個環境裡已經有同名的機器或落地了。
+    ///
+    /// 同一個環境有兩台 `redis-01` 會讓萬用字元數到 2，
+    /// 而使用者以為那是兩台不同的機器——正好是這個工具要防的誤會。
+    Taken(String),
+    /// 指定的服務不在邏輯層裡。
+    NoSuchContainer(Id),
+    /// 這個接點定義不屬於那個服務。
+    EndpointNotOnContainer { container: String, endpoint: Id },
     /// 產生出的名稱不是正規的 slug。附上建議寫法。
     NotNormalized {
         produced: String,
@@ -113,6 +131,14 @@ impl fmt::Display for BatchError {
                 )
             }
             BatchError::UnclosedPlaceholder => write!(f, "樣板裡的 {{ 沒有對應的 }}"),
+            BatchError::Taken(name) => {
+                write!(f, "{name} 在這個環境已經有了")
+            }
+            BatchError::NoSuchContainer(id) => write!(f, "找不到服務 {id}"),
+            BatchError::EndpointNotOnContainer {
+                container,
+                endpoint,
+            } => write!(f, "服務 {container} 上沒有接點定義 {endpoint}"),
             BatchError::DuplicateName(name) => {
                 write!(f, "產生出重複的名稱 {name}，名稱樣板需要包含 {{n}}")
             }
@@ -139,7 +165,7 @@ pub fn expand(
         return Err(BatchError::EmptyCount);
     }
 
-    let mut nodes = Vec::with_capacity(spec.count);
+    let mut nodes = Vec::with_capacity(spec.count as usize);
     let mut seen_names = HashSet::new();
 
     for offset in 0..spec.count {
@@ -186,7 +212,7 @@ pub fn expand(
 }
 
 /// 把樣板裡的 `{n}` 與 `{ip}` 換成實際數字。
-fn render(template: &str, n: usize, ip: usize, pad: usize) -> Result<String, BatchError> {
+fn render(template: &str, n: u32, ip: u32, pad: u32) -> Result<String, BatchError> {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
 
@@ -196,7 +222,11 @@ fn render(template: &str, n: usize, ip: usize, pad: usize) -> Result<String, Bat
 
         let close = after.find('}').ok_or(BatchError::UnclosedPlaceholder)?;
         match &after[..close] {
-            "n" => out.push_str(&format!("{n:0pad$}")),
+            "n" => {
+                // 補零寬度是格式參數，只吃 usize。
+                let pad = pad as usize;
+                out.push_str(&format!("{n:0pad$}"))
+            }
             "ip" => out.push_str(&ip.to_string()),
             other => return Err(BatchError::UnknownPlaceholder(other.to_string())),
         }
@@ -222,11 +252,95 @@ fn check_normalized(name: &str) -> Result<(), BatchError> {
     })
 }
 
+/// 展開之後的樣子，加上它會放在哪。
+///
+/// # 為什麼 id 在這裡就發好
+///
+/// 跟 [`crate::connect::propose`] 同一個理由：`apply` 必須是決定性的。
+/// 若 id 等到套用時才產生，預覽給使用者看的就不是他真正會拿到的東西，
+/// 而復原之後重做也會得到一批不同 id 的機器。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct BatchPlan {
+    pub nodes: Vec<DeploymentNode>,
+    /// 給預覽看的一行行摘要：`vm-redis-01 / redis-01 @ 10.0.1.11:6379`。
+    pub preview: Vec<String>,
+}
+
+/// 算出「這批會建出什麼」，並且擋掉會撞名的。**不改動任何東西。**
+///
+/// 檢查放在這裡而不是 [`expand`]：`expand` 只認得樣板，
+/// 「這個環境已經有一台 redis-01 了」要看環境才知道。
+pub fn plan(
+    project: &crate::Project,
+    env: &crate::environment::Environment,
+    spec: &BatchSpec,
+) -> Result<BatchPlan, BatchError> {
+    let container = project
+        .logical
+        .container(&spec.container)
+        .ok_or_else(|| BatchError::NoSuchContainer(spec.container.clone()))?;
+
+    if container.endpoint(&spec.endpoint.def).is_none() {
+        return Err(BatchError::EndpointNotOnContainer {
+            container: container.slug.clone(),
+            endpoint: spec.endpoint.def.clone(),
+        });
+    }
+
+    let nodes = expand(spec, |_hint| Id::generate())?;
+
+    // 撞名一律擋下來。同一個環境有兩台 redis-01 會讓萬用字元數到 2，
+    // 而使用者以為那是兩台不同的機器——正好是這個工具要防的誤會。
+    let 既有機器: HashSet<&str> = 所有機器名(&env.nodes);
+    let 既有落地: HashSet<&str> = env
+        .instances()
+        .into_iter()
+        .map(|i| i.slug.as_str())
+        .collect();
+    for node in &nodes {
+        if 既有機器.contains(node.slug.as_str()) {
+            return Err(BatchError::Taken(node.slug.clone()));
+        }
+        for i in &node.instances {
+            if 既有落地.contains(i.slug.as_str()) {
+                return Err(BatchError::Taken(i.slug.clone()));
+            }
+        }
+    }
+
+    let preview = nodes
+        .iter()
+        .flat_map(|n| {
+            n.instances.iter().map(move |i| {
+                let 位址 = i
+                    .endpoints
+                    .first()
+                    .and_then(|e| e.address.as_deref())
+                    .unwrap_or("（沒有位址）");
+                format!("{} / {} @ {}", n.slug, i.slug, 位址)
+            })
+        })
+        .collect();
+
+    Ok(BatchPlan { nodes, preview })
+}
+
+fn 所有機器名(nodes: &[DeploymentNode]) -> HashSet<&str> {
+    let mut out = HashSet::new();
+    for n in nodes {
+        out.insert(n.slug.as_str());
+        out.extend(所有機器名(&n.children));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn 規格(count: usize) -> BatchSpec {
+    fn 規格(count: u32) -> BatchSpec {
         BatchSpec {
             count,
             name_template: "redis-{n}".into(),

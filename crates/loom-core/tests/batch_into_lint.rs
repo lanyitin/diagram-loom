@@ -15,7 +15,7 @@ use loom_core::logical::Protocol;
 
 /// 生出 `count` 台 Redis 的規格。名稱與位址的起始值刻意錯開，
 /// 對應現實中 `redis-01`～`redis-12` 配 `10.0.1.11`～`10.0.1.22` 的情形。
-fn redis_batch(count: usize) -> BatchSpec {
+fn redis_batch(count: u32) -> BatchSpec {
     BatchSpec {
         count,
         name_template: "redis-{n}".into(),
@@ -35,7 +35,7 @@ fn redis_batch(count: usize) -> BatchSpec {
 }
 
 /// 用批次建立換掉 prod 原本手寫的 Redis，並把連線的 expect 設成 `expect`。
-fn prod_with_batch(count: usize, expect: u32) -> loom_core::Project {
+fn prod_with_batch(count: u32, expect: u32) -> loom_core::Project {
     let mut project = healthy_project();
     let prod = &mut project.environments[0];
 

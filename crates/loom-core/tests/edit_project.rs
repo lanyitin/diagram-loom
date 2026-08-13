@@ -344,8 +344,10 @@ fn 照著修法填一格_就能把一個壞掉的專案修乾淨() {
             Fix::Text { .. } => FixValue::Text("補上去了".into()),
             Fix::Count { suggestion } => FixValue::Count(suggestion),
             Fix::Toggle { .. } => FixValue::Toggle(true),
-            // 新增連線走另一條路（要開表單），不在這個「填一格」的迴圈裡。
-            Fix::AddConnection { .. } => unreachable!("這份素材不該有 L001／L002"),
+            // 這兩種要開表單，不在這個「填一格」的迴圈裡。
+            Fix::AddConnection { .. } | Fix::AddInstances { .. } => {
+                unreachable!("這份素材不該有 L001")
+            }
         };
         let e = edit::edit_for(&f, &填什麼).expect("交不出 Edit");
         edit::apply(&mut project, &e).expect("套用失敗");

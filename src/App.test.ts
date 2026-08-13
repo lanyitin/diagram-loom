@@ -40,6 +40,7 @@ vi.mock('./lib/bindings', () => ({
     redo: vi.fn(),
     proposeConnection: vi.fn(),
     connectionChoices: vi.fn(),
+    previewBatch: vi.fn(),
   },
 }))
 

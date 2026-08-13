@@ -39,6 +39,15 @@ interface State {
   刪除中: 待刪 | null
   /** 使用者要補一條連線給哪個環境的哪條契約。 */
   新增連線中: 待建 | null
+  /** 使用者要在哪個環境批次建立哪個服務的機器。 */
+  新增機器中: 待建機器 | null
+}
+
+/** 批次建立的表單需要知道的：建哪個服務的機器，以及怎麼稱呼它。 */
+export interface 待建機器 {
+  environment: Id
+  container: Id
+  label: string
 }
 
 /** 新增連線的表單需要知道的：補給誰，以及怎麼稱呼它。 */
@@ -75,6 +84,7 @@ export const useProject = defineStore('project', {
     錯誤: null,
     刪除中: null,
     新增連線中: null,
+    新增機器中: null,
   }),
 
   getters: {

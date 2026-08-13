@@ -238,11 +238,3 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
-- id: 0dbd1732-343f-4b38-b9d6-2cb57ffe1174
-  serves: r-channel-連-redis
-  purpose: Session 存取
-  from: !instance
-    target: !one i-test-channel-01
-  to: !instance
-    target: !one i-prod-redis-01
-    endpoint: e-redis

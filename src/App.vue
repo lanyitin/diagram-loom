@@ -5,6 +5,7 @@ import { useProject } from './lib/store'
 import CoverageMatrix from './components/CoverageMatrix.vue'
 import ConnectionTable from './components/ConnectionTable.vue'
 import AddConnection from './components/AddConnection.vue'
+import AddInstances from './components/AddInstances.vue'
 import CloseGuard from './components/CloseGuard.vue'
 import DeleteConfirm from './components/DeleteConfirm.vue'
 import EnvPicker from './components/EnvPicker.vue'
@@ -134,6 +135,7 @@ onUnmounted(() => window.removeEventListener('keydown', 按鍵))
 
     <ImportWizard v-if="store.匯入中" />
     <AddConnection />
+    <AddInstances />
     <DeleteConfirm />
     <CloseGuard />
   </div>

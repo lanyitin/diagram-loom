@@ -54,6 +54,16 @@ function 補連線(f: Finding) {
   }
 }
 
+/** 開「批次建立機器」的表單。同樣不認得規則代號。 */
+function 建機器(f: Finding) {
+  if (!f.fix?.addInstances || !f.environment) return
+  store.新增機器中 = {
+    environment: f.environment,
+    container: f.fix.addInstances.container,
+    label: f.detail,
+  }
+}
+
 function 跳過去(f: Finding) {
   store.檢視 = '連線表'
   store.搜尋 = ''
@@ -91,11 +101,15 @@ function 跳過去(f: Finding) {
               <td class="mono subject">{{ f.subject }}</td>
               <td class="detail" @click="跳過去(f)">{{ f.detail }}</td>
               <td class="act">
-                <!-- 補連線要開一張表單，不是就地填一格，所以走另一顆鈕。 -->
+                <!-- 這兩種要開一張表單，不是就地填一格，所以走另一顆鈕。 -->
                 <button
                   v-if="f.fix?.addConnection" class="fix" :disabled="store.忙碌中"
                   @click="補連線(f)"
                 >補連線…</button>
+                <button
+                  v-else-if="f.fix?.addInstances" class="fix" :disabled="store.忙碌中"
+                  @click="建機器(f)"
+                >建機器…</button>
                 <button
                   v-else-if="f.fix" class="fix" :disabled="store.忙碌中"
                   @click="修改中 = 修改中 === i ? null : i"
@@ -108,7 +122,10 @@ function 跳過去(f: Finding) {
               </td>
             </tr>
 
-            <tr v-if="修改中 === i && f.fix && !f.fix.addConnection" class="editor">
+            <tr
+              v-if="修改中 === i && f.fix && !f.fix.addConnection && !f.fix.addInstances"
+              class="editor"
+            >
               <td colspan="5">
                 <FixEditor :finding="f" :fix="f.fix" @done="修改中 = null" />
               </td>

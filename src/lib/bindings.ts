@@ -42,6 +42,12 @@ export const commands = {
 	/**  這個環境裡，某一端接得上的所有地方。 */
 	connectionChoices: (environment: Id, end: ConnectionEnd) => typedError<Choice_Serialize[], Failure>(__TAURI_INVOKE("connection_choices", { environment, end })),
 	/**
+	 *  算出「這批會建出什麼」，並且擋掉會撞名的。**不改動任何東西。**
+	 * 
+	 *  L001 報在**服務**上時的修法（那個服務在這個環境一台都還沒建）。
+	 */
+	previewBatch: (environment: Id, spec: BatchSpec) => typedError<BatchPlan_Serialize, Failure>(__TAURI_INVOKE("preview_batch", { environment, spec })),
+	/**
 	 *  把 lint 面板上「照著修法填的那一格」變成一次修改。
 	 * 
 	 *  前端送回來的是**發現本身 + 使用者填了什麼**，不是 [`Edit`]——
@@ -58,6 +64,72 @@ export const commands = {
 };
 
 /* Types */
+/**
+ *  展開之後的樣子，加上它會放在哪。
+ * 
+ *  # 為什麼 id 在這裡就發好
+ * 
+ *  跟 [`crate::connect::propose`] 同一個理由：`apply` 必須是決定性的。
+ *  若 id 等到套用時才產生，預覽給使用者看的就不是他真正會拿到的東西，
+ *  而復原之後重做也會得到一批不同 id 的機器。
+ */
+export type BatchPlan = BatchPlan_Serialize | BatchPlan_Deserialize;
+
+/**
+ *  展開之後的樣子，加上它會放在哪。
+ * 
+ *  # 為什麼 id 在這裡就發好
+ * 
+ *  跟 [`crate::connect::propose`] 同一個理由：`apply` 必須是決定性的。
+ *  若 id 等到套用時才產生，預覽給使用者看的就不是他真正會拿到的東西，
+ *  而復原之後重做也會得到一批不同 id 的機器。
+ */
+export type BatchPlan_Deserialize = {
+	nodes: DeploymentNode_Deserialize[],
+	/**  給預覽看的一行行摘要：`vm-redis-01 / redis-01 @ 10.0.1.11:6379`。 */
+	preview: string[],
+};
+
+/**
+ *  展開之後的樣子，加上它會放在哪。
+ * 
+ *  # 為什麼 id 在這裡就發好
+ * 
+ *  跟 [`crate::connect::propose`] 同一個理由：`apply` 必須是決定性的。
+ *  若 id 等到套用時才產生，預覽給使用者看的就不是他真正會拿到的東西，
+ *  而復原之後重做也會得到一批不同 id 的機器。
+ */
+export type BatchPlan_Serialize = {
+	nodes: DeploymentNode_Serialize[],
+	/**  給預覽看的一行行摘要：`vm-redis-01 / redis-01 @ 10.0.1.11:6379`。 */
+	preview: string[],
+};
+
+/**
+ *  一次批次建立的規格。
+ * 
+ *  數字用 `u32` 而不是 `usize`：它們是「要建幾台」「從幾號開始」，
+ *  不是記憶體索引。而且 `usize` 匯不出 TypeScript（specta 怕 BigInt 精度）。
+ */
+export type BatchSpec = {
+	count: number,
+	/**  Instance 的名稱樣板，例如 `redis-{n}`。 */
+	nameTemplate: string,
+	/**  承載機器的名稱樣板，例如 `vm-redis-{n}`。 */
+	nodeTemplate: string,
+	/**  `{n}` 的起始值。 */
+	start: number,
+	/**  `{n}` 的補零寬度。`2` 會產生 `01`、`02`。 */
+	pad: number,
+	/**  位址樣板，例如 `10.0.1.{ip}:6379`。 */
+	addressTemplate: string,
+	/**  `{ip}` 的起始值。 */
+	ipStart: number,
+	nodeKind: NodeKind,
+	container: Id,
+	endpoint: EndpointPlan,
+};
+
 /**  矩陣裡的一格。 */
 export type Cell = {
 	relationship: Id,
@@ -312,7 +384,7 @@ export type Edit_Deserialize =
 	 *  那正是「我還不知道位址」該有的狀態。
 	 */
 	address: string | null,
-} }) & { addConnection?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  L007 的修法：填上用途。
  * 
@@ -322,27 +394,27 @@ export type Edit_Deserialize =
 	environment: Id | null,
 	subject: Id,
 	purpose: string,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
 /**  L004 / L005 的修法：萬用字元的期望數量。 */
 ({ setExpect: {
 	environment: Id,
 	connection: Id,
 	side: ConnectionEnd,
 	expect: number | null,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
 	/**  Instance 或外部系統落地的 id。 */
 	subject: Id,
 	standalone: boolean,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
 /**  改成正常路徑或備援路徑。 */
 ({ setConnectionKind: {
 	environment: Id,
 	connection: Id,
 	kind: ConnectionKind,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  L001／L002 的修法：新增一條環境層連線。
  * 
@@ -361,7 +433,19 @@ export type Edit_Deserialize =
 	kind: ConnectionKind,
 	from: Endpointing_Deserialize,
 	to: Endpointing_Deserialize,
-} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+ * 
+ *  `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
+ *  這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
+ */
+({ addInstances: {
+	environment: Id,
+	/**  掛在哪個部署節點底下（通常是站點）。`None` 表示掛在環境最上層。 */
+	within: Id | null,
+	nodes: DeploymentNode_Deserialize[],
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  刪掉一條環境層連線。
  * 
@@ -371,7 +455,7 @@ export type Edit_Deserialize =
 ({ deleteConnection: {
 	environment: Id,
 	connection: Id,
-} }) & { addConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
+} }) & { addConnection?: never; addInstances?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
 
 /**  對專案的一次修改。 */
 export type Edit_Serialize = 
@@ -389,7 +473,7 @@ export type Edit_Serialize =
 	 *  那正是「我還不知道位址」該有的狀態。
 	 */
 	address: string | null,
-} }) & { addConnection?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  L007 的修法：填上用途。
  * 
@@ -399,27 +483,27 @@ export type Edit_Serialize =
 	environment: Id | null,
 	subject: Id,
 	purpose: string,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setStandalone?: never } | 
 /**  L004 / L005 的修法：萬用字元的期望數量。 */
 ({ setExpect: {
 	environment: Id,
 	connection: Id,
 	side: ConnectionEnd,
 	expect: number | null,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setPurpose?: never; setStandalone?: never } | 
 /**  L008 的修法：標記「刻意獨立」，例如冷備機。 */
 ({ setStandalone: {
 	environment: Id,
 	/**  Instance 或外部系統落地的 id。 */
 	subject: Id,
 	standalone: boolean,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never } | 
 /**  改成正常路徑或備援路徑。 */
 ({ setConnectionKind: {
 	environment: Id,
 	connection: Id,
 	kind: ConnectionKind,
-} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addConnection?: never; addInstances?: never; deleteConnection?: never; setAddress?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  L001／L002 的修法：新增一條環境層連線。
  * 
@@ -438,7 +522,19 @@ export type Edit_Serialize =
 	kind: ConnectionKind,
 	from: Endpointing_Serialize,
 	to: Endpointing_Serialize,
-} }) & { deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+} }) & { addInstances?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
+/**
+ *  批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+ * 
+ *  `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
+ *  這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
+ */
+({ addInstances: {
+	environment: Id,
+	/**  掛在哪個部署節點底下（通常是站點）。`None` 表示掛在環境最上層。 */
+	within: Id | null,
+	nodes: DeploymentNode_Serialize[],
+} }) & { addConnection?: never; deleteConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never } | 
 /**
  *  刪掉一條環境層連線。
  * 
@@ -448,7 +544,7 @@ export type Edit_Serialize =
 ({ deleteConnection: {
 	environment: Id,
 	connection: Id,
-} }) & { addConnection?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
+} }) & { addConnection?: never; addInstances?: never; setAddress?: never; setConnectionKind?: never; setExpect?: never; setPurpose?: never; setStandalone?: never };
 
 /**  動到的是什麼東西。畫面上用來分組。 */
 export type Element = "environment" | 
@@ -471,6 +567,14 @@ export type Endpoint = Endpoint_Serialize | Endpoint_Deserialize;
  */
 export type EndpointDef = {
 	id: Id,
+	slug: string,
+	protocol: Protocol,
+};
+
+/**  要在每個 Instance 上建立的 Endpoint。 */
+export type EndpointPlan = {
+	/**  對應邏輯層的 `EndpointDef`。 */
+	def: Id,
 	slug: string,
 	protocol: Protocol,
 };
@@ -787,15 +891,15 @@ export type Fix =
 	/**  欄位提示，例如「10.0.1.11:6379」。 */
 	hint: string,
 	current: string | null,
-} }) & { addConnection?: never; count?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; count?: never; toggle?: never } | 
 /**  填一個數字（expect）。附上實際符合的數量當預設值。 */
 ({ count: {
 	suggestion: number | null,
-} }) & { addConnection?: never; text?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; text?: never; toggle?: never } | 
 /**  一個開關（standalone）。 */
 ({ toggle: {
 	label: string,
-} }) & { addConnection?: never; count?: never; text?: never } | 
+} }) & { addConnection?: never; addInstances?: never; count?: never; text?: never } | 
 /**
  *  開一張「新增連線」的表單。**這個沒辦法在 lint 面板上填一格解決**，
  *  但它仍然是個修法——所以它有值，不是 `None`。
@@ -804,7 +908,14 @@ export type Fix =
  */
 ({ addConnection: {
 	relationship: Id,
-} }) & { count?: never; text?: never; toggle?: never };
+} }) & { addInstances?: never; count?: never; text?: never; toggle?: never } | 
+/**
+ *  開一張「批次建立機器」的表單。L001 報在**服務**上時的修法——
+ *  那個服務在這個環境一台都還沒建。
+ */
+({ addInstances: {
+	container: Id,
+} }) & { addConnection?: never; count?: never; text?: never; toggle?: never };
 
 /**  使用者在 [`Fix`] 的控制項裡填的東西。 */
 export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };

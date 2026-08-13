@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use loom_core::Project;
+use loom_core::batch::{self, BatchPlan, BatchSpec};
 use loom_core::connect::{self, Choice, Proposal};
 use loom_core::coverage::{self, Matrix};
 use loom_core::edit::{self, Edit, Fix, FixValue, Impact};
@@ -265,6 +266,25 @@ fn connection_choices(
     Ok(connect::choices(project, env, end))
 }
 
+/// 算出「這批會建出什麼」，並且擋掉會撞名的。**不改動任何東西。**
+///
+/// L001 報在**服務**上時的修法（那個服務在這個環境一台都還沒建）。
+#[tauri::command]
+#[specta::specta]
+fn preview_batch(
+    state: State<'_>,
+    environment: loom_core::id::Id,
+    spec: BatchSpec,
+) -> Result<BatchPlan, Failure> {
+    let mut opened = 鎖(&state)?;
+    let (_, history) = 開著的(&mut opened)?;
+    let project = history.project();
+    let env = project.environment(&environment).ok_or_else(|| Failure {
+        message: format!("找不到環境 {environment}"),
+    })?;
+    batch::plan(project, env, &spec).map_err(Into::into)
+}
+
 /// 退回上一步。已經到底了就原樣回傳——這不是錯誤，
 /// 使用者多按一次 Cmd+Z 不該看到紅字。
 #[tauri::command]
@@ -365,6 +385,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         apply_edit,
         propose_connection,
         connection_choices,
+        preview_batch,
         apply_fix,
         undo,
         redo

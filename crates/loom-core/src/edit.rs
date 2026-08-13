@@ -100,6 +100,16 @@ pub enum Edit {
         from: Endpointing,
         to: Endpointing,
     },
+    /// 批次建立機器與落地：L001「這個服務一台都還沒建」的修法。
+    ///
+    /// `nodes` 是 [`crate::batch::plan`] 展開好的（id 也發好了），
+    /// 這一層只負責掛上去。理由同 [`Edit::AddConnection`]：`apply` 要是決定性的。
+    AddInstances {
+        environment: Id,
+        /// 掛在哪個部署節點底下（通常是站點）。`None` 表示掛在環境最上層。
+        within: Option<Id>,
+        nodes: Vec<DeploymentNode>,
+    },
     /// 刪掉一條環境層連線。
     ///
     /// 這是目前唯一的刪除操作，而且刪除一定要先看 [`preview`]——
@@ -117,6 +127,7 @@ impl Edit {
             Edit::SetStandalone { .. } => "標記刻意獨立",
             Edit::SetConnectionKind { .. } => "修改連線種類",
             Edit::AddConnection { .. } => "新增連線",
+            Edit::AddInstances { .. } => "批次建立機器",
             Edit::DeleteConnection { .. } => "刪除連線",
         }
     }
@@ -303,6 +314,31 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
             Ok(())
         }
 
+        Edit::AddInstances {
+            environment,
+            within,
+            nodes,
+        } => {
+            let env = 找環境(project, environment)?;
+            // 撞名的已經在 `batch::plan` 擋掉了，這裡只擋「同一批加兩次」，
+            // 也就是復原之後又重播的情況。
+            let 既有: std::collections::HashSet<Id> = 所有節點id(&env.nodes).into_iter().collect();
+            if let Some(撞到的) = nodes.iter().find(|n| 既有.contains(&n.id)) {
+                return Err(EditError::AlreadyExists(撞到的.id.clone()));
+            }
+
+            let 放進去 = match within {
+                None => &mut env.nodes,
+                Some(node) => {
+                    &mut 找節點(&mut env.nodes, node)
+                        .ok_or_else(|| EditError::NoSuchSubject(node.clone()))?
+                        .children
+                }
+            };
+            放進去.extend(nodes.iter().cloned());
+            Ok(())
+        }
+
         Edit::DeleteConnection {
             environment,
             connection,
@@ -382,6 +418,9 @@ pub enum Fix {
     ///
     /// `relationship` 是要補的那條契約，前端拿它去問 `propose_connection`。
     AddConnection { relationship: Id },
+    /// 開一張「批次建立機器」的表單。L001 報在**服務**上時的修法——
+    /// 那個服務在這個環境一台都還沒建。
+    AddInstances { container: Id },
 }
 
 /// 使用者在 [`Fix`] 的控制項裡填的東西。
@@ -463,13 +502,23 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
         Rule::L008 => Some(Fix::Toggle {
             label: "刻意獨立（冷備機等）".into(),
         }),
-        // L001／L002 的 subject 就是那條契約，補一條連線就修好了。
-        // 它跟其他四種的差別只在「要開一張表單」，不是「沒救」。
-        Rule::L001 | Rule::L002 => {
-            是契約嗎(project, &finding.subject).then(|| Fix::AddConnection {
+        // 同樣是 L001，subject 是什麼決定了要怎麼修——這個分辨是規則，
+        // 不是畫面，所以在這裡做完。
+        //
+        // 契約沒實現／走不通 → 補一條連線。
+        Rule::L001 | Rule::L002 if 是契約嗎(project, &finding.subject) => {
+            Some(Fix::AddConnection {
                 relationship: finding.subject.clone(),
             })
         }
+        // 服務一台都還沒建 → 批次建機器。
+        Rule::L001 if project.logical.container(&finding.subject).is_some() => {
+            Some(Fix::AddInstances {
+                container: finding.subject.clone(),
+            })
+        }
+        // 剩下的 L001 是外部系統沒指定落地位址，那還沒做。
+        Rule::L001 | Rule::L002 => None,
         // L003 是「指到了不存在的東西」，要改的是既有連線的接法，
         // 不是新增一條。留給之後的「改接」功能。
         Rule::L003 => None,
@@ -565,6 +614,27 @@ fn 看端點<'a>(env: &'a Environment, id: &Id) -> Option<&'a Endpoint> {
         .chain(env.infra.iter().flat_map(|n| &n.endpoints))
         .chain(env.systems.iter().flat_map(|s| &s.endpoints))
         .find(|e| &e.id == id)
+}
+
+fn 所有節點id(nodes: &[DeploymentNode]) -> Vec<Id> {
+    let mut out = Vec::new();
+    for n in nodes {
+        out.push(n.id.clone());
+        out.extend(所有節點id(&n.children));
+    }
+    out
+}
+
+fn 找節點<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
+    for node in nodes {
+        if &node.id == id {
+            return Some(node);
+        }
+        if let Some(found) = 找節點(&mut node.children, id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn 找實例<'a>(

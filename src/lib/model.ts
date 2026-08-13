@@ -16,6 +16,8 @@
 
 export type {
   Cell,
+  BatchPlan,
+  BatchSpec,
   Change,
   ChangeKind,
   Choice,
@@ -29,6 +31,7 @@ export type {
   Id,
   Impact,
   Matrix,
+  NodeKind,
   Plan,
   Proposal,
   Relationship,
