@@ -32,6 +32,8 @@ const portInput = ref('')
 function take(next: McpStatus) {
   status.value = next
   portInput.value = next.preferredPort === null ? '' : String(next.preferredPort)
+  // 標頭那顆燈讀的是 store。兩邊各存一份的話遲早會各說各話。
+  store.agentRunning = next.running
 }
 
 async function refresh() {
@@ -112,8 +114,15 @@ async function copy() {
 
       <label class="switch">
         <input type="checkbox" :checked="status.running" @change="toggle()">
-        <span>{{ status.running ? '已開啟' : '關閉中' }}</span>
+        <span :class="{ off: !status.running }">
+          {{ status.running ? '端點開著，Agent 連得進來' : '端點是關的，Agent 連不進來' }}
+        </span>
       </label>
+      <!-- 使用者踩過一次：設定都填好了、以為就能用，其實忘了打開這個開關。
+           填好卻沒開的時候直說，不要只給一個中性的核取方塊。 -->
+      <p v-if="!status.running && status.preferredPort !== null" class="muted hint">
+        設定都在，但還沒啟用。勾上面那個就會開起來。
+      </p>
 
       <div class="settings">
         <label class="field">
@@ -203,6 +212,8 @@ p { margin: 0; }
 
 .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .switch input { accent-color: var(--warp); }
+.switch .off { color: var(--ink-3); }
+.hint { font-size: 11.5px; color: var(--ink-3); margin-left: 22px; }
 
 .config {
   margin: 0;

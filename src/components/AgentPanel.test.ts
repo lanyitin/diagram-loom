@@ -118,6 +118,30 @@ describe('AI 助手面板', () => {
     expect(w.find('.notes .warn').exists()).toBe(false)
   })
 
+  it('設定填好但沒啟用時直說', async () => {
+    // 使用者踩過一次：設定都在、以為就能用，其實忘了打開開關。
+    vi.mocked(commands.mcpStatus).mockResolvedValue({
+      status: 'ok', data: state({ running: false }),
+    } as never)
+    const w = await open()
+
+    expect(w.find('.switch').text()).toContain('連不進來')
+    expect(w.find('.hint').text()).toContain('還沒啟用')
+  })
+
+  it('狀態同步給標頭那顆燈', async () => {
+    // 兩個地方各存一份的話遲早會各說各話。
+    const w = await open()
+    expect(store.agentRunning).toBe(true)
+
+    vi.mocked(commands.stopMcp).mockResolvedValue({
+      status: 'ok', data: state({ running: false, url: null }),
+    } as never)
+    await w.find('.switch input').trigger('change')
+    await flushPromises()
+    expect(store.agentRunning).toBe(false)
+  })
+
   it('永遠說得出哪兩道關不掉', async () => {
     // 使用者要分得出「我關掉的是哪一道」。
     const w = await open()

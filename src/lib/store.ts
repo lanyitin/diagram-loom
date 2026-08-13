@@ -46,6 +46,13 @@ interface State {
   editingResource: PendingEdit | null
   /** 「讓 AI 助手接進來」那個面板開著。 */
   agentPanelOpen: boolean
+  /**
+   * AI 助手的端點正在跑。
+   *
+   * 放在 store 而不是面板裡，因為**標頭也要顯示**——兩個地方各自去問
+   * 的話遲早會各說各話，而使用者只會看到「這裡說開著、那裡說關著」。
+   */
+  agentRunning: boolean
 }
 
 /** 資源表單需要知道的：改哪一個、是不是新的、怎麼稱呼它。 */
@@ -107,6 +114,7 @@ export const useProject = defineStore('project', {
     addingInstances: null,
     editingResource: null,
     agentPanelOpen: false,
+    agentRunning: false,
   }),
 
   getters: {
@@ -194,6 +202,12 @@ export const useProject = defineStore('project', {
 
     async open(path: string) {
       await this.run(() => commands.openProject(path))
+    },
+
+    /** 端點開著沒有。App 一啟動就問一次——它可能是自動啟用的。 */
+    async refreshAgent() {
+      const res = await commands.mcpStatus()
+      if (res.status === 'ok') this.agentRunning = res.data.running
     },
 
     /** 在一個空資料夾裡開新專案。資料夾非空時 Rust 會擋下來。 */

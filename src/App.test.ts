@@ -92,6 +92,12 @@ describe('視窗組裝', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useProject()
+    // App 一掛載就會問一次端點狀態。沒有這個預設值，每個測試都會
+    // 噴一個看不出來源的 unhandled rejection。
+    vi.mocked(commands.mcpStatus).mockResolvedValue({
+      status: 'ok',
+      data: { running: false, url: null, preferredPort: null, requireToken: true, autostart: false },
+    } as never)
   })
 
   it('沒開專案時只有歡迎畫面', () => {
@@ -199,6 +205,29 @@ describe('視窗組裝', () => {
 
     await headerButton(mount(App), '復原').trigger('click')
     expect(undo).toHaveBeenCalled()
+  })
+
+  it('標頭看得出端點是開是關', async () => {
+    // 使用者踩過一次：重開 App 之後端點預設是關的，而畫面上沒有任何地方
+    // 講這件事——只能點進面板才知道。
+    store.snapshot = fakeSnapshot()
+    const w = mount(App)
+    expect(w.find('.lamp').exists()).toBe(true)
+    expect(w.find('.lamp.on').exists()).toBe(false)
+    expect(headerButton(w, 'AI 助手').attributes('title')).toContain('關的')
+
+    store.agentRunning = true
+    await w.vm.$nextTick()
+    expect(w.find('.lamp.on').exists()).toBe(true)
+    expect(headerButton(w, 'AI 助手').attributes('title')).toContain('開著')
+  })
+
+  it('一開始就問一次端點的狀態', async () => {
+    // 它可能是自動啟用的。不問的話那顆燈開機就是錯的。
+    const refresh = vi.spyOn(store, 'refreshAgent').mockResolvedValue(undefined)
+    mount(App)
+    await flushPromises()
+    expect(refresh).toHaveBeenCalled()
   })
 
   it('AI Agent 改了東西之後畫面會自己拉新', async () => {

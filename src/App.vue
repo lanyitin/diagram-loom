@@ -77,6 +77,8 @@ let unlisten: (() => void) | null = null
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   unlisten = await listen('loom://changed', () => void store.recheck())
+  // 端點可能是自動啟用的，所以一開始就要問一次真正的狀態。
+  await store.refreshAgent()
 })
 
 onUnmounted(() => {
@@ -122,7 +124,16 @@ onUnmounted(() => {
       <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.importing = true">匯入試算表…</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.recheck()">重新檢查</button>
-      <button :disabled="!store.isOpen || store.busy" @click="store.agentPanelOpen = true">AI 助手…</button>
+      <!-- 端點是開是關要在標頭看得出來。使用者踩過一次：重開 App 之後
+           它預設是關的，而畫面上沒有任何地方講這件事，只能點進面板才知道。 -->
+      <button
+        :disabled="!store.isOpen || store.busy"
+        :title="store.agentRunning ? 'AI 助手的端點開著' : 'AI 助手的端點是關的'"
+        @click="store.agentPanelOpen = true"
+      >
+        <span :class="['lamp', { on: store.agentRunning }]" />
+        AI 助手…
+      </button>
       <button class="primary" :disabled="!store.dirty || store.busy" @click="store.save()">
         儲存
       </button>
@@ -222,6 +233,18 @@ header {
 
 /* 三個字的級距鈕，比其他鈕窄。 */
 .scale button { padding: 4px 9px; }
+
+/* 端點開著時亮起來。灰的圈圈＝關著，實心＝開著——
+   狀態不能只靠顏色，所以實心與空心也要不一樣。 */
+.lamp {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+}
+.lamp.on { background: var(--ok); border-color: var(--ok); }
 
 .dirty {
   font-size: 11px;
