@@ -14,8 +14,9 @@
  * `redis-*` 展開成幾台、位址從哪個 Endpoint 來——那跟 lint 做萬用字元
  * 比對是同一件事。這裡只負責排版。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useProject } from '../lib/store'
+import { nextSort, sortBy, type Sort } from '../lib/rows'
 import type { Row, Side } from '../lib/model'
 
 const store = useProject()
@@ -34,6 +35,44 @@ function side(side: Side): string {
 
 const anyRowHasExpect = computed(() => store.visibleRows.some((r) => r.to.expect !== null))
 
+/**
+ * 可以排序的欄位。
+ *
+ * **用欄名認，不用第幾欄**：「實際／期望」那欄會依內容出現或消失，
+ * 用位置的話會排到別欄去，而且看起來像排錯了而不是抓錯欄。
+ */
+const KEYS: Record<string, (r: Row) => string | number> = {
+  契約: (r) => r.servesSlug ?? r.serves,
+  來源: (r) => side(r.from),
+  目標: (r) => side(r.to),
+  目標位址: (r) => addressOf(r.to),
+  // 差幾台。遞增就是「缺最多的排前面」——點這一欄的人要找的就是對不上的。
+  '實際／期望': (r) => (r.to.expect === null ? 0 : r.to.matched - r.to.expect),
+  用途: (r) => r.purpose,
+}
+
+const sort = ref<Sort<string> | null>(null)
+
+const rows = computed(() =>
+  sortBy(store.visibleRows, sort.value, (r, column) => KEYS[column]!(r)),
+)
+
+function clickHeader(column: string) {
+  sort.value = nextSort(sort.value, column)
+}
+
+/** 標題上的三個屬性都一樣，集中在這裡，不要在樣板上抄六遍。 */
+function head(column: string) {
+  const state = sort.value?.column !== column
+    ? 'none'
+    : sort.value.direction === 'asc' ? 'ascending' : 'descending'
+  return {
+    class: 'sortable',
+    'aria-sort': state as 'none' | 'ascending' | 'descending',
+    onClick: () => clickHeader(column),
+  }
+}
+
 /** 只是打開確認框。真正刪掉在使用者看過影響之後。 */
 function askDelete(row: Row) {
   store.deleting = {
@@ -51,17 +90,17 @@ function askDelete(row: Row) {
         <tr>
           <th class="sev" />
           <th class="kind" />
-          <th>契約</th>
-          <th>來源</th>
-          <th>目標</th>
-          <th>目標位址</th>
-          <th v-if="anyRowHasExpect" class="right">實際／期望</th>
-          <th>用途</th>
+          <th v-bind="head('契約')">契約</th>
+          <th v-bind="head('來源')">來源</th>
+          <th v-bind="head('目標')">目標</th>
+          <th v-bind="head('目標位址')">目標位址</th>
+          <th v-if="anyRowHasExpect" v-bind="head('實際／期望')" class="right sortable">實際／期望</th>
+          <th v-bind="head('用途')">用途</th>
           <th class="act" />
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in store.visibleRows" :key="row.id" :class="{ fallback: row.kind === 'fallback' }" :title="row.rules.join('、')">
+        <tr v-for="row in rows" :key="row.id" :class="{ fallback: row.kind === 'fallback' }" :title="row.rules.join('、')">
           <td class="sev">
             <span v-if="row.severity" :class="['dot', row.severity]" />
           </td>
@@ -90,7 +129,7 @@ function askDelete(row: Row) {
             </button>
           </td>
         </tr>
-        <tr v-if="store.visibleRows.length === 0">
+        <tr v-if="rows.length === 0">
           <td :colspan="9" class="empty muted">沒有符合條件的連線。</td>
         </tr>
       </tbody>
@@ -110,6 +149,17 @@ th, td {
   border-bottom: 1px solid var(--rule-2);
   white-space: nowrap;
 }
+
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--ink); }
+/*
+ * 箭頭用 CSS 畫，不放進標題的文字裡——放進去的話欄名會變成「契約 ▴」，
+ * 螢幕閱讀器會照唸，而排序狀態 `aria-sort` 已經講過一次了。
+ * 透明的那個一直佔著位置，不然排序時整排標題會左右跳。
+ */
+th.sortable::after { content: '▴'; margin-left: 4px; font-size: 10px; opacity: 0; }
+th.sortable[aria-sort='ascending']::after { opacity: 0.75; }
+th.sortable[aria-sort='descending']::after { content: '▾'; opacity: 0.75; }
 
 thead th {
   position: sticky;

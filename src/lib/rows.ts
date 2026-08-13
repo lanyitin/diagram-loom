@@ -23,8 +23,14 @@ import type { ResourceRow } from './model'
 /** 排序的方向。`null` 表示照 Rust 給的原始順序。 */
 export type Direction = 'asc' | 'desc'
 
-export interface Sort {
-  column: number
+/**
+ * 哪一欄、哪個方向。
+ *
+ * 欄位的識別方式做成泛型：資源表用第幾欄（欄位是 Rust 給的字串陣列），
+ * 連線表用欄名（它的欄位會依內容增減，用位置會對到別欄去）。
+ */
+export interface Sort<C = number> {
+  column: C
   direction: Direction
 }
 
@@ -70,7 +76,7 @@ function flatten(nodes: Node[], out: ResourceRow[] = []): ResourceRow[] {
  * 用 `localeCompare` 的 `numeric`：不然 `vm-10` 會排在 `vm-2` 前面，
  * 而機器名字幾乎都是這種帶編號的。
  */
-export function sortRows(rows: ResourceRow[], sort: Sort | null): ResourceRow[] {
+export function sortRows(rows: ResourceRow[], sort: Sort<number> | null): ResourceRow[] {
   if (!sort) return rows
 
   const sign = sort.direction === 'asc' ? 1 : -1
@@ -114,9 +120,41 @@ export function filterRows(rows: ResourceRow[], keyword: string): ResourceRow[] 
   return flatten(keep(toTree(rows)))
 }
 
-/** 點同一欄就換方向，點別欄就從遞增開始。第三次點回到原始順序。 */
-export function nextSort(current: Sort | null, column: number): Sort | null {
+/**
+ * 點同一欄就換方向，點別欄就從遞增開始。第三次點回到原始順序。
+ *
+ * **一定要回得到原始順序**：Rust 給的順序是有意義的（機器是樹、
+ * 契約照定義順序），排過就回不去的話那個資訊就沒了。
+ */
+export function nextSort<C>(current: Sort<C> | null, column: C): Sort<C> | null {
   if (current?.column !== column) return { column, direction: 'asc' }
   if (current.direction === 'asc') return { column, direction: 'desc' }
   return null
+}
+
+
+/**
+ * 一般的排序：一張平的表，照某一欄的值排。
+ *
+ * 給連線表用——它沒有樹，但點標題的行為要跟資源表一模一樣，
+ * 所以共用同一個 [`nextSort`]，而不是各寫一套。
+ *
+ * 值是數字就照數字比。字串則用 `numeric` 比對，不然 `vm-10` 會排在 `vm-2` 前面。
+ */
+export function sortBy<T, C extends string | number>(
+  items: T[],
+  sort: Sort<C> | null,
+  key: (item: T, column: C) => string | number,
+): T[] {
+  if (!sort) return items
+  const sign = sort.direction === 'asc' ? 1 : -1
+  return [...items].sort((a, b) => {
+    const x = key(a, sort.column)
+    const y = key(b, sort.column)
+    if (typeof x === 'number' && typeof y === 'number') return sign * (x - y)
+    return sign * String(x).localeCompare(String(y), undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    })
+  })
 }

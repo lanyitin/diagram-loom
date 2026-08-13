@@ -334,3 +334,66 @@ describe('Lint 面板', () => {
     expect(w.find('.empty').text()).toContain('沒有任何缺漏')
   })
 })
+
+describe('連線表的排序', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot([
+      rows('c1', { servesSlug: 'redis' }),
+      rows('c2', { servesSlug: 'apache' }),
+      rows('c3', { servesSlug: 'gateway' }),
+    ])
+  })
+
+  /** 依表頭名稱取那一欄的全部值，不用位置——加一欄就全錯的測試沒有價值。 */
+  function columnValues(w: ReturnType<typeof mount>, header: string) {
+    const i = w.findAll('thead th').findIndex((t) => t.text() === header)
+    return w.findAll('tbody tr').map((r) => r.findAll('td')[i]!.text())
+  }
+
+  const th = (w: ReturnType<typeof mount>, name: string) =>
+    w.findAll('thead th').find((t) => t.text() === name)!
+
+  it('點欄位標題會排序，再點一次倒過來', async () => {
+    const w = mount(ConnectionTable)
+    expect(columnValues(w, '契約')).toEqual(['redis', 'apache', 'gateway'])
+
+    await th(w, '契約').trigger('click')
+    expect(columnValues(w, '契約')).toEqual(['apache', 'gateway', 'redis'])
+
+    await th(w, '契約').trigger('click')
+    expect(columnValues(w, '契約')).toEqual(['redis', 'gateway', 'apache'])
+  })
+
+  it('第三次點回到原始順序', async () => {
+    // Rust 給的順序是有意義的（依環境、再依契約）。排過就回不去的話那個資訊就沒了。
+    const w = mount(ConnectionTable)
+    await th(w, '契約').trigger('click')
+    await th(w, '契約').trigger('click')
+    await th(w, '契約').trigger('click')
+
+    expect(columnValues(w, '契約')).toEqual(['redis', 'apache', 'gateway'])
+    expect(th(w, '契約').attributes('aria-sort')).toBe('none')
+  })
+
+  it('排序狀態放在 aria-sort，不是只有一個箭頭', async () => {
+    const w = mount(ConnectionTable)
+    await th(w, '契約').trigger('click')
+    expect(th(w, '契約').attributes('aria-sort')).toBe('ascending')
+  })
+
+  it('「實際／期望」照差幾台排，缺最多的在前面', async () => {
+    // 點這一欄的人要找的就是對不上的那幾條，不是照數字大小看熱鬧。
+    store.snapshot = fakeSnapshot([
+      rows('c1', { servesSlug: '剛好', to: side('a', { matched: 3, expect: 3 }) }),
+      rows('c2', { servesSlug: '缺三台', to: side('b', { matched: 1, expect: 4 }) }),
+      rows('c3', { servesSlug: '缺一台', to: side('c', { matched: 2, expect: 3 }) }),
+    ])
+    const w = mount(ConnectionTable)
+    await th(w, '實際／期望').trigger('click')
+    expect(columnValues(w, '契約')).toEqual(['缺三台', '缺一台', '剛好'])
+  })
+})
