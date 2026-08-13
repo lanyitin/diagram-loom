@@ -231,33 +231,36 @@ fn 環境名稱不安全時記憶體儲存體不會被寫入任何東西() {
 
 #[test]
 fn 真實架構樣本可以完整讀回來() {
-    // `fixtures/通路系統.loom` 是照一個真實系統的架構建的（35 個落地、29 條連線、
-    // 兩層巢狀站點、一台 VM 跑兩個服務、同站優先加跨站備援）。
-    // 假素材通常太乾淨，這份用來確認 YAML 佈局撐得住現實的形狀。
+    // 照一個真實系統的架構建的（28 個落地、兩層巢狀站點、一台 VM 跑兩個服務、
+    // 同站優先加跨站備援）。假素材通常太乾淨，這份用來確認 YAML 佈局
+    // 撐得住現實的形狀。
     //
-    // 順便釘住它的內容：如果哪天改了模型讓這份樣本的 lint 結果變了，
-    // 這裡會提醒你那是不是預期中的。
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/通路系統.loom");
-    if !root.exists() {
-        // 樣本沒產生過就跳過——它不是編譯產物，靠 mise run fixture:real 生成。
-        return;
-    }
+    // **現建一份，不讀 `fixtures/通路系統.loom`。** 磁碟上那份是開來玩的範例，
+    // 使用者在 App 裡改它、存檔正是它的用途；拿它當測試素材的話，
+    // 每次有人玩過 `mise run check` 就紅一次，然後只能把他的操作洗掉。
+    let project = common::real::專案();
 
-    let project = loom_core::repository::load_from_dir(&root).expect("讀得回來");
+    // 走一趟真正的存檔與讀檔，因為這裡要驗的就是 YAML 佈局。
+    // 記憶體儲存體就夠了——不碰磁碟，也就不會動到那份範例專案。
+    let mut store = loom_core::store::MemoryStore::new();
+    loom_core::repository::save(&project, &mut store).expect("存得下去");
+    let 讀回來 = loom_core::repository::load(&store).expect("讀得回來");
+    assert_eq!(讀回來, project, "存檔再讀回來變了樣");
 
-    assert_eq!(project.logical.containers.len(), 8);
-    assert_eq!(project.logical.relationships.len(), 11);
-    assert_eq!(project.environments.len(), 2);
+    assert_eq!(讀回來.logical.containers.len(), 8);
+    assert_eq!(讀回來.logical.relationships.len(), 11);
+    assert_eq!(讀回來.environments.len(), 2);
 
-    let 落地數: usize = project.environments[0]
+    let 落地數: usize = 讀回來.environments[0]
         .nodes
         .iter()
         .map(|n| n.instances_recursive().len())
         .sum();
     assert_eq!(落地數, 28, "prod 應該有 28 個落地（含兩層巢狀站點底下的）");
 
-    let found: Vec<String> = loom_core::lint::lint(&project)
+    // 順便釘住 lint 的結果：哪天改了模型讓這份樣本的結論變了，
+    // 這裡會提醒你那是不是預期中的。
+    let found: Vec<String> = loom_core::lint::lint(&讀回來)
         .iter()
         .map(|f| format!("{} {}", f.rule.code(), f.subject))
         .collect();

@@ -19,6 +19,28 @@ nodes:
         def: e-apache
         protocol: tcp
         address: 10.9.1.11:8080
+  - id: n-prod-vm-g01
+    slug: vm-g01
+    kind: virtual-machine
+    instances:
+    - id: i-prod-consul-01
+      slug: consul-01
+      container: c-consul
+      endpoints:
+      - id: ep-prod-consul-01
+        slug: http-api
+        def: e-consul
+        protocol: tcp
+        address: 10.1.5.11:8500
+    - id: i-prod-redis-01
+      slug: redis-01
+      container: c-redis
+      endpoints:
+      - id: ep-prod-redis-01
+        slug: client-port
+        def: e-redis
+        protocol: tcp
+        address: 10.1.5.11:6379
   - id: n-test-vm-t-c01
     slug: vm-t-c01
     kind: virtual-machine
@@ -130,7 +152,7 @@ connections:
   to: !instance
     target: !pattern
       slug_pattern: consul-*
-      expect: 1
+      expect: 2
     endpoint: e-consul
 - id: conn-test-04
   serves: r-channel-連-consul
@@ -142,7 +164,7 @@ connections:
   to: !instance
     target: !pattern
       slug_pattern: consul-*
-      expect: 1
+      expect: 2
     endpoint: e-consul
 - id: conn-test-05
   serves: r-gateway-連-channel
@@ -178,7 +200,7 @@ connections:
   to: !instance
     target: !pattern
       slug_pattern: common-*
-      expect: 2
+      expect: 1
     endpoint: e-common
 - id: conn-test-08
   serves: r-gateway-連-db
@@ -216,3 +238,11 @@ connections:
       slug_pattern: db-*
       expect: 1
     endpoint: e-db
+- id: 0dbd1732-343f-4b38-b9d6-2cb57ffe1174
+  serves: r-channel-連-redis
+  purpose: Session 存取
+  from: !instance
+    target: !one i-test-channel-01
+  to: !instance
+    target: !one i-prod-redis-01
+    endpoint: e-redis

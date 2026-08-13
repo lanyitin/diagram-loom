@@ -16,6 +16,12 @@
 //! 涵蓋了設計上最容易出錯的幾件事：經過設備的多段路徑、叢集扇出、
 //! 同一條邏輯連線在不同環境展開成不同數量，以及外部系統在各環境的不同落地。
 
+// 每個整合測試各自是一個 crate，只用得到這裡的一部分，
+// 所以「沒被用到」不代表沒用。
+#![allow(dead_code)]
+
+pub mod real;
+
 use loom_core::Project;
 use loom_core::environment::{
     Connection, ContainerInstance, DeploymentNode, Endpoint, Endpointing, Environment,

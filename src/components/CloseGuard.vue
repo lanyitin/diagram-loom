@@ -34,10 +34,20 @@ onMounted(async () => {
 
 onUnmounted(() => 收工?.())
 
-/** 真的關掉。`destroy` 不會再觸發 `onCloseRequested`，所以不會繞回來。 */
+/**
+ * 真的關掉。`destroy` 不會再觸發 `onCloseRequested`，所以不會繞回來。
+ *
+ * 失敗要講出來。這裡踩過一次：`core:window:allow-destroy` 沒開，
+ * destroy 被權限擋下、Promise 靜靜地 reject，於是視窗永遠關不掉，
+ * 而畫面上一個字都沒有。由 `src-tauri/tests/capabilities.rs` 守著。
+ */
 async function 關掉() {
   問著.value = false
-  await getCurrentWindow().destroy()
+  try {
+    await getCurrentWindow().destroy()
+  } catch (e) {
+    store.錯誤 = `關不掉視窗：${e instanceof Error ? e.message : String(e)}`
+  }
 }
 
 async function 存了再關() {
