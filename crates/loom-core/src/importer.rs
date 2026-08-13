@@ -20,8 +20,8 @@ use std::path::Path;
 
 use crate::Project;
 use crate::environment::{
-    Connection, ContainerInstance, DeploymentNode, Endpoint, Endpointing, Environment,
-    InfrastructureNode, InstanceRef, NodeKind,
+    Connection, ConnectionKind, ContainerInstance, DeploymentNode, Endpoint, Endpointing,
+    Environment, InfrastructureNode, InstanceRef, NodeKind,
 };
 use crate::id::Id;
 use crate::logical::{
@@ -54,10 +54,13 @@ const REQUIRED_VALUES: [&str; 6] = [
 ];
 
 /// 所有認得的欄位。
-const KNOWN_COLUMNS: [&str; 13] = [
+const KNOWN_COLUMNS: [&str; 16] = [
     "environment",
     "purpose",
     "serves",
+    "kind",
+    "from_site",
+    "to_site",
     "from_node",
     "from_service",
     "from_endpoint",
@@ -124,6 +127,8 @@ pub enum ImportError {
     },
     /// 目標是設備（`to_service` 留空）時，無法推導這條連線服務哪條邏輯連線。
     InfraRowNeedsServes { row: usize },
+    /// `kind` 欄位認不得。
+    UnknownKind { row: usize, value: String },
 }
 
 impl fmt::Display for ImportError {
@@ -154,6 +159,10 @@ impl fmt::Display for ImportError {
             ImportError::InfraRowNeedsServes { row } => write!(
                 f,
                 "第 {row} 列的目標是設備，必須填 serves 指明它服務哪條邏輯連線"
+            ),
+            ImportError::UnknownKind { row, value } => write!(
+                f,
+                "第 {row} 列的 kind「{value}」認不得，可用：primary（或留空）、fallback"
             ),
         }
     }
@@ -269,6 +278,8 @@ fn import_row(
     let to_node_raw = sheet.value(index, "to_node").to_string();
     let from_service =
         optional_normalized(sheet.value(index, "from_service"), row, "from_service")?;
+    let from_site = optional_normalized(sheet.value(index, "from_site"), row, "from_site")?;
+    let to_site = optional_normalized(sheet.value(index, "to_site"), row, "to_site")?;
     let to_service = optional_normalized(sheet.value(index, "to_service"), row, "to_service")?;
     let to_endpoint = normalized(sheet.value(index, "to_endpoint"), row, "to_endpoint")?;
     let from_endpoint =
@@ -278,6 +289,16 @@ fn import_row(
     let purpose = sheet.value(index, "purpose").to_string();
     let address = sheet.value(index, "to_address").to_string();
     let serves_slug = sheet.value(index, "serves").to_string();
+    let kind = match sheet.value(index, "kind").to_lowercase().as_str() {
+        "" | "primary" | "正常" => ConnectionKind::Primary,
+        "fallback" | "備援" => ConnectionKind::Fallback,
+        other => {
+            return Err(ImportError::UnknownKind {
+                row,
+                value: other.to_string(),
+            });
+        }
+    };
 
     // `to_node` 含 `*` 代表這一列在**指涉**既有的一群機器，不是在定義新機器。
     let to_is_pattern = to_node_raw.contains('*');
@@ -290,7 +311,18 @@ fn import_row(
         if let Some(ep) = &from_endpoint {
             ensure_endpoint_def(project, &container, ep, protocol);
         }
-        let instance = ensure_instance(project, &env_slug, &from_node, service, &container, report);
+        let site = from_site
+            .as_ref()
+            .map(|s| ensure_site(project, &env_slug, s));
+        let instance = ensure_instance(
+            project,
+            &env_slug,
+            &from_node,
+            site.as_ref(),
+            service,
+            &container,
+            report,
+        );
         Endpointing::Instance {
             target: InstanceRef::One(instance),
             endpoint: from_endpoint
@@ -312,14 +344,25 @@ fn import_row(
         let target = if to_is_pattern {
             InstanceRef::Pattern {
                 slug_pattern: format!("{to_node_raw}-{service}"),
-                // 試算表目前沒有欄位可以說「這台在哪個機房」，所以不限定範圍。
-                // 見 docs/domain-model.md 的限制 D。
-                within: None,
+                // 填了 to_site 就把範圍限定在那個機房底下。
+                //
+                // 這一步不做的話，站點建了也沒用——`expect` 還是在數總量，
+                // 機器從一個機房搬到另一個就抓不到（見 L-C）。
+                within: to_site.as_ref().map(|s| ensure_site(project, &env_slug, s)),
                 expect,
             }
         } else {
             let node = normalized(&to_node_raw, row, "to_node")?;
-            let instance = ensure_instance(project, &env_slug, &node, service, &container, report);
+            let site = to_site.as_ref().map(|s| ensure_site(project, &env_slug, s));
+            let instance = ensure_instance(
+                project,
+                &env_slug,
+                &node,
+                site.as_ref(),
+                service,
+                &container,
+                report,
+            );
             set_instance_address(
                 project,
                 &env_slug,
@@ -358,7 +401,14 @@ fn import_row(
     // ── 這條連線服務哪條邏輯連線 ────────────────────────────
     let serves = if !serves_slug.is_empty() {
         let slug = normalized(&serves_slug, row, "serves")?;
-        ensure_relationship_by_slug(project, &slug, &from_service, &to_container, &to_endpoint)
+        ensure_relationship_by_slug(
+            project,
+            &slug,
+            &from_service,
+            &to_container,
+            &to_endpoint,
+            &purpose,
+        )
     } else {
         // 沒填 serves 時只能靠兩端的服務推導。目標是設備就推不出來。
         let (Some(from), Some(to)) = (&from_service, &to_container) else {
@@ -384,6 +434,7 @@ fn import_row(
     {
         Some(既有) => {
             既有.purpose = purpose;
+            既有.kind = kind;
             report.connections_updated += 1;
         }
         None => {
@@ -391,8 +442,7 @@ fn import_row(
                 id: Id::generate(),
                 serves,
                 purpose,
-                // 試算表目前沒有欄位可以標備援路徑，一律當成正常路徑。
-                kind: Default::default(),
+                kind,
                 from: from_side,
                 to: to_side,
             });
@@ -562,16 +612,111 @@ fn endpoint_def_id(project: &Project, container: &Id, slug: &str) -> Option<Id> 
 /// 加上服務名之後既唯一又可預測，重跑匯入會得到同一個名字。
 /// 也剛好讓試算表上 `redis-vm-t*` 這種寫法仍然選得到
 /// `redis-vm-t01-redis`（樣式以 `*` 結尾）。
+/// 站點（機房）。沒有就建一個。
+///
+/// 站點是**裝別的節點用的**，本身不跑東西——所以它只有 `children`，
+/// 沒有 `instances`。
+fn ensure_site(project: &mut Project, env_slug: &str, site_slug: &str) -> Id {
+    let env = environment_mut(project, env_slug);
+    if let Some(found) = env
+        .nodes
+        .iter()
+        .find(|n| n.slug == site_slug && n.kind == NodeKind::Site)
+    {
+        return found.id.clone();
+    }
+    let id = Id::generate();
+    env.nodes.push(DeploymentNode {
+        id: id.clone(),
+        slug: site_slug.to_string(),
+        kind: NodeKind::Site,
+        children: vec![],
+        instances: vec![],
+    });
+    id
+}
+
+/// 把機器擺到正確的位置：有站點就放進站點底下，沒有就放最外層。
+///
+/// 已經存在但擺錯地方的會被**搬過去**——試算表補上 `site` 欄位之後
+/// 重新匯入，機器就會自己歸位，不必手動搬。
+fn 安置機器(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id {
+    // 先看它是不是已經在對的位置。
+    let 目標底下 = match site {
+        Some(sid) => env
+            .nodes
+            .iter()
+            .find(|n| &n.id == sid)
+            .map(|s| s.children.iter().any(|c| c.slug == node_slug))
+            .unwrap_or(false),
+        None => env.nodes.iter().any(|n| n.slug == node_slug),
+    };
+    if 目標底下 {
+        return 找機器(&env.nodes, node_slug).expect("剛剛才確認在的");
+    }
+
+    // 不在對的位置：從別處抽出來（或新建），再放進去。
+    let 機器 = 抽出機器(&mut env.nodes, node_slug).unwrap_or_else(|| DeploymentNode {
+        id: Id::generate(),
+        slug: node_slug.to_string(),
+        kind: NodeKind::VirtualMachine,
+        children: vec![],
+        instances: vec![],
+    });
+    let id = 機器.id.clone();
+
+    match site {
+        Some(sid) => env
+            .nodes
+            .iter_mut()
+            .find(|n| &n.id == sid)
+            .expect("站點在此之前已由 ensure_site 建立")
+            .children
+            .push(機器),
+        None => env.nodes.push(機器),
+    }
+    id
+}
+
+fn 找機器(nodes: &[DeploymentNode], slug: &str) -> Option<Id> {
+    for n in nodes {
+        if n.slug == slug {
+            return Some(n.id.clone());
+        }
+        if let Some(found) = 找機器(&n.children, slug) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn 抽出機器(nodes: &mut Vec<DeploymentNode>, slug: &str) -> Option<DeploymentNode> {
+    if let Some(i) = nodes.iter().position(|n| n.slug == slug) {
+        return Some(nodes.remove(i));
+    }
+    for n in nodes.iter_mut() {
+        if let Some(found) = 抽出機器(&mut n.children, slug) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 fn ensure_instance(
     project: &mut Project,
     env_slug: &str,
     node_slug: &str,
+    site: Option<&Id>,
     service_slug: &str,
     container: &Id,
     report: &mut ImportReport,
 ) -> Id {
     let instance_slug = format!("{node_slug}-{service_slug}");
     let env = environment_mut(project, env_slug);
+
+    // 先把機器擺到正確的位置——即使 Instance 已經存在也要做。
+    // 少了這一步，補上 site 欄位之後重新匯入，機器不會歸位。
+    let node_id = 安置機器(env, node_slug, site);
 
     if let Some(found) = env
         .instances()
@@ -590,19 +735,27 @@ fn ensure_instance(
     };
     let id = instance.id.clone();
 
-    match env.nodes.iter_mut().find(|n| n.slug == node_slug) {
-        Some(node) => node.instances.push(instance),
-        None => env.nodes.push(DeploymentNode {
-            id: Id::generate(),
-            slug: node_slug.to_string(),
-            kind: NodeKind::VirtualMachine,
-            children: vec![],
-            instances: vec![instance],
-        }),
-    }
+    找機器可變(&mut env.nodes, &node_id)
+        .expect("剛剛才安置好的")
+        .instances
+        .push(instance);
 
     report.instances_created += 1;
     id
+}
+
+fn 找機器可變<'a>(nodes: &'a mut [DeploymentNode], id: &Id) -> Option<&'a mut DeploymentNode> {
+    // 先用不可變借用把位置找出來，再一次可變借用——
+    // 邊走邊借的寫法過不了 borrow checker。
+    if let Some(i) = nodes.iter().position(|n| &n.id == id) {
+        return nodes.get_mut(i);
+    }
+    for n in nodes.iter_mut() {
+        if let Some(found) = 找機器可變(&mut n.children, id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn ensure_infra(project: &mut Project, env_slug: &str, node_slug: &str) -> Id {
@@ -760,13 +913,21 @@ fn ensure_relationship_by_slug(
     from_service: &Option<String>,
     to_container: &Option<Id>,
     to_endpoint_slug: &str,
+    purpose: &str,
 ) -> Id {
     if let Some(existing) = project
         .logical
         .relationships
-        .iter()
+        .iter_mut()
         .find(|r| r.slug == slug)
     {
+        // 補上還沒填的用途，但不覆蓋已經有的——跟位址同一條規則。
+        //
+        // 少了這一段，用 serves 命名的契約會永遠帶著一個 L007 警告，
+        // 而且從試算表修不掉。出貨的樣板本來就會產生六個這種警告。
+        if existing.purpose.trim().is_empty() {
+            existing.purpose = purpose.to_string();
+        }
         return existing.id.clone();
     }
 
@@ -777,7 +938,7 @@ fn ensure_relationship_by_slug(
 
     match (from, to_container) {
         (Some(from), Some(to)) => {
-            ensure_relationship(project, slug, &from, to, to_endpoint_slug, "")
+            ensure_relationship(project, slug, &from, to, to_endpoint_slug, purpose)
         }
         // 這一列只是路徑的一段（例如「F5 → 後端」），推不出完整的兩端。
         // 先建一條佔位的邏輯連線，等同一個 serves 的其他列補上真正的端點。
@@ -786,7 +947,7 @@ fn ensure_relationship_by_slug(
             project.logical.relationships.push(Relationship {
                 id: id.clone(),
                 slug: slug.to_string(),
-                purpose: String::new(),
+                purpose: purpose.to_string(),
                 from: RelationshipEnd::Container(Id::generate()),
                 to: RelationshipEnd::Container(Id::generate()),
                 to_endpoint: Id::generate(),
