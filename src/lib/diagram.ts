@@ -35,7 +35,7 @@
 import type { DeploymentNode, Environment, Link, Project, UnboundShape } from './model'
 
 /** 一個要畫出來的形狀。 */
-interface Shape {
+export interface Shape {
   /** XML 裡的 cell id。線靠它接上來，所以每個形狀都要有。 */
   id: string
   /**
@@ -55,7 +55,7 @@ interface Shape {
 }
 
 /** draw.io 的 style 字串。集中在這裡，不要散在產生邏輯裡。 */
-const STYLE = {
+export const STYLE = {
   site: 'rounded=0;whiteSpace=wrap;html=1;fillColor=none;dashed=1;verticalAlign=top;fontStyle=1;',
   node: 'rounded=0;whiteSpace=wrap;html=1;fillColor=none;verticalAlign=top;',
   instance: 'rounded=1;whiteSpace=wrap;html=1;',
@@ -65,7 +65,7 @@ const STYLE = {
 } as const
 
 /** 線的 style。備援線要看得出來，不然圖上四條線一樣重，讀不出主路徑。 */
-const EDGE = {
+export const EDGE = {
   primary: 'edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;',
   fallback: 'edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#999999;',
 } as const
