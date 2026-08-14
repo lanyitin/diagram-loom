@@ -553,6 +553,20 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
                     .map(|x| (x.id.clone(), x.slug.clone())),
                 r,
             )?;
+            // 人只能當來源。
+            //
+            // # 為什麼建立時就擋，而不是只靠 L013
+            //
+            // 環境層的連線早就在 `edit::validate_connection` 擋同一件事，
+            // 理由寫在那裡：lint 是**事後**的——東西已經建進去了才叫你回頭修。
+            // 對「一看就知道錯」的東西那太晚了，而且它建出來之後長得像一條
+            // 正常的契約。
+            //
+            // L013 仍然留著，因為它蓋得到這裡蓋不到的：既有的舊資料，
+            // 以及手改的 YAML（純文字格式本來就是要給人改的）。
+            if matches!(rel.to, crate::logical::RelationshipEnd::Person(_)) {
+                return Err(EditError::PersonAsTarget);
+            }
             replace_or_push(
                 &mut project.logical.relationships,
                 rel.clone(),

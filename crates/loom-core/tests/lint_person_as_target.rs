@@ -111,3 +111,91 @@ fn a_person_that_does_not_exist_on_the_target_end_gets_both_complaints() {
     assert!(rules.contains(&Rule::L012), "{rules:?}");
     assert!(rules.contains(&Rule::L013), "{rules:?}");
 }
+
+/// 建立時就擋下來，不只事後叫。
+///
+/// # 為什麼兩層都要
+///
+/// `edit.rs` 的模組註解自己講過理由：lint 是**事後**的——東西已經建進去了
+/// 才叫你回頭修，而它建出來之後長得像一條正常的契約。環境層的連線早就在
+/// `validate_connection` 擋了同一件事，邏輯層的契約卻沒有。
+///
+/// L013 仍然留著，因為它蓋得到這裡蓋不到的：既有的舊資料，以及手改的
+/// YAML（純文字格式本來就是要給人改的）。
+mod rejected_at_creation {
+    use super::*;
+    use loom_core::edit::{self, Edit, EditError};
+    use loom_core::logical::Relationship;
+    use loom_core::resource::Resource;
+
+    fn contract_to(project: &loom_core::Project, to: RelationshipEnd) -> Resource {
+        let base = &project.logical.relationships[0];
+        Resource::Relationship(Relationship {
+            id: Id::new("r-新的"),
+            slug: "新契約".into(),
+            purpose: "測試".into(),
+            from: base.from.clone(),
+            to,
+            to_endpoint: base.to_endpoint.clone(),
+        })
+    }
+
+    #[test]
+    fn adding_a_contract_that_targets_a_person_is_refused() {
+        let project = with_a_person();
+        let bad = contract_to(&project, RelationshipEnd::Person(Id::new("p-客戶")));
+
+        let mut copy = project.clone();
+        assert_eq!(
+            edit::apply(&mut copy, &Edit::AddResource(bad)),
+            Err(EditError::PersonAsTarget),
+        );
+        // 擋下來就是真的沒建進去。
+        assert_eq!(
+            copy.logical.relationships.len(),
+            project.logical.relationships.len()
+        );
+    }
+
+    #[test]
+    fn a_person_on_the_source_end_is_still_allowed() {
+        // 這正是它存在的用途：「使用者連上系統」。
+        let mut project = with_a_person();
+        let ok = contract_to(&project, project.logical.relationships[0].to.clone());
+        let Resource::Relationship(mut rel) = ok else {
+            unreachable!()
+        };
+        rel.from = RelationshipEnd::Person(Id::new("p-客戶"));
+
+        edit::apply(
+            &mut project,
+            &Edit::AddResource(Resource::Relationship(rel)),
+        )
+        .expect("人當來源應該要過");
+    }
+
+    #[test]
+    fn editing_an_existing_contract_into_that_shape_is_refused_too() {
+        // 新增擋了、修改沒擋的話，繞一下就進去了。
+        let mut project = with_a_person();
+        let mut rel = project.logical.relationships[0].clone();
+        rel.to = RelationshipEnd::Person(Id::new("p-客戶"));
+
+        assert_eq!(
+            edit::apply(
+                &mut project,
+                &Edit::UpdateResource(Resource::Relationship(rel))
+            ),
+            Err(EditError::PersonAsTarget),
+        );
+    }
+
+    #[test]
+    fn lint_still_catches_data_that_got_in_some_other_way() {
+        // 手改 YAML 進來的、或這條檢查之前就存在的。兩層各守各的。
+        let mut project = with_a_person();
+        project.logical.relationships[0].to = RelationshipEnd::Person(Id::new("p-客戶"));
+
+        assert_eq!(person_problems(&project).len(), 1);
+    }
+}
