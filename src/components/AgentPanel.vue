@@ -8,6 +8,15 @@
  * Agent 那邊的設定裡只有一個 URL——跟著專案走的話，切一次專案
  * 那份設定就失效，而「不用每次重貼」正是這些設定存在的唯一理由。
  *
+ * 端點本身也是 App 層級的：它同時服務所有開著的專案，Agent 用 `project`
+ * 指名要動哪一個。所以「這個專案要不要開 MCP」在模型上不成立。
+ *
+ * # 開關就是偏好
+ *
+ * 這裡曾經有兩個控制項：一個開關，加一個「開啟 App 時自動啟用」。
+ * 於是打開端點的人下次還要再打開一次——除非他發現了第二個方塊。
+ * 現在開關自己記住（`mcp::remember`），畫面直說它記住了。
+ *
  * # 三道鎖，只有一道可以關
  *
  * 綁 `127.0.0.1` 與擋 `Origin` 是無條件的。token 可以關掉，
@@ -21,7 +30,8 @@ import type { McpStatus } from '../lib/model'
 const store = useProject()
 
 const status = ref<McpStatus>({
-  running: false, url: null, preferredPort: null, requireToken: true, autostart: false,
+  running: false, url: null, preferredPort: null, requireToken: true,
+  autostart: false, autostartFailed: null,
 })
 const config = ref<string | null>(null)
 const copied = ref(false)
@@ -43,12 +53,11 @@ async function refresh() {
 }
 
 /** 改設定。端點在跑的話 Rust 那邊會重開——埠與 token 是啟動時決定的。 */
-async function apply(next: Partial<{ port: number | null; requireToken: boolean; autostart: boolean }>) {
+async function apply(next: Partial<{ port: number | null; requireToken: boolean }>) {
   const port = 'port' in next ? next.port! : parsePort()
   const res = await commands.setMcpConfig(
     port,
     next.requireToken ?? status.value.requireToken,
-    next.autostart ?? status.value.autostart,
   )
   if (res.status !== 'ok') {
     store.error = (res.error as { message?: string })?.message ?? String(res.error)
@@ -123,6 +132,16 @@ async function copy() {
       <p v-if="!status.running && status.preferredPort !== null" class="muted hint">
         設定都在，但還沒啟用。勾上面那個就會開起來。
       </p>
+      <!-- 這個開關**就是**偏好本身，旁邊不再放第二個「而且下次也要」的方塊。
+           但要說出來——安靜地記住跟安靜地忘記一樣讓人不放心。 -->
+      <p v-if="status.autostart && status.running" class="muted hint">
+        記住了，下次開 App 會自動開起來。不想要的話把上面那個關掉。
+      </p>
+      <!-- 自動啟用失敗的話一定要說。不說的話畫面跟「忘了打開」長得一模一樣，
+           而使用者會以為自己上次忘了勾——那正是這個偏好要消滅的東西。 -->
+      <p v-if="status.autostartFailed" class="warn hint">
+        <strong>這次沒有自動開起來。</strong>{{ status.autostartFailed }}
+      </p>
 
       <div class="settings">
         <label class="field">
@@ -143,13 +162,6 @@ async function copy() {
             @change="apply({ requireToken: ($event.target as HTMLInputElement).checked })"
           >
           需要 token
-        </label>
-        <label class="check">
-          <input
-            type="checkbox" :checked="status.autostart"
-            @change="apply({ autostart: ($event.target as HTMLInputElement).checked })"
-          >
-          開啟 App 時自動啟用
         </label>
       </div>
 

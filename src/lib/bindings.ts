@@ -103,6 +103,9 @@ export const commands = {
 	 *  打開給 AI Agent 用的本機端點。
 	 * 
 	 *  判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
+	 * 
+	 *  **開了就記住。** 開關本身就是「我要不要這個端點」這個偏好，
+	 *  不需要旁邊再放一個「而且下次也要」——理由見 `mcp::remember`。
 	 */
 	startMcp: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("start_mcp")),
 	stopMcp: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("stop_mcp")),
@@ -115,11 +118,12 @@ export const commands = {
 	 */
 	mcpConfig: () => typedError<string | null, Failure>(__TAURI_INVOKE("mcp_config")),
 	/**
-	 *  改 AI 助手的偏好：埠、要不要 token、要不要自動啟用。
+	 *  改 AI 助手的偏好：埠、要不要 token。
 	 * 
 	 *  端點正在跑的話會重開——埠與 token 都是啟動時決定的。
+	 *  「要不要自動啟用」不在這裡，它由開關自己寫。
 	 */
-	setMcpConfig: (port: number | null, requireToken: boolean, autostart: boolean) => typedError<McpStatus, Failure>(__TAURI_INVOKE("set_mcp_config", { port, requireToken, autostart })),
+	setMcpConfig: (port: number | null, requireToken: boolean) => typedError<McpStatus, Failure>(__TAURI_INVOKE("set_mcp_config", { port, requireToken })),
 	/**  換一組新的 token。舊的立刻失效。 */
 	regenerateMcpToken: () => typedError<McpStatus, Failure>(__TAURI_INVOKE("regenerate_mcp_token")),
 	/**
@@ -1358,6 +1362,8 @@ export type McpStatus = {
 	preferredPort: number | null,
 	requireToken: boolean,
 	autostart: boolean,
+	/**  開機自動啟用失敗了的話，原因。成功或沒開自動啟用時是 `None`。 */
+	autostartFailed: string | null,
 };
 
 /**  運算載體的種類。 */

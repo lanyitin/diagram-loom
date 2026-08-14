@@ -89,8 +89,16 @@ pub struct Running {
     shutdown: tokio::sync::oneshot::Sender<()>,
 }
 
+/// 端點的狀態。**開機自動啟用失敗的原因也留在這裡。**
+///
+/// 少了 `autostart_failed`，自動啟用撞到埠被佔用時是**完全安靜**的：
+/// 使用者以為端點開著，Agent 連不進來，而畫面上看起來就跟他忘了打開一樣。
+/// 那正是「自動啟用」要消滅的那個症狀，只是換了個原因。
 #[derive(Default)]
-pub struct Server(pub Option<Running>);
+pub struct Server {
+    pub running: Option<Running>,
+    pub autostart_failed: Option<String>,
+}
 
 /// 存在 App 設定區的偏好。**跟著這台機器，不跟著專案。**
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +120,10 @@ pub struct AgentConfig {
     /// 預設 `false`：這是可以改你檔案的端點，不該安靜地開著。
     /// 但使用者自己打開過之後，下次不必再打開一次——
     /// 一個每次都要重設的偏好等於沒有偏好。
+    ///
+    /// ⚠️ 這句話曾經只是一句話：畫面上另外放了一個「開啟 App 時自動啟用」
+    /// 核取方塊，於是打開端點的人下次還是要再打開一次。現在**開關本身
+    /// 就是這個偏好**，只有 [`remember`] 寫得動它。
     pub autostart: bool,
 }
 
@@ -137,6 +149,8 @@ pub struct McpStatus {
     pub preferred_port: Option<u16>,
     pub require_token: bool,
     pub autostart: bool,
+    /// 開機自動啟用失敗了的話，原因。成功或沒開自動啟用時是 `None`。
+    pub autostart_failed: Option<String>,
 }
 
 // ── 工具：轉接到 loom-mcp ────────────────────────────────────────
@@ -390,18 +404,59 @@ fn save_config(app: &AppHandle, config: &AgentConfig) -> Result<(), String> {
 }
 
 /// 改設定。端點正在跑的話會**重開**，因為埠與 token 都是啟動時決定的。
+///
+/// **不收 `autostart`**：那個偏好只有開關本身寫得動（見 [`remember`]）。
+/// 兩個地方寫得到同一個值，遲早會有一個把另一個蓋掉——這裡尤其危險，
+/// 因為這個函式結尾會重開端點。
 pub fn set_config(
     app: &AppHandle,
     port: Option<u16>,
     require_token: bool,
-    autostart: bool,
 ) -> Result<McpStatus, String> {
     let mut config = config(app);
     config.port = port;
     config.require_token = require_token;
-    config.autostart = autostart;
     save_config(app, &config)?;
     restart_if_running(app)
+}
+
+/// 記住「使用者要不要這個端點開著」。
+///
+/// # 為什麼開關本身就是偏好
+///
+/// 這裡原本有兩個控制項：一個開關，一個「開啟 App 時自動啟用」核取方塊。
+/// 於是打開端點的人下次還要再打開一次——除非他發現了第二個方塊。
+///
+/// 而 `AgentConfig::autostart` 的註解一直寫著「使用者自己打開過之後，
+/// 下次不必再打開一次」。那句話描述的是這裡，不是那個核取方塊：
+/// **一個每次都要重設的偏好等於沒有偏好。**
+///
+/// 預設仍然是關的——可以改你檔案的端點不該在誰都沒說過的情況下開著。
+/// 但「他自己打開過」就是說過了。
+///
+/// ⚠️ 只有 [`crate::start_mcp`] / [`crate::stop_mcp`] 這兩個 command 呼叫得到。
+/// 放進 [`start`] 的話 [`restart_if_running`] 會順手把它打開，
+/// 於是「端點開著時關掉自動啟用」變成做不到。
+pub fn remember(app: &AppHandle, autostart: bool) -> Result<(), String> {
+    let mut config = config(app);
+    if config.autostart == autostart {
+        // 沒變就不要重寫檔案。每次開機都改寫一次設定檔沒有意義。
+        return Ok(());
+    }
+    config.autostart = autostart;
+    save_config(app, &config)
+}
+
+/// 開機自動啟用。失敗的原因留著給畫面說，**不要吞掉**。
+pub fn autostart(app: &AppHandle) {
+    if !config(app).autostart {
+        return;
+    }
+    if let Err(why) = start(app)
+        && let Ok(mut server) = app.state::<Mutex<Server>>().lock()
+    {
+        server.autostart_failed = Some(why);
+    }
 }
 
 /// 換一組新的 token。舊的立刻失效。
@@ -416,7 +471,7 @@ fn restart_if_running(app: &AppHandle) -> Result<McpStatus, String> {
     let was_running = {
         let server = app.state::<Mutex<Server>>();
         let running = server.lock().map_err(|_| "內部狀態毀損")?;
-        running.0.is_some()
+        running.running.is_some()
     };
     if !was_running {
         return status_of(app);
@@ -438,8 +493,12 @@ pub fn start(app: &AppHandle) -> Result<McpStatus, String> {
     let server = app.state::<Mutex<Server>>();
     {
         let running = server.lock().map_err(|_| "內部狀態毀損")?;
-        if let Some(r) = &running.0 {
-            return Ok(status(Some(r), &config(app)));
+        if let Some(r) = &running.running {
+            return Ok(status(
+                Some(r),
+                running.autostart_failed.as_deref(),
+                &config(app),
+            ));
         }
     }
 
@@ -478,32 +537,47 @@ pub fn start(app: &AppHandle) -> Result<McpStatus, String> {
     });
 
     let mut running = server.lock().map_err(|_| "內部狀態毀損")?;
-    running.0 = Some(Running { port, shutdown: tx });
-    Ok(status(running.0.as_ref(), &config(app)))
+    running.running = Some(Running { port, shutdown: tx });
+    // 開起來了，上次自動啟用失敗的那句話就不再成立。
+    running.autostart_failed = None;
+    Ok(status(
+        running.running.as_ref(),
+        running.autostart_failed.as_deref(),
+        &config(app),
+    ))
 }
 
 pub fn stop(app: &AppHandle) -> Result<McpStatus, String> {
     let server = app.state::<Mutex<Server>>();
     let mut running = server.lock().map_err(|_| "內部狀態毀損")?;
-    if let Some(r) = running.0.take() {
+    if let Some(r) = running.running.take() {
         let _ = r.shutdown.send(());
     }
-    Ok(status(None, &config(app)))
+    Ok(status(
+        None,
+        running.autostart_failed.as_deref(),
+        &config(app),
+    ))
 }
 
 pub fn status_of(app: &AppHandle) -> Result<McpStatus, String> {
     let server = app.state::<Mutex<Server>>();
     let running = server.lock().map_err(|_| "內部狀態毀損")?;
-    Ok(status(running.0.as_ref(), &config(app)))
+    Ok(status(
+        running.running.as_ref(),
+        running.autostart_failed.as_deref(),
+        &config(app),
+    ))
 }
 
-fn status(running: Option<&Running>, config: &AgentConfig) -> McpStatus {
+fn status(running: Option<&Running>, failed: Option<&str>, config: &AgentConfig) -> McpStatus {
     McpStatus {
         running: running.is_some(),
         url: running.map(|r| format!("http://127.0.0.1:{}/mcp", r.port)),
         preferred_port: config.port,
         require_token: config.require_token,
         autostart: config.autostart,
+        autostart_failed: failed.map(str::to_string),
     }
 }
 
@@ -527,7 +601,7 @@ pub fn config_snippet(app: &AppHandle) -> Result<Option<String>, String> {
     let server = app.state::<Mutex<Server>>();
     let running = server.lock().map_err(|_| "內部狀態毀損")?;
     let settings = config(app);
-    Ok(running.0.as_ref().map(|r| {
+    Ok(running.running.as_ref().map(|r| {
         let mut entry = json!({
             "type": "http",
             "url": format!("http://127.0.0.1:{}/mcp", r.port),
@@ -568,7 +642,7 @@ mod tests {
             token: "秘密".into(),
             ..AgentConfig::default()
         };
-        let s = status(Some(&r), &config);
+        let s = status(Some(&r), None, &config);
         assert_eq!(s.url.as_deref(), Some("http://127.0.0.1:1234/mcp"));
         assert!(!serde_json::to_string(&s).unwrap().contains("秘密"));
     }
@@ -599,6 +673,40 @@ mod tests {
         assert!(!after.require_token);
         assert_eq!(after.token, "abc");
         assert!(after.autostart);
+    }
+
+    #[test]
+    fn only_the_switch_writes_the_autostart_preference() {
+        // 兩個地方寫得動同一個偏好，遲早有一個把另一個蓋掉。這裡尤其危險：
+        // `set_config` 結尾會 `restart_if_running`，而重開會走 `start`。
+        // 若 `start` 也順手記一次，「關掉自動啟用」就會被自己的重開撤銷。
+        //
+        // 現在是型別擋住的（`set_config` 收不到 autostart），這條測試守的是
+        // 另外那半邊：`start` 不准碰它。
+        let source = include_str!("mcp.rs");
+        let start = source
+            .split("pub fn start(")
+            .nth(1)
+            .expect("找不到 start()");
+        let body = start.split("\npub fn ").next().unwrap();
+        assert!(
+            !body.contains("remember("),
+            "start() 碰了 autostart 偏好——重開端點會把使用者關掉的偏好打開回來"
+        );
+    }
+
+    #[test]
+    fn the_startup_failure_reaches_the_screen() {
+        // 自動啟用失敗如果只是被吞掉，畫面跟「忘了打開」長得一模一樣，
+        // 而使用者會以為自己上次忘了勾——那正是這個偏好要消滅的東西。
+        let config = AgentConfig {
+            autostart: true,
+            ..AgentConfig::default()
+        };
+        let s = status(None, Some("埠 53809 開不起來"), &config);
+        assert!(!s.running);
+        assert!(s.autostart);
+        assert_eq!(s.autostart_failed.as_deref(), Some("埠 53809 開不起來"));
     }
 
     #[test]

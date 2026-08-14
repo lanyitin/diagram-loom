@@ -710,16 +710,25 @@ fn environment_of<'a>(
 /// 打開給 AI Agent 用的本機端點。
 ///
 /// 判斷與工具都在 `loom-mcp`，這裡只負責開關與把狀態交給畫面。
+///
+/// **開了就記住。** 開關本身就是「我要不要這個端點」這個偏好，
+/// 不需要旁邊再放一個「而且下次也要」——理由見 `mcp::remember`。
 #[tauri::command]
 #[specta::specta]
 fn start_mcp(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
-    mcp::start(&app).map_err(Into::into)
+    let status = mcp::start(&app)?;
+    // 端點已經開起來了，偏好寫不進去也不該讓這次操作失敗——
+    // 頂多是下次要再開一次，而現在是通的。
+    let _ = mcp::remember(&app, true);
+    Ok(status)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn stop_mcp(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
-    mcp::stop(&app).map_err(Into::into)
+    let status = mcp::stop(&app)?;
+    let _ = mcp::remember(&app, false);
+    Ok(status)
 }
 
 #[tauri::command]
@@ -728,18 +737,18 @@ fn mcp_status(app: tauri::AppHandle) -> Result<mcp::McpStatus, Failure> {
     mcp::status_of(&app).map_err(Into::into)
 }
 
-/// 改 AI 助手的偏好：埠、要不要 token、要不要自動啟用。
+/// 改 AI 助手的偏好：埠、要不要 token。
 ///
 /// 端點正在跑的話會重開——埠與 token 都是啟動時決定的。
+/// 「要不要自動啟用」不在這裡，它由開關自己寫。
 #[tauri::command]
 #[specta::specta]
 fn set_mcp_config(
     app: tauri::AppHandle,
     port: Option<u16>,
     require_token: bool,
-    autostart: bool,
 ) -> Result<mcp::McpStatus, Failure> {
-    mcp::set_config(&app, port, require_token, autostart).map_err(Into::into)
+    mcp::set_config(&app, port, require_token).map_err(Into::into)
 }
 
 /// 換一組新的 token。舊的立刻失效。
@@ -917,9 +926,9 @@ pub fn run() {
             app.manage(Desk::default());
             app.manage(Mutex::new(mcp::Server::default()));
             // 使用者上次打開過就自動打開。一個每次都要重設的偏好等於沒有偏好。
-            if mcp::config(&app.handle().clone()).autostart {
-                let _ = mcp::start(&app.handle().clone());
-            }
+            // 開不起來的原因留在狀態裡給畫面說——吞掉的話症狀跟「忘了打開」
+            // 一模一樣，而那正是這個偏好要消滅的東西。
+            mcp::autostart(&app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

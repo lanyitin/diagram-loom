@@ -32,6 +32,7 @@ function state(extra: Partial<McpStatus> = {}): McpStatus {
     preferredPort: 53809,
     requireToken: true,
     autostart: false,
+    autostartFailed: null,
     ...extra,
   }
 }
@@ -73,14 +74,14 @@ describe('AI 助手面板', () => {
     const w = await open()
     await w.find('.field input').setValue('40000')
     await w.find('.field input').trigger('change')
-    expect(commands.setMcpConfig).toHaveBeenCalledWith(40000, true, false)
+    expect(commands.setMcpConfig).toHaveBeenCalledWith(40000, true)
   })
 
   it('填了不是埠的東西就當作沒指定，不是送一個壞值下去', async () => {
     const w = await open()
     await w.find('.field input').setValue('七萬')
     await w.find('.field input').trigger('change')
-    expect(commands.setMcpConfig).toHaveBeenCalledWith(null, true, false)
+    expect(commands.setMcpConfig).toHaveBeenCalledWith(null, true)
   })
 
   it('可以換一組 token', async () => {
@@ -127,6 +128,44 @@ describe('AI 助手面板', () => {
 
     expect(w.find('.switch').text()).toContain('連不進來')
     expect(w.find('.hint').text()).toContain('還沒啟用')
+  })
+
+  it('打開就記住，而且畫面說得出來', async () => {
+    // 這裡曾經有兩個控制項：一個開關，加一個「開啟 App 時自動啟用」。
+    // 於是打開端點的人下次還要再打開一次——除非他發現了第二個方塊。
+    // 現在開關本身就是偏好，Rust 那邊記住（`mcp::remember`）。
+    const w = await open()
+
+    expect(
+      w.findAll('.check').some((l) => l.text().includes('自動')),
+      '不該再有第二個「而且下次也要」的方塊',
+    ).toBe(false)
+  })
+
+  it('記住了就要說出來', async () => {
+    // 安靜地記住跟安靜地忘記一樣讓人不放心。
+    vi.mocked(commands.mcpStatus).mockResolvedValue({
+      status: 'ok', data: state({ autostart: true }),
+    } as never)
+    const w = await open()
+
+    expect(w.text()).toContain('下次開 App')
+  })
+
+  it('自動啟用失敗時一定要說', async () => {
+    // 不說的話畫面跟「忘了打開」長得一模一樣，而使用者會以為自己上次
+    // 忘了勾——那正是這個偏好要消滅的東西。
+    vi.mocked(commands.mcpStatus).mockResolvedValue({
+      status: 'ok',
+      data: state({
+        running: false, url: null, autostart: true,
+        autostartFailed: '埠 53809 開不起來（可能被別的程式佔用了）',
+      }),
+    } as never)
+    const w = await open()
+
+    expect(w.text()).toContain('沒有自動開起來')
+    expect(w.text()).toContain('53809')
   })
 
   it('狀態同步給標頭那顆燈', async () => {
