@@ -50,7 +50,22 @@ const graph = new Graph($('canvas'))
 graph.setCellsMovable(true)
 graph.setCellsResizable(true)
 graph.setCellsEditable(true)
-graph.setDropEnabled(false)
+
+/**
+ * 放得進容器。
+ *
+ * ⚠️ 這條**非開不可**。真實世界的架構圖是巢狀的（中心 → 群組 → 伺服器 →
+ * 裡面的小框，三到四層），而 `dropEnabled` 預設是關的——拖一個框到容器上
+ * 放開，它只是**疊在上面**，父子關係完全沒變。畫面看起來對，結構是錯的，
+ * 而且要等到摺疊容器（或存檔）才會發現。
+ */
+graph.setDropEnabled(true)
+// 子節點被拖到容器外緣時，讓容器跟著長大，而不是把子節點壓回去。
+graph.setExtendParents(true)
+graph.setExtendParentsOnAdd(true)
+graph.setConstrainChildren(false)
+// 拖到一條線上不要把那條線切斷——draw.io 有這個，但它很容易誤觸。
+graph.setSplitEnabled(false)
 
 // 值可能是 XML 元素（帶自訂屬性）。**這行要在任何東西畫出來之前**，
 // 否則標籤會變成 `object`。

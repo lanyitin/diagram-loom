@@ -79,7 +79,9 @@ export function formatPanel(graph, { onChange = () => {} } = {}) {
 
   // ── 形狀 ────────────────────────────────────────────────────
   const fill = color((v) => style('fillColor', v))
-  const stroke = color((v) => style('strokeColor', v), { none: false })
+  // ⚠️ 框線也要有「無」。少了它就做不出**沒有邊框的文字**——而真實的架構圖
+  // 上到處都是那種東西：區塊說明、圖例文字、線旁邊的註記。
+  const stroke = color((v) => style('strokeColor', v))
   const strokeWidth = number((v) => style('strokeWidth', v), { min: 0, max: 24, step: 0.5 })
   const dashed = toggle('虛線', (on) => style('dashed', on))
   const rounded = toggle('圓角', (on) => style('rounded', on))

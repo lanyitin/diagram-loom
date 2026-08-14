@@ -502,6 +502,80 @@ const drawn = await page.evaluate(() => {
 check('從接點拖到另一個形狀就連起來了', drawn.n === 1 && drawn.from === 'A' && drawn.to === 'B',
   `${drawn.n} 條：${drawn.from} → ${drawn.to}`)
 
+// ── 轉彎點與複製樣式 ────────────────────────────────────────────
+
+section('轉彎點與複製樣式（畫真實架構圖要的）')
+
+// 上一節把圖清空了（拉線要在空曠的地方測），這一節要原本那張圖，所以重載。
+await page.reload({ waitUntil: 'networkidle0' })
+await new Promise((r) => setTimeout(r, 900))
+
+/**
+ * ⚠️ 直角線用的是 `EdgeSegmentHandler`：**拖整段線**平移，跟 draw.io 一樣。
+ * 這個本來就會，我原本以為整個沒有。
+ */
+await page.evaluate(() => {
+  const g = window.__editor.graph
+  g.clearSelection()
+  g.setSelectionCell(g.model.getCell('e2'))
+})
+await new Promise((r) => setTimeout(r, 300))
+const before3 = await page.evaluate(() =>
+  JSON.stringify(window.__editor.graph.model.getCell('e2').getGeometry()?.points?.map((p) => Math.round(p.x))))
+const handle = await page.evaluate(() => {
+  const g = window.__editor.graph
+  const h = g.getPlugin('SelectionCellsHandler').getHandler(g.model.getCell('e2'))
+  const box = g.container.getBoundingClientRect()
+  const b = h.bends[Math.floor(h.bends.length / 2)]
+  return { x: box.left + b.bounds.getCenterX(), y: box.top + b.bounds.getCenterY(), n: h.bends.length }
+})
+await page.mouse.move(handle.x, handle.y)
+await page.mouse.down()
+await page.mouse.move(handle.x + 90, handle.y, { steps: 20 })
+await new Promise((r) => setTimeout(r, 150))
+await page.mouse.up()
+await new Promise((r) => setTimeout(r, 350))
+const after3 = await page.evaluate(() =>
+  JSON.stringify(window.__editor.graph.model.getCell('e2').getGeometry()?.points?.map((p) => Math.round(p.x))))
+check('拖線段可以改走法（直角線）', before3 !== after3, `${before3} → ${after3}`)
+
+/** 直線的線改用 `EdgeHandler`，那種才吃 virtual bends。 */
+check('直線的線有「加一個轉彎點」的握把',
+  await page.evaluate(() => {
+    const g = window.__editor.graph
+    const cell = g.model.getCell('e3')
+    g.batchUpdate(() => g.setCellStyles('edgeStyle', null, [cell]))
+    g.clearSelection()
+    g.setSelectionCell(cell)
+    const h = g.getPlugin('SelectionCellsHandler').getHandler(cell)
+    return (h?.virtualBends?.length ?? 0) > 0
+  }),
+  'EdgeHandlerConfig.virtualBendsEnabled')
+
+/** 複製樣式：四十個框要長得一樣，靠一個一個改是漏掉的來源。 */
+await page.evaluate(() => {
+  const g = window.__editor.graph
+  const cell = g.model.getCell('redis-01')
+  g.clearSelection()
+  g.setSelectionCell(cell)
+  g.batchUpdate(() => {
+    g.setCellStyles('fillColor', '#ffd479', [cell])
+    g.setCellStyles('strokeWidth', 3, [cell])
+  })
+})
+await page.click('.toolbar button[title="複製樣式 ⌥⌘C"]')
+await page.evaluate(() => {
+  const g = window.__editor.graph
+  g.setSelectionCells([g.model.getCell('redis-02'), g.model.getCell('redis-03')])
+})
+await page.click('.toolbar button[title="貼上樣式 ⌥⌘V"]')
+await new Promise((r) => setTimeout(r, 300))
+const pasted = await page.evaluate(() => ['redis-02', 'redis-03'].map((id) => {
+  const s = window.__editor.graph.model.getCell(id).getStyle()
+  return `${s.fillColor}/${s.strokeWidth}`
+}))
+check('複製樣式一次套到多個形狀', pasted.every((s) => s === '#ffd479/3'), pasted.join('、'))
+
 await page.screenshot({ path: 'out/editor.png' })
 console.log('\n  截圖：out/editor.png')
 

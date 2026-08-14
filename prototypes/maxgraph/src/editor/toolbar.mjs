@@ -42,6 +42,8 @@ export function toolbar(graph, undoManager, { onChange = () => {}, clip, onEditD
     ['⇩', '靠下對齊', run(() => graph.alignCells('bottom'))],
     null,
     ['⧉', '複製一份 ⌘D', run(() => clip?.duplicate())],
+    ['🖌', '複製樣式 ⌥⌘C', run(() => clip?.copyStyle())],
+    ['🖌↓', '貼上樣式 ⌥⌘V', run(() => clip?.pasteStyle())],
     ['資料', '編輯資料 ⌘M', run(() => onEditData?.())],
     null,
     ['群組', '群組 ⌘G', run(() => graph.groupCells(null, 8))],
@@ -92,6 +94,11 @@ export function keyboard(graph, undoManager, { onChange = () => {}, clip, onEdit
       e.shiftKey ? graph.ungroupCells() : graph.groupCells(null, 8)
     } else if (meta && e.key === 'a') {
       graph.selectAll()
+    } else if (meta && e.altKey && e.code === 'KeyC') {
+      // ⚠️ 這裡要看 `code` 不能看 `key`：macOS 上按著 ⌥ 打 C，`key` 會是 `ç`。
+      clip?.copyStyle()
+    } else if (meta && e.altKey && e.code === 'KeyV') {
+      clip?.pasteStyle()
     } else if (meta && e.key === 'c') {
       clip?.copy()
     } else if (meta && e.key === 'x') {

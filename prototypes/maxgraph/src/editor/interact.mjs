@@ -5,7 +5,7 @@
  * 每一個不一樣的地方都是一次「咦？」。
  */
 
-import { Clipboard, ImageBox, InternalEvent, Point } from '@maxgraph/core'
+import { Clipboard, EdgeHandlerConfig, ImageBox, InternalEvent, Point } from '@maxgraph/core'
 
 /**
  * 拉線。
@@ -66,6 +66,32 @@ export function connecting(graph) {
   // 使用者自己拉的線走直角，跟我們產的圖一致。
   graph.getStylesheet().getDefaultEdgeStyle().edgeStyle = 'orthogonalEdgeStyle'
   graph.getStylesheet().getDefaultEdgeStyle().rounded = false
+
+  waypoints()
+}
+
+/**
+ * 轉彎點。
+ *
+ * ⚠️ **這件事一半本來就會，我原本以為整個沒有。** maxGraph 依線的走法給
+ * 不同的 handler，兩種的操作方式完全不一樣：
+ *
+ * | 走法 | handler | 怎麼改 | 這一輪做了什麼 |
+ * | --- | --- | --- | --- |
+ * | 直角（預設） | `EdgeSegmentHandler` | **拖整段線**平移，跟 draw.io 一樣 | 本來就能用 |
+ * | 直線 | `EdgeHandler` | 拖線段中間那顆半透明的點，多一個轉彎點 | 這裡才打開 |
+ *
+ * 第二種的 virtual bends 預設是**關的**，而且透明度只有 20（幾乎看不見）。
+ * 而它只對「沒有走法」的線生效——`isVirtualBendsEnabled` 明文要求
+ * `edgeStyle == null`，因為有繞線器的時候，「在這一段中間插一個點」是
+ * 有歧義的。
+ */
+function waypoints() {
+  EdgeHandlerConfig.virtualBendsEnabled = true
+  // 20 太淡了。這一輪一直踩到的都是「功能在但看不到」，不要再多一個。
+  EdgeHandlerConfig.virtualBendOpacity = 55
+  // ⇧ 點線上任一處也能加一個點，跟 draw.io 一樣。
+  EdgeHandlerConfig.addBendOnShiftClickEnabled = true
 }
 
 /**
@@ -92,7 +118,35 @@ export function clipboard(graph, { onChange = () => {} } = {}) {
     return cells
   }
 
+  /**
+   * 複製樣式／貼上樣式（draw.io 的 ⌥⌘C／⌥⌘V）。
+   *
+   * 一張真實的架構圖有幾十個框要長得一樣。沒有這一招的話，改配色就是
+   * **一個一個改四十次**——而且一定會漏掉一兩個，那正是這工具最怕的。
+   *
+   * 複製的是 cell **自己的** style（`getStyle()`），不是解析後的完整樣式。
+   * 解析後的那份混了 stylesheet 的預設值，貼過去會把預設值也焊死在形狀上，
+   * 之後改預設就再也影響不到它了。
+   */
+  let copied = null
+
   return {
+    copyStyle: () => {
+      const [cell] = graph.getSelectionCells()
+      if (cell) copied = { ...cell.getStyle() }
+      return copied
+    },
+    pasteStyle: () => {
+      if (!copied) return
+      graph.batchUpdate(() => {
+        for (const cell of graph.getSelectionCells()) {
+          graph.model.setStyle(cell, { ...copied })
+        }
+      })
+      onChange()
+    },
+    hasStyle: () => copied !== null,
+
     copy: () => Clipboard.copy(graph),
     cut: () => { Clipboard.cut(graph); onChange() },
     paste: () => { unbind(Clipboard.paste(graph)); onChange() },
@@ -131,6 +185,22 @@ export function contextMenu(graph, { clip, onEditData, onChange = () => {} }) {
       menu.addSeparator()
       menu.addItem('編輯文字', null, () => graph.startEditingAtCell(selected[0]))
       menu.addItem('編輯資料…', null, () => onEditData(selected[0]))
+      menu.addSeparator()
+      menu.addItem('複製樣式', null, () => clip.copyStyle())
+      if (clip.hasStyle()) menu.addItem('貼上樣式', null, () => clip.pasteStyle())
+      if (selected.some((c) => c.isEdge())) {
+        menu.addItem('拉直（清掉轉彎點）', null, () => {
+          graph.batchUpdate(() => {
+            for (const cell of selected.filter((c) => c.isEdge())) {
+              const geo = cell.getGeometry()?.clone()
+              if (!geo) continue
+              geo.points = []
+              graph.model.setGeometry(cell, geo)
+            }
+          })
+          onChange()
+        })
+      }
       menu.addSeparator()
       menu.addItem('置前', null, () => { graph.orderCells(false, selected); onChange() })
       menu.addItem('置後', null, () => { graph.orderCells(true, selected); onChange() })
