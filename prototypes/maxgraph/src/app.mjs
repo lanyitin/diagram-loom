@@ -11,16 +11,12 @@
  * 讀得進去，但讀得進去不等於畫得出來。這裡真的拿一個 draw.io 的形狀來畫。
  */
 
-import {
-  Graph,
-  InternalEvent,
-  Point,
-  StencilShape,
-  StencilShapeRegistry,
-} from '@maxgraph/core'
+import { Graph, InternalEvent, StencilShape, StencilShapeRegistry } from '@maxgraph/core'
 
 import { fixture } from './fixture.mjs'
 import { layout, walk } from './layout.mjs'
+// 這個檔案自己有一個 render()（重畫側邊欄），所以改個名字進來。
+import { render as draw } from './render.mjs'
 
 const log = (line) => {
   document.getElementById('log').textContent += `${line}\n`
@@ -72,57 +68,7 @@ const model = fixture()
 const { laid, ms } = await layout(model)
 log(`elkjs 排版 ${Math.round(ms)} ms，整張圖 ${Math.round(laid.width)}×${Math.round(laid.height)}`)
 
-/** ELK 的座標是相對於父節點的，maxGraph 的也是——所以直接放，不必換算。 */
-const cells = new Map()
-graph.batchUpdate(() => {
-  const place = (node, parent) => {
-    const cell = graph.insertVertex({
-      parent,
-      id: node.id,
-      value: node.id,
-      position: [node.x, node.y],
-      size: [node.width, node.height],
-      style: styleOf(node),
-    })
-    cells.set(node.id, cell)
-    for (const child of node.children ?? []) place(child, cell)
-  }
-  for (const node of laid.children ?? []) place(node, graph.getDefaultParent())
-
-  // ⚠️ **ELK 算好的轉彎點一定要寫回去。**
-  //
-  // 不寫的話 maxGraph 會自己用 `orthogonalEdgeStyle` 重繞一次，而它不知道
-  // 容器在哪——實測畫出來的線會直接**穿過兩層機房**。看起來像排版很爛，
-  // 其實是我們把排版的成果丟掉了。
-  //
-  // draw.io 那邊這一段是它的 applier 幫我們做的。自己接就得自己做，
-  // 這幾行就是「自己接要付多少」的一部分。
-  const routes = new Map((laid.edges ?? []).map((e) => [e.id, e]))
-  for (const edge of model.edges) {
-    // `window.__noBends = true` 會關掉寫回，用來拍「不寫回長什麼樣」的對照組
-    // （`out/no-bends.png`）。留著是因為那張圖是這個結論唯一的證據。
-    const bends = window.__noBends
-      ? []
-      : (routes.get(edge.id)?.sections ?? []).flatMap((s) => s.bendPoints ?? [])
-    const cell = graph.insertEdge({
-      parent: graph.getDefaultParent(),
-      id: edge.id,
-      source: cells.get(edge.from),
-      target: cells.get(edge.to),
-      // ⚠️ 有轉彎點的時候**不要再給 edgeStyle**。ELK 給的已經是一條完整的
-      // 正交折線，再套一個繞線器等於讓兩個東西同時決定線怎麼走，
-      // 而贏的是 maxGraph 那個——它不知道容器在哪。
-      style: bends.length ? { rounded: false } : { edgeStyle: 'orthogonalEdgeStyle' },
-    })
-    if (bends.length) {
-      // ⚠️ 直接改 `getGeometry().points` 沒有用：那樣不會產生一筆變更紀錄，
-      // 畫面不知道要重畫。**看起來就像轉彎點被忽略了。**
-      const geometry = cell.getGeometry().clone()
-      geometry.points = bends.map((p) => new Point(p.x, p.y))
-      graph.model.setGeometry(cell, geometry)
-    }
-  }
-})
+const cells = draw(graph, laid, model, styleOf)
 
 let drawn = 0
 walk(laid, () => { drawn += 1 })

@@ -21,9 +21,17 @@
 ```sh
 pnpm install
 pnpm probe      # 不開視窗：排版品質、規模、形狀庫（23 項）
-pnpm app        # 開一個真的畫面，自己去點
+pnpm app        # 開畫面。/ 是第一輪的最小原型，/editor.html 是編輯器
 pnpm click      # 另開終端機，用真的 Chrome 點下去（11 項）
+pnpm editor     # 編輯器的 widget：改樣式、對齊、復原（22 項）
 ```
+
+## 兩個入口
+
+| 網址 | 在回答什麼 | 結論寫在 |
+| --- | --- | --- |
+| `/` | 上面那四個問題（畫得出來、點得到、stencil） | [maxgraph-findings.md](../../../docs/maxgraph-findings.md) |
+| `/editor.html` | **取代 draw.io 之後需要哪些 widget** | [editor-widgets.md](../../../docs/editor-widgets.md) |
 
 離開碼：`0` 全過、`1` 有項目失敗。
 
