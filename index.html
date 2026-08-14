@@ -10,8 +10,9 @@
      那是 NSSpellChecker 的設定，網頁碰不到。見 src-tauri/src/lib.rs 的
      `stop_the_os_from_rewriting_what_you_type`。兩層都要。
 
-     spellcheck 沒有關：紅色波浪底線只是提示，不會偷改字。 -->
-<html lang="zh-Hant" autocorrect="off" autocapitalize="off">
+     spellcheck 一起關掉：這裡打的 slug、IP、JDBC URL 沒有一個查得到字典，
+     整個畫面會鋪滿紅色波浪底線。而這個工具會被開一整天。 -->
+<html lang="zh-Hant" autocorrect="off" autocapitalize="off" spellcheck="false">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">

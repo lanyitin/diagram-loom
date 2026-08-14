@@ -88,11 +88,16 @@ pub fn list() -> Value {
   node              environment, slug, kind(site/physical/virtual-machine/linux-container), within(選填)
   infra             environment, slug
   infra_endpoint    environment, owner(設備的 slug), slug, address
+  instance          environment, node(機器的 slug), slug, container(服務的 slug),
+                    address, endpoint(選填), standalone(選填 bool)
+                    **一台機器上要跑第二個服務就用這個**（例如 app 跟 log-agent
+                    同機）。node 填那台已經存在的機器。
   system_instance   environment, slug, system(系統的 slug), address, endpoint(選填)
                     address 是「這個外部系統在這個環境打哪裡」，例如 sso.corp.local:443。
                     那個系統有好幾個接點定義時才需要 endpoint 指名要填哪一個。
 
-要一次建很多台**同一個服務**的機器請改用 create_nodes，它會照樣板配 IP。",
+要一次建很多台**同一個服務**的機器請改用 create_nodes，它會照樣板配 IP，
+但**每個服務實體都會配一台新機器**。要共用機器就用上面的 instance。",
             json!({
                 "type": "object",
                 "required": ["items"],
@@ -107,7 +112,8 @@ pub fn list() -> Value {
                             "properties": {
                                 "kind": {"type": "string", "enum": [
                                     "system", "container", "endpoint_def", "relationship", "person",
-                                    "environment", "node", "infra", "infra_endpoint", "system_instance"]},
+                                    "environment", "node", "infra", "infra_endpoint",
+                                    "instance", "system_instance"]},
                                 "fields": {"type": "object", "description": "見上面各 kind 的欄位"}
                             }
                         }
@@ -203,7 +209,12 @@ pub fn list() -> Value {
 
         tool("update", "\
 改一個既有元素的欄位。`id` 從 describe 或 lint 的輸出拿。
-只填要改的欄位，沒填的不動。",
+只填要改的欄位，沒填的不動。
+
+服務實體給 `node` 就是**搬到另一台機器上**（舊的那台不會留下一份）。
+
+換環境、換擁有者做不到——那不是改一個欄位，是換一個東西。
+帶了會被擋下來並且告訴你怎麼做，不會假裝改好了。",
             json!({
                 "type": "object",
                 "required": ["id", "fields"],
@@ -571,11 +582,20 @@ fn build_resource(project: &Project, item: &Value) -> Result<Resource, String> {
             Some(env_id(project, str_field(&fields, "environment")?)?),
             Some(system_id(project, str_field(&fields, "system")?)?),
         ),
+        // 服務實體。`node` 不在這裡解，交給 `fill`——那樣「放到哪台機器上」
+        // 建立與修改走的是同一行程式碼，也就不會有一邊做得到、一邊做不到。
+        // 這裡只把「少了 node」講清楚，不然錯誤會晚到 `write_into` 才發生，
+        // 而那時它只說得出「找不到 」。
+        "instance" => {
+            let env = str_field(&fields, "environment")?;
+            str_field(&fields, "node")?;
+            (Kind::Instance, Some(env_id(project, env)?), None)
+        }
         other => return Err(format!("認不得的 kind：{other}")),
     };
 
     let mut resource = blank(kind, environment, owner);
-    fill(&mut resource, &fields, project)?;
+    fill(&mut resource, &fields, project, true)?;
     Ok(resource)
 }
 
@@ -585,7 +605,7 @@ fn update(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
     let project = ws.project().unwrap();
 
     let mut resource = find_resource(project, &id)?;
-    fill(&mut resource, &fields, project)?;
+    fill(&mut resource, &fields, project, false)?;
     let slug = resource.slug().to_string();
     with_lint_delta(
         ws,
@@ -941,11 +961,15 @@ fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
         Resource::Node { .. } => &["environment", "slug", "kind", "within"],
         Resource::Infra { .. } => &["environment", "slug"],
         Resource::InfraEndpoint { .. } => &["environment", "owner", "slug", "address", "protocol"],
-        // 服務實體只有 `update` 走得到（建立走 create_nodes）。**不列
-        // `environment` 與 `node`**：`fill` 沒有讀它們，列上去等於宣稱
-        // 收得下卻還是忽略——那跟原本的坑一模一樣，只是換個講法。
-        // 想把服務實體搬到別台機器上，目前 MCP 做不到。
-        Resource::Instance { .. } => &["slug", "container", "standalone"],
+        Resource::Instance { .. } => &[
+            "environment",
+            "node",
+            "slug",
+            "container",
+            "standalone",
+            "address",
+            "endpoint",
+        ],
         Resource::SystemInstance { .. } => &[
             "environment",
             "slug",
@@ -970,8 +994,53 @@ fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
 /// 完全不知道是哪一步的問題了。
 ///
 /// 這也正是這個 crate 開頭寫的原則：錯誤一律附上候選。
-fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<(), String> {
+/// 只有 `create` 讀得到的欄位。
+///
+/// # 為什麼要單獨列一份
+///
+/// 這些欄位由 `build_resource` 消化掉，`fill` 根本沒看。於是 `update` 帶了
+/// 它們就是**安靜地什麼都不做**——回一句「改好了」，而東西沒動。
+///
+/// 那正是 `fill` 開頭那段註解在講的坑，只是換了個位置：一個是打錯字，
+/// 一個是拼對了但這條路不通。對 Agent 來說症狀一樣——它會照著往下走。
+///
+/// 搬家目前真的做不到（換環境要連帶處理連線、換擁有者等於換一個東西），
+/// 所以這裡的答案是**講清楚**，不是假裝做得到。
+fn create_only_fields(resource: &Resource) -> &'static [&'static str] {
+    match resource {
+        Resource::EndpointDef { .. } => &["owner"],
+        Resource::Node { .. } => &["environment", "within"],
+        Resource::Infra { .. } | Resource::Instance { .. } | Resource::SystemInstance { .. } => {
+            &["environment"]
+        }
+        Resource::InfraEndpoint { .. } => &["environment", "owner"],
+        _ => &[],
+    }
+}
+
+fn fill(
+    resource: &mut Resource,
+    fields: &Value,
+    project: &Project,
+    is_new: bool,
+) -> Result<(), String> {
     if let Some(map) = fields.as_object() {
+        if !is_new {
+            let stuck: Vec<&str> = create_only_fields(resource)
+                .iter()
+                .copied()
+                .filter(|k| map.contains_key(*k))
+                .collect();
+            if !stuck.is_empty() {
+                return Err(format!(
+                    "{}建立之後就搬不動了，改不了這些欄位：{}。\
+                     要換位置的話：在新的地方 create 一個，再把舊的 delete 掉。",
+                    resource.kind_name(),
+                    stuck.join("、"),
+                ));
+            }
+        }
+
         let accepted = accepted_fields(resource);
         // `kind` 是 create 用來挑資源種類的，不是欄位；它會跟著整包送進來。
         let unknown: Vec<&str> = map
@@ -1089,7 +1158,11 @@ fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<()
                 endpoint.protocol = protocol(&v)?
             }
         }
-        Resource::Instance { instance, .. } => {
+        Resource::Instance {
+            environment,
+            node,
+            instance,
+        } => {
             if let Some(v) = s("slug") {
                 instance.slug = v
             }
@@ -1098,6 +1171,17 @@ fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<()
             }
             if let Some(v) = fields.get("standalone").and_then(Value::as_bool) {
                 instance.standalone = v
+            }
+            // 跑在哪台機器上。**建立與搬家是同一行。**
+            //
+            // 一台機器上跑好幾個服務是常態（一台 VM 上有 app 也有 agent），
+            // 而在這之前 MCP 只有 create_nodes，它一定會替每個服務開新機器。
+            // 於是 Agent 建得出來的模型，跟使用者的機房長得不一樣。
+            if let Some(v) = s("node") {
+                *node = node_id_in(project, environment, &v)?;
+            }
+            if let Some(address) = s("address") {
+                set_instance_address(instance, project, &address, s("endpoint").as_deref())?;
             }
         }
         Resource::SystemInstance { instance, .. } => {
@@ -1207,30 +1291,69 @@ fn set_system_address(
         .find(|s| s.id == instance.system)
         .ok_or("這個外部系統實體還沒有對應到任何系統，先填 system")?;
 
-    let def = match (endpoint, system.endpoints.as_slice()) {
-        (Some(want), _) => system
-            .endpoints
-            .iter()
-            .find(|d| d.slug == want)
-            .ok_or_else(|| {
-                format!(
-                    "系統 {} 身上沒有接點定義 {want}。有的是：{}",
-                    system.slug,
-                    slugs(system.endpoints.iter().map(|d| &d.slug))
-                )
-            })?,
+    put_address(
+        &mut instance.endpoints,
+        &system.slug,
+        &system.endpoints,
+        address,
+        endpoint,
+    )
+}
+
+/// 把位址寫到服務實體身上。
+///
+/// 跟外部系統實體同一件事，只差 `def` 是從**對應的那個服務**身上找的
+/// （不對稱是模型定義的，見 `docs/domain-model.md`）。
+fn set_instance_address(
+    instance: &mut loom_core::environment::ContainerInstance,
+    project: &Project,
+    address: &str,
+    endpoint: Option<&str>,
+) -> Result<(), String> {
+    let container = project
+        .logical
+        .containers
+        .iter()
+        .find(|c| c.id == instance.container)
+        .ok_or("這個服務實體還沒有對應到任何服務，先填 container")?;
+
+    put_address(
+        &mut instance.endpoints,
+        &container.slug,
+        &container.endpoints,
+        address,
+        endpoint,
+    )
+}
+
+/// 兩種實體共用的那一段：挑出接點定義，然後把位址放上去。
+///
+/// 寫成一份是因為「有好幾個定義的時候不猜」這條規矩兩邊都要成立。
+/// 抄成兩份的話，總有一天只有一邊被改到，而另一邊會安靜地開始猜。
+fn put_address(
+    endpoints: &mut Vec<loom_core::environment::Endpoint>,
+    owner_slug: &str,
+    defs: &[loom_core::logical::EndpointDef],
+    address: &str,
+    endpoint: Option<&str>,
+) -> Result<(), String> {
+    let def = match (endpoint, defs) {
+        (Some(want), _) => defs.iter().find(|d| d.slug == want).ok_or_else(|| {
+            format!(
+                "{owner_slug} 身上沒有接點定義 {want}。有的是：{}",
+                slugs(defs.iter().map(|d| &d.slug))
+            )
+        })?,
         (None, [only]) => only,
         (None, []) => {
             return Err(format!(
-                "系統 {} 還沒有定義任何接點，位址無處可放。\
-                 先用 create 建一個 endpoint_def（owner 填 {}）。",
-                system.slug, system.slug
+                "{owner_slug} 還沒有定義任何接點，位址無處可放。\
+                 先用 create 建一個 endpoint_def（owner 填 {owner_slug}）。"
             ));
         }
         (None, many) => {
             return Err(format!(
-                "系統 {} 有好幾個接點定義，請用 `endpoint` 指定要填哪一個：{}",
-                system.slug,
+                "{owner_slug} 有好幾個接點定義，請用 `endpoint` 指定要填哪一個：{}",
                 slugs(many.iter().map(|d| &d.slug))
             ));
         }
@@ -1238,13 +1361,12 @@ fn set_system_address(
 
     // 已經有對應到這個定義的接點就改它，沒有才新增——不然重跑一次
     // update 會長出第二個位址一樣的接點。
-    match instance
-        .endpoints
+    match endpoints
         .iter_mut()
         .find(|e| e.def.as_ref() == Some(&def.id))
     {
         Some(existing) => existing.address = Some(address.into()),
-        None => instance.endpoints.push(loom_core::environment::Endpoint {
+        None => endpoints.push(loom_core::environment::Endpoint {
             id: Id::generate(),
             slug: def.slug.clone(),
             def: Some(def.id.clone()),
@@ -1364,9 +1486,12 @@ fn owner_id(project: &Project, slug: &str) -> Result<Id, String> {
 }
 
 fn node_id(project: &Project, env_slug: &str, slug: &str) -> Result<Id, String> {
-    let env = project
-        .environment(&env_id(project, env_slug)?)
-        .ok_or("找不到環境")?;
+    node_id_in(project, &env_id(project, env_slug)?, slug)
+}
+
+/// 同上，但環境已經是 id 了——`fill` 手上拿到的資源自己就帶著環境。
+fn node_id_in(project: &Project, environment: &Id, slug: &str) -> Result<Id, String> {
+    let env = project.environment(environment).ok_or("找不到環境")?;
     fn walk(nodes: &[loom_core::environment::DeploymentNode], slug: &str) -> Option<Id> {
         for n in nodes {
             if n.slug == slug {
@@ -1378,7 +1503,24 @@ fn node_id(project: &Project, env_slug: &str, slug: &str) -> Result<Id, String> 
         }
         None
     }
-    walk(&env.nodes, slug).ok_or_else(|| format!("環境 {env_slug} 裡找不到節點 {slug}"))
+    walk(&env.nodes, slug).ok_or_else(|| {
+        // 附上候選。打錯一個字跟「那台機器還沒建」是兩件完全不同的事，
+        // 而 Agent 分不出來就會走上完全不同的一條路。
+        format!(
+            "環境 {} 裡找不到機器 {slug}。有的是：{}",
+            env.slug,
+            slugs(all_node_slugs(&env.nodes).iter())
+        )
+    })
+}
+
+fn all_node_slugs(nodes: &[loom_core::environment::DeploymentNode]) -> Vec<&String> {
+    let mut out = Vec::new();
+    for n in nodes {
+        out.push(&n.slug);
+        out.extend(all_node_slugs(&n.children));
+    }
+    out
 }
 
 fn infra_id(project: &Project, env_slug: &str, slug: &str) -> Result<Id, String> {

@@ -82,12 +82,30 @@ create  items: [
 6. environment       環境
    ── 以上通常一次 create 就送完 ──
 7. create_nodes      機器與服務實體（一個服務一次，它會照樣板配 IP）
+   create/instance   同一台機器上的第二個服務（見下面）
 8. add_connection    在環境裡實現契約（整個環境的連線一次送完）
 9. lint              收工前確認
 ```
 
 第 4 步最容易被跳過。**沒有接點定義就建不了契約，也建不了機器**——
 `create_nodes` 需要知道那台機器上的服務怎麼被連上。
+
+### 共用機器要用 `instance`，不是 `create_nodes`
+
+`create_nodes` **一定會替每個服務實體配一台新機器**。所以「app 跟
+log-agent 跑在同一台 VM 上」用它是做不到的——它會建出兩台。
+
+一台機器上跑好幾個服務是常態，這種情況先把機器建出來（`kind: node`），
+再一個一個 `kind: instance` 掛上去，`node` 填那台機器的名字：
+
+```json
+{"kind": "instance", "fields": {
+  "environment": "prod", "node": "vm-01", "slug": "agent-01",
+  "container": "log-agent", "address": "10.0.1.11:9100"}}
+```
+
+搬家用 `update` 給 `node`。**換環境做不到**——那不是改一個欄位，
+是換一個東西；帶了會被擋下來，不會假裝改好了。
 
 ## 讀資料的時候要問自己的事
 
