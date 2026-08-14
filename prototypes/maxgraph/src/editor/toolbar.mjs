@@ -16,7 +16,7 @@
  */
 
 /** `[標籤, 提示, 動作]`。分隔線用 `null`。 */
-export function toolbar(graph, undoManager, { onChange = () => {} } = {}) {
+export function toolbar(graph, undoManager, { onChange = () => {}, clip, onEditData } = {}) {
   const el = document.createElement('div')
   el.className = 'toolbar'
 
@@ -40,6 +40,9 @@ export function toolbar(graph, undoManager, { onChange = () => {} } = {}) {
     ['⇧', '靠上對齊', run(() => graph.alignCells('top'))],
     ['⇕', '垂直置中', run(() => graph.alignCells('middle'))],
     ['⇩', '靠下對齊', run(() => graph.alignCells('bottom'))],
+    null,
+    ['⧉', '複製一份 ⌘D', run(() => clip?.duplicate())],
+    ['資料', '編輯資料 ⌘M', run(() => onEditData?.())],
     null,
     ['群組', '群組 ⌘G', run(() => graph.groupCells(null, 8))],
     ['解群組', '解群組 ⇧⌘G', run(() => graph.ungroupCells())],
@@ -73,19 +76,34 @@ export function toolbar(graph, undoManager, { onChange = () => {} } = {}) {
  * ⌘Z 應該是「復原我剛打的字」，不是「復原圖上的動作」。所以掛在 document 上，
  * 但**輸入框有焦點時整個讓開**。
  */
-export function keyboard(graph, undoManager, { onChange = () => {} } = {}) {
+export function keyboard(graph, undoManager, { onChange = () => {}, clip, onEditData } = {}) {
   const onKeydown = (e) => {
     const typing = e.target instanceof HTMLElement
       && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)
-    if (typing) return
+    // 就地編輯標籤時鍵盤整組讓開，不然打字會觸發刪除。
+    if (typing || graph.isEditing()) return
 
     const meta = e.metaKey || e.ctrlKey
+    const [first] = graph.getSelectionCells()
+
     if (meta && e.key === 'z') {
       e.shiftKey ? undoManager.redo() : undoManager.undo()
     } else if (meta && e.key === 'g') {
       e.shiftKey ? graph.ungroupCells() : graph.groupCells(null, 8)
     } else if (meta && e.key === 'a') {
       graph.selectAll()
+    } else if (meta && e.key === 'c') {
+      clip?.copy()
+    } else if (meta && e.key === 'x') {
+      clip?.cut()
+    } else if (meta && e.key === 'v') {
+      clip?.paste()
+    } else if (meta && e.key === 'd') {
+      clip?.duplicate()
+    } else if (meta && e.key === 'm') {
+      if (first) onEditData?.(first)
+    } else if (e.key === 'F2' || e.key === 'Enter') {
+      if (first) graph.startEditingAtCell(first)
     } else if (e.key === 'Backspace' || e.key === 'Delete') {
       graph.removeCells()
     } else if (e.key === 'Escape') {
