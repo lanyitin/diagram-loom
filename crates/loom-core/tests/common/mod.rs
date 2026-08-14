@@ -53,6 +53,7 @@ pub fn logical() -> Logical {
                 name: "網路商店".into(),
                 external: false,
                 endpoints: vec![],
+                memo: String::new(),
             },
             SoftwareSystem {
                 id: Id::new(PAYMENT),
@@ -64,7 +65,9 @@ pub fn logical() -> Logical {
                     id: Id::new(PAY_HTTPS),
                     slug: "https".into(),
                     protocol: Protocol::Tcp,
+                    memo: String::new(),
                 }],
+                memo: String::new(),
             },
         ],
         containers: vec![
@@ -77,7 +80,9 @@ pub fn logical() -> Logical {
                     id: Id::new(API_EGRESS),
                     slug: "egress".into(),
                     protocol: Protocol::Tcp,
+                    memo: String::new(),
                 }],
+                memo: String::new(),
             },
             Container {
                 id: Id::new(REDIS),
@@ -88,7 +93,9 @@ pub fn logical() -> Logical {
                     id: Id::new(REDIS_CLIENT),
                     slug: "client-port".into(),
                     protocol: Protocol::Tcp,
+                    memo: String::new(),
                 }],
+                memo: String::new(),
             },
         ],
         relationships: vec![
@@ -99,6 +106,7 @@ pub fn logical() -> Logical {
                 from: RelationshipEnd::Container(Id::new(API)),
                 to: RelationshipEnd::Container(Id::new(REDIS)),
                 to_endpoint: Id::new(REDIS_CLIENT),
+                memo: String::new(),
             },
             Relationship {
                 id: Id::new(REL_PAY),
@@ -107,6 +115,7 @@ pub fn logical() -> Logical {
                 from: RelationshipEnd::Container(Id::new(API)),
                 to: RelationshipEnd::System(Id::new(PAYMENT)),
                 to_endpoint: Id::new(PAY_HTTPS),
+                memo: String::new(),
             },
         ],
     }
@@ -120,6 +129,7 @@ pub fn endpoint(id: &str, slug: &str, def: &str, address: &str) -> Endpoint {
         def: Some(Id::new(def)),
         protocol: Protocol::Tcp,
         address: Some(address.into()),
+        memo: String::new(),
     }
 }
 
@@ -142,6 +152,7 @@ pub fn instance(
             address,
         )],
         standalone: false,
+        memo: String::new(),
     }
 }
 
@@ -158,6 +169,7 @@ pub fn payment(env: &str, slug: &str, address: &str) -> SoftwareSystemInstance {
             address,
         )],
         standalone: false,
+        memo: String::new(),
     }
 }
 
@@ -171,6 +183,7 @@ pub fn vms(env: &str, instances: Vec<ContainerInstance>) -> Vec<DeploymentNode> 
             kind: NodeKind::VirtualMachine,
             children: vec![],
             instances: vec![i],
+            memo: String::new(),
         })
         .collect()
 }
@@ -223,6 +236,7 @@ pub fn connection(
         kind: Default::default(),
         from,
         to,
+        memo: String::new(),
     }
 }
 
@@ -272,7 +286,9 @@ pub fn prod() -> Environment {
                 def: None,
                 protocol: Protocol::Tcp,
                 address: Some("10.0.0.100:6379".into()),
+                memo: String::new(),
             }],
+            memo: String::new(),
         }],
         systems: vec![payment(
             "prod",
@@ -296,6 +312,7 @@ pub fn prod() -> Environment {
             ),
             pay_connection("prod"),
         ],
+        memo: String::new(),
     }
 }
 
@@ -341,6 +358,7 @@ pub fn test_env() -> Environment {
             ),
             pay_connection("test"),
         ],
+        memo: String::new(),
     }
 }
 
@@ -381,6 +399,7 @@ pub fn dev() -> Environment {
             ),
             pay_connection("dev"),
         ],
+        memo: String::new(),
     }
 }
 
@@ -392,5 +411,6 @@ pub fn healthy_project() -> Project {
         name: "網路商店".into(),
         logical: logical(),
         environments: vec![prod(), test_env(), dev()],
+        memo: String::new(),
     }
 }

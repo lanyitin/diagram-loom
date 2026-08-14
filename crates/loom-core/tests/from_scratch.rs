@@ -33,6 +33,7 @@ fn empty_project() -> loom_core::Project {
             relationships: vec![],
         },
         environments: vec![],
+        memo: String::new(),
     }
 }
 
@@ -600,6 +601,7 @@ mod instances {
             def: None,
             protocol: Protocol::Tcp,
             address: Some("10.0.1.11:6379".into()),
+            memo: String::new(),
         });
         h.edit(&Edit::AddResource(r)).unwrap();
 

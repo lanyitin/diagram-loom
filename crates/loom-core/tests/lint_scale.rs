@@ -64,7 +64,9 @@ fn logical(scale: Scale) -> Logical {
                 id: Id::new(def(i)),
                 slug: "client-port".into(),
                 protocol: Protocol::Tcp,
+                memo: String::new(),
             }],
+            memo: String::new(),
         })
         .collect();
 
@@ -80,6 +82,7 @@ fn logical(scale: Scale) -> Logical {
                 from: RelationshipEnd::Container(Id::new(svc(i))),
                 to: RelationshipEnd::Container(Id::new(svc(next))),
                 to_endpoint: Id::new(def(next)),
+                memo: String::new(),
             }
         })
         .collect();
@@ -92,6 +95,7 @@ fn logical(scale: Scale) -> Logical {
             name: "主系統".into(),
             external: false,
             endpoints: vec![],
+            memo: String::new(),
         }],
         containers,
         relationships,
@@ -120,9 +124,12 @@ fn environment(scale: Scale, e: usize) -> Environment {
                         def: Some(Id::new(def(i))),
                         protocol: Protocol::Tcp,
                         address: Some(format!("10.{e}.{i}.{k}:6379")),
+                        memo: String::new(),
                     }],
                     standalone: false,
+                    memo: String::new(),
                 }],
+                memo: String::new(),
             });
         }
     }
@@ -136,7 +143,9 @@ fn environment(scale: Scale, e: usize) -> Environment {
             def: None,
             protocol: Protocol::Tcp,
             address: Some(format!("10.{e}.0.100:6379")),
+            memo: String::new(),
         }],
+        memo: String::new(),
     }];
 
     // 每條邏輯連線拆兩段：來源 → F5 → 目標那一整群。
@@ -161,6 +170,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                     node: Id::new(format!("f5-{env}")),
                     endpoint: Some(Id::new(format!("ep-f5-{env}"))),
                 },
+                memo: String::new(),
             },
             Connection {
                 id: Id::new(format!("conn-{env}-{i:03}-b")),
@@ -179,6 +189,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
                     },
                     endpoint: Some(Id::new(def(next))),
                 },
+                memo: String::new(),
             },
         ]);
     }
@@ -191,6 +202,7 @@ fn environment(scale: Scale, e: usize) -> Environment {
         infra,
         systems: vec![],
         connections,
+        memo: String::new(),
     }
 }
 
@@ -201,6 +213,7 @@ fn project(scale: Scale) -> Project {
         name: "規模測試".into(),
         logical: logical(scale),
         environments: (0..scale.envs).map(|e| environment(scale, e)).collect(),
+        memo: String::new(),
     }
 }
 

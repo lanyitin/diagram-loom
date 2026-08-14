@@ -26,6 +26,7 @@ fn project_with_a_person() -> loom_core::Project {
         id: Id::new(USER),
         slug: "end-user".into(),
         name: "End User".into(),
+        memo: String::new(),
     });
     project.logical.relationships.push(Relationship {
         id: Id::new("r-使用者"),
@@ -34,6 +35,7 @@ fn project_with_a_person() -> loom_core::Project {
         from: RelationshipEnd::Person(Id::new(USER)),
         to: RelationshipEnd::Container(Id::new(API)),
         to_endpoint: Id::new(API_EGRESS),
+        memo: String::new(),
     });
 
     for env in &mut project.environments {
@@ -50,6 +52,7 @@ fn project_with_a_person() -> loom_core::Project {
                 target: InstanceRef::One(Id::new(format!("i-{slug}-api-01"))),
                 endpoint: Some(Id::new(API_EGRESS)),
             },
+            memo: String::new(),
         });
     }
     project
@@ -132,6 +135,7 @@ fn a_site_holds_nodes_without_affecting_any_check() {
         kind: NodeKind::Site,
         children: original,
         instances: vec![],
+        memo: String::new(),
     }];
 
     let found = lint(&project);
@@ -149,6 +153,7 @@ fn a_site_is_not_reported_as_an_unused_node() {
         kind: NodeKind::Site,
         children: vec![],
         instances: vec![],
+        memo: String::new(),
     });
 
     assert!(lint(&project).is_empty());
@@ -278,6 +283,7 @@ fn two_site_project() -> loom_core::Project {
             kind: NodeKind::Site,
             children: main_site_nodes,
             instances: vec![],
+            memo: String::new(),
         },
         DeploymentNode {
             id: Id::new("n-異地"),
@@ -285,6 +291,7 @@ fn two_site_project() -> loom_core::Project {
             kind: NodeKind::Site,
             children: dr_site_nodes,
             instances: vec![],
+            memo: String::new(),
         },
     ];
 

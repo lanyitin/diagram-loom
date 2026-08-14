@@ -44,6 +44,7 @@ pub fn empty() -> Desk {
             relationships: vec![],
         },
         environments: vec![],
+        memo: String::new(),
     })))
 }
 

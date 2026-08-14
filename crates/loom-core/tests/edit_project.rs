@@ -496,6 +496,7 @@ mod wildcards_on_both_ends {
                 },
                 endpoint: Some(Id::new(REDIS_CLIENT)),
             },
+            memo: String::new(),
         });
         project
     }
@@ -617,6 +618,7 @@ mod updating_keeps_every_field {
             def: None,
             protocol: Protocol::Tcp,
             address: Some("pay.example.com:443".into()),
+            memo: String::new(),
         }];
 
         edit::apply(

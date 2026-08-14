@@ -47,6 +47,9 @@ pub struct Person {
     pub id: Id,
     pub slug: String,
     pub name: String,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。
@@ -66,6 +69,9 @@ pub struct SoftwareSystem {
     /// 自家系統留空，它的接點由各個 [`Container`] 自己定義。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<EndpointDef>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 impl SoftwareSystem {
@@ -83,6 +89,9 @@ pub struct EndpointDef {
     pub id: Id,
     pub slug: String,
     pub protocol: Protocol,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。
@@ -95,6 +104,9 @@ pub struct Container {
     pub system: Id,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<EndpointDef>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 impl Container {
@@ -122,6 +134,12 @@ pub struct Relationship {
     /// 連到目標的哪一個 [`EndpointDef`]。
     /// 目標是 Container 就查它的 endpoints，是外部系統就查系統的 endpoints。
     pub to_endpoint: Id,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    ///
+    /// 跟 `purpose` 分開：`purpose` 是 L007 在檢查的欄位，屬於「這條連線為什麼存在」；
+    /// 備註是規則不管的雜項，寫進 `purpose` 會讓那個欄位變成雜物櫃。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 邏輯連線的一端：自家的服務、一整個外部系統，或一個真人。
@@ -186,7 +204,9 @@ mod tests {
                 id: Id::new("e-redis-client"),
                 slug: "client-port".into(),
                 protocol: Protocol::Tcp,
+                memo: String::new(),
             }],
+            memo: String::new(),
         }
     }
 

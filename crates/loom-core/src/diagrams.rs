@@ -332,6 +332,7 @@ mod tests {
             infra: vec![],
             systems: vec![],
             connections: vec![],
+            memo: String::new(),
         }
     }
 
@@ -347,6 +348,7 @@ mod tests {
                 relationships: vec![],
             },
             environments: vec![environment()],
+            memo: String::new(),
         }
     }
 
@@ -423,6 +425,7 @@ mod tests {
             id: Id::from("per"),
             slug: "客戶".into(),
             name: "客戶".into(),
+            memo: String::new(),
         });
         assert_ne!(fingerprint(&project, &env), before);
     }

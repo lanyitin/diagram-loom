@@ -21,6 +21,7 @@ fn empty_project() -> Project {
         name: "網路商店".into(),
         logical: Logical::default(),
         environments: vec![],
+        memo: String::new(),
     }
 }
 

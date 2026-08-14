@@ -227,6 +227,7 @@ mod tests {
             container: Id::from("c"),
             endpoints: vec![],
             standalone: false,
+            memo: String::new(),
         }
     }
 
@@ -242,6 +243,7 @@ mod tests {
                 kind: NodeKind::VirtualMachine,
                 children: vec![],
                 instances: vec![instance("apache-01"), instance("redis-01")],
+                memo: String::new(),
             }],
             infra: vec![],
             systems: vec![],
@@ -258,7 +260,9 @@ mod tests {
                     target: InstanceRef::One(Id::from("i-redis-01")),
                     endpoint: None,
                 },
+                memo: String::new(),
             }],
+            memo: String::new(),
         }
     }
 

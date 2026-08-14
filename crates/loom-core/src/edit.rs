@@ -428,6 +428,7 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
                 kind: *kind,
                 from: from.clone(),
                 to: to.clone(),
+                memo: String::new(),
             });
             Ok(())
         }

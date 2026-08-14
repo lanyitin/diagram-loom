@@ -33,6 +33,7 @@ fn with_a_person() -> loom_core::Project {
         id: Id::new("p-客戶"),
         slug: "customer".into(),
         name: "一般客戶".into(),
+        memo: String::new(),
     });
     project
 }
@@ -137,6 +138,7 @@ mod rejected_at_creation {
             from: base.from.clone(),
             to,
             to_endpoint: base.to_endpoint.clone(),
+            memo: String::new(),
         })
     }
 

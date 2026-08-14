@@ -36,6 +36,7 @@ fn with_infra_named(slug: &str) -> loom_core::Project {
         id: Id::new(format!("infra-{slug}")),
         slug: slug.into(),
         endpoints: vec![],
+        memo: String::new(),
     });
     project
 }
@@ -119,6 +120,7 @@ fn the_same_name_in_a_different_environment_is_fine() {
         id: Id::new("infra-別的環境"),
         slug: only_in_prod,
         endpoints: vec![],
+        memo: String::new(),
     });
 
     assert_eq!(collisions(&project), Vec::new());

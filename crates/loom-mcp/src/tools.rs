@@ -96,6 +96,10 @@ pub fn list() -> Value {
                     address 是「這個外部系統在這個環境打哪裡」，例如 sso.corp.local:443。
                     那個系統有好幾個接點定義時才需要 endpoint 指名要填哪一個。
 
+上面每一種都另外收 **memo**：給人看的備註，例如「等年底汰換」。
+沒有任何 lint 規則會讀它，所以拿它記規則管不到的事，
+不要把這種話塞進 purpose——那個欄位 L007 在看。
+
 要一次建很多台**同一個服務**的機器請改用 create_nodes，它會照樣板配 IP，
 但**每個服務實體都會配一台新機器**。要共用機器就用上面的 instance。",
             json!({
@@ -952,15 +956,22 @@ fn build_connection(project: &Project, env_slug: &str, item: &Value) -> Result<E
 /// 順序跟 `list()` 裡的說明一致，這樣 Agent 看到的兩份是同一份。
 fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
     match resource {
-        Resource::Person(_) => &["slug", "name"],
-        Resource::System(_) => &["slug", "name", "external"],
-        Resource::Container(_) => &["slug", "name", "system"],
-        Resource::EndpointDef { .. } => &["owner", "slug", "protocol"],
-        Resource::Relationship(_) => &["slug", "purpose", "from", "to", "to_endpoint"],
-        Resource::Environment(_) => &["slug", "name"],
-        Resource::Node { .. } => &["environment", "slug", "kind", "within"],
-        Resource::Infra { .. } => &["environment", "slug"],
-        Resource::InfraEndpoint { .. } => &["environment", "owner", "slug", "address", "protocol"],
+        Resource::Person(_) => &["slug", "name", "memo"],
+        Resource::System(_) => &["slug", "name", "external", "memo"],
+        Resource::Container(_) => &["slug", "name", "system", "memo"],
+        Resource::EndpointDef { .. } => &["owner", "slug", "protocol", "memo"],
+        Resource::Relationship(_) => &["slug", "purpose", "from", "to", "to_endpoint", "memo"],
+        Resource::Environment(_) => &["slug", "name", "memo"],
+        Resource::Node { .. } => &["environment", "slug", "kind", "within", "memo"],
+        Resource::Infra { .. } => &["environment", "slug", "memo"],
+        Resource::InfraEndpoint { .. } => &[
+            "environment",
+            "owner",
+            "slug",
+            "address",
+            "protocol",
+            "memo",
+        ],
         Resource::Instance { .. } => &[
             "environment",
             "node",
@@ -969,6 +980,7 @@ fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
             "standalone",
             "address",
             "endpoint",
+            "memo",
         ],
         Resource::SystemInstance { .. } => &[
             "environment",
@@ -977,6 +989,7 @@ fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
             "standalone",
             "address",
             "endpoint",
+            "memo",
         ],
     }
 }
@@ -1059,6 +1072,12 @@ fn fill(
     }
 
     let s = |k: &str| opt_str(fields, k).map(str::to_string);
+
+    // 備註每種資源都有，所以在攤開變體之前先處理掉——
+    // 不然下面十一個分支每個都要再抄一次同一段。
+    if let Some(v) = s("memo") {
+        *resource.memo_mut() = v;
+    }
 
     match resource {
         Resource::Person(p) => {
@@ -1372,6 +1391,7 @@ fn put_address(
             def: Some(def.id.clone()),
             protocol: def.protocol,
             address: Some(address.into()),
+            memo: String::new(),
         }),
     }
     Ok(())

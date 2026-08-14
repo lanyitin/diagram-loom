@@ -96,3 +96,48 @@ fn without_an_environment_only_the_master_copy_shows_up() {
     );
     assert!(groups.contains(&TableGroup::Logical));
 }
+
+#[test]
+fn every_table_has_a_memo_column_and_it_is_last() {
+    // 備註是**每一種**資源都有的欄位。九張表各補一次的話，
+    // 遲早會漏掉一張——而漏掉的那一種，備註就是「存得進去、看不到」。
+    let project = common::healthy_project();
+    let env = project.environments.first().map(|e| &e.id);
+
+    for table in tables(&project, env) {
+        assert_eq!(
+            table.columns.last().map(String::as_str),
+            Some("備註"),
+            "{} 這張表的最後一欄不是備註",
+            table.title,
+        );
+        for row in &table.rows {
+            assert_eq!(
+                row.cells.len(),
+                table.columns.len(),
+                "{} 的格子數跟欄位數對不上",
+                table.title,
+            );
+        }
+    }
+}
+
+#[test]
+fn a_memo_shows_up_in_the_table() {
+    let mut project = common::healthy_project();
+    project.logical.containers[0].memo = "等年底汰換".into();
+    let env = project.environments.first().map(|e| &e.id);
+
+    let containers = tables(&project, env)
+        .into_iter()
+        .find(|t| t.title == "服務")
+        .expect("找不到服務的表");
+
+    assert!(
+        containers
+            .rows
+            .iter()
+            .any(|r| r.cells.last().map(String::as_str) == Some("等年底汰換")),
+        "備註沒有出現在表格裡",
+    );
+}

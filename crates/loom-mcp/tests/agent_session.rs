@@ -510,3 +510,71 @@ mod what_the_agent_is_told {
         assert!(err(&mut ws, "刪掉全部", json!({})).contains("沒有這個工具"));
     }
 }
+
+#[test]
+fn an_agent_can_write_a_memo_and_read_it_back() {
+    // 備註是規則不管的欄位，所以寫進去之後**沒有任何 lint 會提到它**。
+    // 它唯一的回報路徑就是 describe 那幾張表——讀不回來的話，
+    // Agent 會以為自己沒寫成功，然後再寫一次。
+    let mut ws = empty();
+    create(
+        &mut ws,
+        "system",
+        json!({"slug": "shop", "name": "訂單系統", "external": false}),
+    );
+    create(
+        &mut ws,
+        "container",
+        json!({
+            "slug": "redis",
+            "name": "快取",
+            "system": "shop",
+            "memo": "等年底汰換",
+        }),
+    );
+
+    assert!(
+        ok(&mut ws, "describe", json!({})).contains("等年底汰換"),
+        "describe 裡看不到剛寫進去的備註",
+    );
+
+    // 改備註不必重填其他欄位，也不該動到它們。
+    let id = id_of(&mut ws, "服務", "redis");
+    ok(
+        &mut ws,
+        "update",
+        json!({"id": id, "fields": {"memo": "已排除役"}}),
+    );
+
+    let described = ok(&mut ws, "describe", json!({}));
+    assert!(described.contains("已排除役"));
+    assert!(!described.contains("等年底汰換"));
+    assert!(described.contains("快取"), "改備註不該動到顯示名");
+}
+
+#[test]
+fn a_memo_is_not_a_place_the_rules_look() {
+    // 這是備註存在的理由：使用者寫什麼都不會讓 lint 改變說法。
+    // 若哪天有規則開始讀它，這個測試會紅——那是應該要重新討論的時候。
+    let mut ws = empty();
+    create(
+        &mut ws,
+        "system",
+        json!({"slug": "shop", "name": "訂單系統", "external": false}),
+    );
+    create(
+        &mut ws,
+        "container",
+        json!({"slug": "redis", "name": "快取", "system": "shop"}),
+    );
+    let before = lint(ws.project().unwrap());
+
+    let id = id_of(&mut ws, "服務", "redis");
+    ok(
+        &mut ws,
+        "update",
+        json!({"id": id, "fields": {"memo": "隨便寫點什麼"}}),
+    );
+
+    assert_eq!(lint(ws.project().unwrap()), before);
+}

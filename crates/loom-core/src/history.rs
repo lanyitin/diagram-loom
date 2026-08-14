@@ -175,8 +175,11 @@ mod tests {
                         node: Id::new("f5"),
                         endpoint: None,
                     },
+                    memo: String::new(),
                 }],
+                memo: String::new(),
             }],
+            memo: String::new(),
         }
     }
 

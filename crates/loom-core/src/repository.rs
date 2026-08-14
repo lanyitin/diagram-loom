@@ -54,6 +54,9 @@ struct ProjectFile {
     id: Id,
     slug: String,
     name: String,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    memo: String,
     /// 環境的 slug 清單，決定載入順序。
     ///
     /// 不靠掃描資料夾決定順序：檔案系統的排序因平台而異，
@@ -135,6 +138,7 @@ pub fn save(project: &Project, store: &mut impl FileStore) -> Result<()> {
             id: project.id.clone(),
             slug: project.slug.clone(),
             name: project.name.clone(),
+            memo: project.memo.clone(),
             environments: project
                 .environments
                 .iter()
@@ -193,6 +197,7 @@ pub fn load(store: &impl FileStore) -> Result<Project> {
         id: meta.id,
         slug: meta.slug,
         name: meta.name,
+        memo: meta.memo,
         logical: Logical {
             people: systems.people,
             systems: systems.systems,

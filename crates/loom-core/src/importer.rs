@@ -445,6 +445,7 @@ fn import_row(
                 kind,
                 from: from_side,
                 to: to_side,
+                memo: String::new(),
             });
             report.connections += 1;
         }
@@ -516,6 +517,7 @@ fn ensure_environment(project: &mut Project, slug: &str, report: &mut ImportRepo
         infra: vec![],
         systems: vec![],
         connections: vec![],
+        memo: String::new(),
     });
     report.environments_created += 1;
 }
@@ -542,6 +544,7 @@ fn ensure_container(project: &mut Project, slug: &str, report: &mut ImportReport
         name: slug.to_string(),
         system,
         endpoints: vec![],
+        memo: String::new(),
     });
     report.containers_created += 1;
     id
@@ -558,6 +561,7 @@ fn ensure_default_system(project: &mut Project) -> Id {
         name: project.name.clone(),
         external: false,
         endpoints: vec![],
+        memo: String::new(),
     });
     id
 }
@@ -592,6 +596,7 @@ fn ensure_endpoint_def(
         id: id.clone(),
         slug: slug.to_string(),
         protocol,
+        memo: String::new(),
     });
     id
 }
@@ -632,6 +637,7 @@ fn ensure_site(project: &mut Project, env_slug: &str, site_slug: &str) -> Id {
         kind: NodeKind::Site,
         children: vec![],
         instances: vec![],
+        memo: String::new(),
     });
     id
 }
@@ -662,6 +668,7 @@ fn place_node(env: &mut Environment, node_slug: &str, site: Option<&Id>) -> Id {
         kind: NodeKind::VirtualMachine,
         children: vec![],
         instances: vec![],
+        memo: String::new(),
     });
     let id = machine.id.clone();
 
@@ -732,6 +739,7 @@ fn ensure_instance(
         container: container.clone(),
         endpoints: vec![],
         standalone: false,
+        memo: String::new(),
     };
     let id = instance.id.clone();
 
@@ -772,6 +780,7 @@ fn ensure_infra(project: &mut Project, env_slug: &str, node_slug: &str) -> Id {
         id: id.clone(),
         slug: node_slug.to_string(),
         endpoints: vec![],
+        memo: String::new(),
     });
     id
 }
@@ -810,6 +819,7 @@ fn set_instance_address(
         def: Some(def.clone()),
         protocol,
         address: Some(address.to_string()),
+        memo: String::new(),
     });
 }
 
@@ -839,6 +849,7 @@ fn set_infra_address(
         def: None,
         protocol,
         address: Some(address.to_string()),
+        memo: String::new(),
     });
     id
 }
@@ -905,6 +916,7 @@ fn ensure_relationship(
         from: RelationshipEnd::Container(from.clone()),
         to: RelationshipEnd::Container(to.clone()),
         to_endpoint,
+        memo: String::new(),
     });
     id
 }
@@ -954,6 +966,7 @@ fn ensure_relationship_by_slug(
                 from: RelationshipEnd::Container(Id::generate()),
                 to: RelationshipEnd::Container(Id::generate()),
                 to_endpoint: Id::generate(),
+                memo: String::new(),
             });
             id
         }

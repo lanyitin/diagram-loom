@@ -273,6 +273,7 @@ mod connectable_places {
             id: Id::new("p-客戶"),
             slug: "customer".into(),
             name: "客戶".into(),
+            memo: String::new(),
         });
         let env = &project.environments[0];
 

@@ -125,6 +125,17 @@ pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
         out.push(instances_table(project, env, &severity_of));
         out.push(system_instances_table(project, env, &severity_of));
     }
+
+    // 備註每張表都有，所以在這裡補一次，而不是九個表格各寫一次——
+    // 少寫一個的話，那一種資源的備註就是「存得進去、看不到」。
+    // 放最後一欄：它是自由文字，長度不受控，不該把有結構的欄位擠出畫面。
+    for table in &mut out {
+        table.columns.push("備註".into());
+        for row in &mut table.rows {
+            let memo = row.resource.memo().to_string();
+            row.cells.push(memo);
+        }
+    }
     out
 }
 

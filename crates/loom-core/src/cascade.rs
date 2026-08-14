@@ -162,6 +162,7 @@ mod tests {
             id: Id::new("def-redis"),
             slug: "client-port".into(),
             protocol: Protocol::Tcp,
+            memo: String::new(),
         };
         Project {
             id: Id::new("p"),
@@ -175,6 +176,7 @@ mod tests {
                     name: "訂單系統".into(),
                     external: false,
                     endpoints: vec![],
+                    memo: String::new(),
                 }],
                 containers: vec![
                     Container {
@@ -183,6 +185,7 @@ mod tests {
                         name: "代理".into(),
                         system: Id::new("sys-shop"),
                         endpoints: vec![],
+                        memo: String::new(),
                     },
                     Container {
                         id: Id::new("c-redis"),
@@ -190,6 +193,7 @@ mod tests {
                         name: "快取".into(),
                         system: Id::new("sys-shop"),
                         endpoints: vec![redis_ep.clone()],
+                        memo: String::new(),
                     },
                 ],
                 relationships: vec![Relationship {
@@ -199,6 +203,7 @@ mod tests {
                     from: RelationshipEnd::Container(Id::new("c-apache")),
                     to: RelationshipEnd::Container(Id::new("c-redis")),
                     to_endpoint: Id::new("def-redis"),
+                    memo: String::new(),
                 }],
             },
             environments: vec![Environment {
@@ -220,6 +225,7 @@ mod tests {
                         target: InstanceRef::One(Id::new("i-redis")),
                         endpoint: Some(Id::new("def-redis")),
                     },
+                    memo: String::new(),
                 }],
                 nodes: vec![
                     DeploymentNode {
@@ -233,7 +239,9 @@ mod tests {
                             container: Id::new("c-apache"),
                             standalone: false,
                             endpoints: vec![],
+                            memo: String::new(),
                         }],
+                        memo: String::new(),
                     },
                     DeploymentNode {
                         id: Id::new("n-redis"),
@@ -251,11 +259,16 @@ mod tests {
                                 def: Some(Id::new("def-redis")),
                                 protocol: Protocol::Tcp,
                                 address: Some("10.0.1.11:6379".into()),
+                                memo: String::new(),
                             }],
+                            memo: String::new(),
                         }],
+                        memo: String::new(),
                     },
                 ],
+                memo: String::new(),
             }],
+            memo: String::new(),
         }
     }
 
@@ -410,6 +423,7 @@ mod tests {
             name: "".into(),
             system: Id::new("sys-shop"),
             endpoints: vec![],
+            memo: String::new(),
         }));
         assert!(plan(&p, &[ghost]).is_err());
     }

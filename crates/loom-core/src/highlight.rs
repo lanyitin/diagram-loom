@@ -199,6 +199,7 @@ mod tests {
             container: Id::from("c-app"),
             endpoints: vec![],
             standalone: false,
+            memo: String::new(),
         }
     }
 
@@ -221,8 +222,10 @@ mod tests {
                 kind: NodeKind::VirtualMachine,
                 children: vec![],
                 instances: vec![instance("a"), instance("b"), instance("c")],
+                memo: String::new(),
             }],
             instances: vec![],
+            memo: String::new(),
         };
 
         let env = Environment {
@@ -240,6 +243,7 @@ mod tests {
                     kind: Default::default(),
                     from: one("a"),
                     to: one("b"),
+                    memo: String::new(),
                 },
                 Connection {
                     id: Id::from("conn-2"),
@@ -249,8 +253,10 @@ mod tests {
                     kind: Default::default(),
                     from: one("a"),
                     to: one("c"),
+                    memo: String::new(),
                 },
             ],
+            memo: String::new(),
         };
 
         let rel = |id: &str| Relationship {
@@ -260,6 +266,7 @@ mod tests {
             from: RelationshipEnd::Container(Id::from("c-app")),
             to: RelationshipEnd::Container(Id::from("c-app")),
             to_endpoint: Id::from("ep"),
+            memo: String::new(),
         };
 
         Project {
@@ -278,11 +285,14 @@ mod tests {
                         id: Id::from("ep"),
                         slug: "ep".into(),
                         protocol: Protocol::Tcp,
+                        memo: String::new(),
                     }],
+                    memo: String::new(),
                 }],
                 relationships: vec![rel("r-1"), rel("r-2")],
             },
             environments: vec![env],
+            memo: String::new(),
         }
     }
 

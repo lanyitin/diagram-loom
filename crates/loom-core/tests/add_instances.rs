@@ -188,6 +188,7 @@ fn can_be_created_under_a_site() {
         kind: NodeKind::Site,
         children: vec![],
         instances: vec![],
+        memo: String::new(),
     };
     project.environments[2].nodes.push(site);
 

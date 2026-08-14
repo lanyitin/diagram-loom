@@ -357,6 +357,13 @@ export type Connection_Deserialize = {
 	kind?: ConnectionKind,
 	from: Endpointing_Deserialize,
 	to: Endpointing_Deserialize,
+	/**
+	 *  使用者的備註。見 [`crate::memo_is_empty`]。
+	 * 
+	 *  跟 `purpose` 分開的理由同
+	 *  [`Relationship::memo`](crate::logical::Relationship::memo)。
+	 */
+	memo?: string,
 };
 
 /**
@@ -380,6 +387,13 @@ export type Connection_Serialize = {
 	kind?: ConnectionKind,
 	from: Endpointing_Serialize,
 	to: Endpointing_Serialize,
+	/**
+	 *  使用者的備註。見 [`crate::memo_is_empty`]。
+	 * 
+	 *  跟 `purpose` 分開的理由同
+	 *  [`Relationship::memo`](crate::logical::Relationship::memo)。
+	 */
+	memo?: string,
 };
 
 /**  一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。 */
@@ -409,6 +423,8 @@ export type ContainerInstance_Deserialize = {
 	 *  冷備機是合法情境，但預設應該要叫。
 	 */
 	standalone?: boolean,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -427,6 +443,8 @@ export type ContainerInstance_Serialize = {
 	 *  冷備機是合法情境，但預設應該要叫。
 	 */
 	standalone?: boolean,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。 */
@@ -435,7 +453,9 @@ export type Container_Deserialize = {
 	slug: string,
 	name: string,
 	system: Id,
-	endpoints?: EndpointDef[],
+	endpoints?: EndpointDef_Deserialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  一個會跑的服務：Redis、Consul、訂單 API。C4 的 `Container`。 */
@@ -444,7 +464,9 @@ export type Container_Serialize = {
 	slug: string,
 	name: string,
 	system: Id,
-	endpoints?: EndpointDef[],
+	endpoints?: EndpointDef_Serialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -472,6 +494,8 @@ export type DeploymentNode_Deserialize = {
 	/**  巢狀：機房 → 機器 → 容器。 */
 	children?: DeploymentNode_Deserialize[],
 	instances?: ContainerInstance_Deserialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。 */
@@ -482,6 +506,8 @@ export type DeploymentNode_Serialize = {
 	/**  巢狀：機房 → 機器 → 容器。 */
 	children?: DeploymentNode_Serialize[],
 	instances?: ContainerInstance_Serialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  給畫面看的一張圖。 */
@@ -797,10 +823,32 @@ export type Endpoint = Endpoint_Serialize | Endpoint_Deserialize;
  * 
  *  位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
  */
-export type EndpointDef = {
+export type EndpointDef = EndpointDef_Serialize | EndpointDef_Deserialize;
+
+/**
+ *  Endpoint 的定義：只有名字與協定，沒有位址。
+ * 
+ *  位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
+ */
+export type EndpointDef_Deserialize = {
 	id: Id,
 	slug: string,
 	protocol: Protocol,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
+};
+
+/**
+ *  Endpoint 的定義：只有名字與協定，沒有位址。
+ * 
+ *  位址屬於環境層的 [`Endpoint`](crate::environment::Endpoint)。
+ */
+export type EndpointDef_Serialize = {
+	id: Id,
+	slug: string,
+	protocol: Protocol,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  要在每個 Instance 上建立的 Endpoint。 */
@@ -826,6 +874,8 @@ export type Endpoint_Deserialize = {
 	 *  缺少會觸發 L006，所以必須允許 `None`。
 	 */
 	address: string | null,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  Endpoint 在某環境的實際樣貌：定義加上位址。 */
@@ -843,6 +893,8 @@ export type Endpoint_Serialize = {
 	 *  缺少會觸發 L006，所以必須允許 `None`。
 	 */
 	address: string | null,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -999,6 +1051,8 @@ export type Environment_Deserialize = {
 	/**  外部系統在此環境的實體。不在 `nodes` 底下，因為那些機器不是我們的。 */
 	systems?: SoftwareSystemInstance_Deserialize[],
 	connections?: Connection_Deserialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  一個部署環境。 */
@@ -1011,6 +1065,8 @@ export type Environment_Serialize = {
 	/**  外部系統在此環境的實體。不在 `nodes` 底下，因為那些機器不是我們的。 */
 	systems?: SoftwareSystemInstance_Serialize[],
 	connections?: Connection_Serialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -1275,6 +1331,8 @@ export type InfrastructureNode_Deserialize = {
 	id: Id,
 	slug: string,
 	endpoints?: Endpoint_Deserialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -1287,6 +1345,8 @@ export type InfrastructureNode_Serialize = {
 	id: Id,
 	slug: string,
 	endpoints?: Endpoint_Serialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  連線一端指向的 Instance：可以是一個，也可以是一整群。 */
@@ -1403,18 +1463,18 @@ export type Logical = Logical_Serialize | Logical_Deserialize;
 
 /**  邏輯層的全部內容。 */
 export type Logical_Deserialize = {
-	people: Person[],
+	people: Person_Deserialize[],
 	systems: SoftwareSystem_Deserialize[],
 	containers: Container_Deserialize[],
-	relationships: Relationship[],
+	relationships: Relationship_Deserialize[],
 };
 
 /**  邏輯層的全部內容。 */
 export type Logical_Serialize = {
-	people: Person[],
+	people: Person_Serialize[],
 	systems: SoftwareSystem_Serialize[],
 	containers: Container_Serialize[],
-	relationships: Relationship[],
+	relationships: Relationship_Serialize[],
 };
 
 /**  整張矩陣。列是邏輯連線，欄是環境。 */
@@ -1492,10 +1552,24 @@ export type OpenOutcome_Serialize =
 } }) & { loaded?: never };
 
 /**  真人使用者。C4 的 `Person`，只出現在 Context 圖。 */
-export type Person = {
+export type Person = Person_Serialize | Person_Deserialize;
+
+/**  真人使用者。C4 的 `Person`，只出現在 Context 圖。 */
+export type Person_Deserialize = {
 	id: Id,
 	slug: string,
 	name: string,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
+};
+
+/**  真人使用者。C4 的 `Person`，只出現在 Context 圖。 */
+export type Person_Serialize = {
+	id: Id,
+	slug: string,
+	name: string,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 export type Plan = {
@@ -1528,6 +1602,8 @@ export type Project_Deserialize = {
 	id: Id,
 	slug: string,
 	name: string,
+	/**  使用者的備註。見 [`memo_is_empty`]。 */
+	memo?: string,
 	logical: Logical_Deserialize,
 	environments: Environment_Deserialize[],
 };
@@ -1543,6 +1619,8 @@ export type Project_Serialize = {
 	id: Id,
 	slug: string,
 	name: string,
+	/**  使用者的備註。見 [`memo_is_empty`]。 */
+	memo?: string,
 	logical: Logical_Serialize,
 	environments: Environment_Serialize[],
 };
@@ -1603,19 +1681,7 @@ export type Protocol = "tcp" | "udp" | "unix-socket" | "jdbc" | "file";
  *  一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
  *  dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
  */
-export type Relationship = {
-	id: Id,
-	slug: string,
-	/**  用途說明。空白會觸發 L007。 */
-	purpose: string,
-	from: RelationshipEnd,
-	to: RelationshipEnd,
-	/**
-	 *  連到目標的哪一個 [`EndpointDef`]。
-	 *  目標是 Container 就查它的 endpoints，是外部系統就查系統的 endpoints。
-	 */
-	to_endpoint: Id,
-};
+export type Relationship = Relationship_Serialize | Relationship_Deserialize;
 
 /**
  *  邏輯連線的一端：自家的服務、一整個外部系統，或一個真人。
@@ -1630,6 +1696,66 @@ export type RelationshipEnd = ({ container: Id }) & { person?: never; system?: n
  *  人不需要被部署，所以 L001 不會要求它在每個環境都有實體。
  */
 ({ person: Id }) & { container?: never; system?: never };
+
+/**
+ *  邏輯層的連線：「A 要連 B 的某個 endpoint」，並說明用途。
+ * 
+ *  **這就是原本討論中的「連線契約」。** 我們刻意不另設 placeholder 概念——
+ *  邏輯層宣告了一條連線，每個環境就必須實現它，沒實現就是 lint 錯誤。
+ * 
+ *  一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
+ *  dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
+ */
+export type Relationship_Deserialize = {
+	id: Id,
+	slug: string,
+	/**  用途說明。空白會觸發 L007。 */
+	purpose: string,
+	from: RelationshipEnd,
+	to: RelationshipEnd,
+	/**
+	 *  連到目標的哪一個 [`EndpointDef`]。
+	 *  目標是 Container 就查它的 endpoints，是外部系統就查系統的 endpoints。
+	 */
+	to_endpoint: Id,
+	/**
+	 *  使用者的備註。見 [`crate::memo_is_empty`]。
+	 * 
+	 *  跟 `purpose` 分開：`purpose` 是 L007 在檢查的欄位，屬於「這條連線為什麼存在」；
+	 *  備註是規則不管的雜項，寫進 `purpose` 會讓那個欄位變成雜物櫃。
+	 */
+	memo?: string,
+};
+
+/**
+ *  邏輯層的連線：「A 要連 B 的某個 endpoint」，並說明用途。
+ * 
+ *  **這就是原本討論中的「連線契約」。** 我們刻意不另設 placeholder 概念——
+ *  邏輯層宣告了一條連線，每個環境就必須實現它，沒實現就是 lint 錯誤。
+ * 
+ *  一條 Relationship 在不同環境會展開成**不同數量**的實際連線：
+ *  dev 直連是 1 段，prod 走 F5 是 2 段；Redis 叢集 prod 12 個節點、test 6 個。
+ */
+export type Relationship_Serialize = {
+	id: Id,
+	slug: string,
+	/**  用途說明。空白會觸發 L007。 */
+	purpose: string,
+	from: RelationshipEnd,
+	to: RelationshipEnd,
+	/**
+	 *  連到目標的哪一個 [`EndpointDef`]。
+	 *  目標是 Container 就查它的 endpoints，是外部系統就查系統的 endpoints。
+	 */
+	to_endpoint: Id,
+	/**
+	 *  使用者的備註。見 [`crate::memo_is_empty`]。
+	 * 
+	 *  跟 `purpose` 分開：`purpose` 是 L007 在檢查的欄位，屬於「這條連線為什麼存在」；
+	 *  備註是規則不管的雜項，寫進 `purpose` 會讓那個欄位變成雜物櫃。
+	 */
+	memo?: string,
+};
 
 /**
  *  一個可以增／改／刪的模型元素。
@@ -1689,12 +1815,12 @@ export type ResourceRow_Serialize = {
  *  帶的是**完整的值**而不是「欄位差異」：整份換掉的語意最單純，
  *  而復原本來就是存整份快照（見 [`crate::history`]），省不了什麼。
  */
-export type Resource_Deserialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Deserialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+export type Resource_Deserialize = ({ person: Person_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Deserialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  接點定義掛在服務或外部系統身上，所以要指名擁有者。 */
 ({ endpointDef: {
 	owner: Id,
-	def: EndpointDef,
-} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Deserialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+	def: EndpointDef_Deserialize,
+} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship_Deserialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Deserialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  站點、實體機、VM、Linux 容器。`within` 是父節點。 */
 ({ node: {
 	environment: Id,
@@ -1735,12 +1861,12 @@ export type Resource_Deserialize = ({ person: Person }) & { container?: never; e
  *  帶的是**完整的值**而不是「欄位差異」：整份換掉的語意最單純，
  *  而復原本來就是存整份快照（見 [`crate::history`]），省不了什麼。
  */
-export type Resource_Serialize = ({ person: Person }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Serialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+export type Resource_Serialize = ({ person: Person_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; relationship?: never; system?: never; systemInstance?: never } | ({ system: SoftwareSystem_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; systemInstance?: never } | ({ container: Container_Serialize }) & { endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  接點定義掛在服務或外部系統身上，所以要指名擁有者。 */
 ({ endpointDef: {
 	owner: Id,
-	def: EndpointDef,
-} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Serialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
+	def: EndpointDef_Serialize,
+} }) & { container?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | ({ relationship: Relationship_Serialize }) & { container?: never; endpointDef?: never; environment?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; system?: never; systemInstance?: never } | ({ environment: Environment_Serialize }) & { container?: never; endpointDef?: never; infra?: never; infraEndpoint?: never; instance?: never; node?: never; person?: never; relationship?: never; system?: never; systemInstance?: never } | 
 /**  站點、實體機、VM、Linux 容器。`within` 是父節點。 */
 ({ node: {
 	environment: Id,
@@ -1983,6 +2109,8 @@ export type SoftwareSystemInstance_Deserialize = {
 	endpoints?: Endpoint_Deserialize[],
 	/**  同 [`ContainerInstance::standalone`]，關閉 L008 警告。 */
 	standalone?: boolean,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**
@@ -1998,6 +2126,8 @@ export type SoftwareSystemInstance_Serialize = {
 	endpoints?: Endpoint_Serialize[],
 	/**  同 [`ContainerInstance::standalone`]，關閉 L008 警告。 */
 	standalone?: boolean,
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。 */
@@ -2017,7 +2147,9 @@ export type SoftwareSystem_Deserialize = {
 	 *  只知道「有一個 API 可以打」。因此接點直接掛在系統上。
 	 *  自家系統留空，它的接點由各個 [`Container`] 自己定義。
 	 */
-	endpoints?: EndpointDef[],
+	endpoints?: EndpointDef_Deserialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  軟體系統。可能是自家系統，也可能是外部系統（金流、簡訊商）。 */
@@ -2037,7 +2169,9 @@ export type SoftwareSystem_Serialize = {
 	 *  只知道「有一個 API 可以打」。因此接點直接掛在系統上。
 	 *  自家系統留空，它的接點由各個 [`Container`] 自己定義。
 	 */
-	endpoints?: EndpointDef[],
+	endpoints?: EndpointDef_Serialize[],
+	/**  使用者的備註。見 [`crate::memo_is_empty`]。 */
+	memo?: string,
 };
 
 /**  一格的狀態。畫面上用顏色區分，順序即嚴重度。 */

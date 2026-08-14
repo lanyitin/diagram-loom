@@ -189,6 +189,7 @@ pub fn expand(
             def: Some(spec.endpoint.def.clone()),
             protocol: spec.endpoint.protocol,
             address: Some(address),
+            memo: String::new(),
         };
 
         let instance = ContainerInstance {
@@ -197,6 +198,7 @@ pub fn expand(
             container: spec.container.clone(),
             endpoints: vec![endpoint],
             standalone: false,
+            memo: String::new(),
         };
 
         nodes.push(DeploymentNode {
@@ -205,6 +207,7 @@ pub fn expand(
             kind: spec.node_kind,
             children: vec![],
             instances: vec![instance],
+            memo: String::new(),
         });
     }
 

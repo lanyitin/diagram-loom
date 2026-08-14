@@ -49,6 +49,9 @@ pub struct Endpoint {
     /// `10.0.1.11:6379` / JDBC URL / socket 路徑 / 檔案路徑。
     /// 缺少會觸發 L006，所以必須允許 `None`。
     pub address: Option<String>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 邏輯 Container 在此環境的一份服務實體。C4 的 `Container Instance`。
@@ -67,6 +70,9 @@ pub struct ContainerInstance {
     /// 冷備機是合法情境，但預設應該要叫。
     #[serde(default, skip_serializing_if = "is_false")]
     pub standalone: bool,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 機器：實體機、VM、Linux container。C4 的 `Deployment Node`，可巢狀。
@@ -81,6 +87,9 @@ pub struct DeploymentNode {
     pub children: Vec<DeploymentNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instances: Vec<ContainerInstance>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 impl DeploymentNode {
@@ -109,6 +118,9 @@ pub struct SoftwareSystemInstance {
     /// 同 [`ContainerInstance::standalone`]，關閉 L008 警告。
     #[serde(default, skip_serializing_if = "is_false")]
     pub standalone: bool,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// F5 等 VIP 設備。C4 的 `Infrastructure Node`。
@@ -122,6 +134,9 @@ pub struct InfrastructureNode {
     pub slug: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<Endpoint>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 連線的哪一端。
@@ -265,6 +280,12 @@ pub struct Connection {
     pub kind: ConnectionKind,
     pub from: Endpointing,
     pub to: Endpointing,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    ///
+    /// 跟 `purpose` 分開的理由同
+    /// [`Relationship::memo`](crate::logical::Relationship::memo)。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 /// 連線是正常路徑還是備援路徑。
@@ -303,6 +324,9 @@ pub struct Environment {
     pub systems: Vec<SoftwareSystemInstance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connections: Vec<Connection>,
+    /// 使用者的備註。見 [`crate::memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "crate::memo_is_empty")]
+    pub memo: String,
 }
 
 impl Environment {
@@ -351,6 +375,7 @@ mod tests {
             container: Id::new("c-redis"),
             endpoints: vec![],
             standalone: false,
+            memo: String::new(),
         }
     }
 
@@ -361,6 +386,7 @@ mod tests {
             kind: NodeKind::VirtualMachine,
             children: vec![],
             instances,
+            memo: String::new(),
         }
     }
 
@@ -373,6 +399,7 @@ mod tests {
             infra: vec![],
             systems: vec![],
             connections: vec![],
+            memo: String::new(),
         }
     }
 

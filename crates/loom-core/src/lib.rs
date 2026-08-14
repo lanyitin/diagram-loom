@@ -53,6 +53,24 @@ use crate::environment::Environment;
 use crate::id::Id;
 use crate::logical::Logical;
 
+/// 備註是空的。`skip_serializing_if` 用：沒寫備註就不要在 YAML 留下空字串。
+///
+/// # 為什麼每個模型元素都有 `memo`
+///
+/// 模型欄位是**規則要用的**：`purpose` 會被 L007 檢查、`expect` 會被 L005
+/// 檢查、`standalone` 會關掉 L008 的警告。但真實世界的資訊不會剛好只有這些——
+/// 「這台等年底汰換」「這條是舊系統遺留、問過 XX 說不能拆」這種話沒有欄位可放，
+/// 人就會塞進 `slug` 或 `purpose` 裡，把有規則在讀的欄位弄髒。
+///
+/// `memo` 是那些話的去處，而且**刻意不參與任何 lint 判斷**。
+/// 沒有規則讀它，就沒有人需要為了讓 lint 閉嘴而修改它。
+///
+/// 型別是 `String` 不是 `Option<String>`：空字串就是沒寫，
+/// 這裡沒有「沒填」與「填了空的」之分，多一層 `Option` 只是讓每個讀的人多解一次。
+pub fn memo_is_empty(memo: &str) -> bool {
+    memo.is_empty()
+}
+
 /// 一個專案：一份邏輯層母版，加上多個環境。
 /// 一個完整的專案。
 ///
@@ -64,6 +82,9 @@ pub struct Project {
     pub id: Id,
     pub slug: String,
     pub name: String,
+    /// 使用者的備註。見 [`memo_is_empty`]。
+    #[serde(default, skip_serializing_if = "memo_is_empty")]
+    pub memo: String,
     pub logical: Logical,
     pub environments: Vec<Environment>,
 }

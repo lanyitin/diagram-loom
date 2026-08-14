@@ -12,7 +12,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use common::*;
+use loom_core::Project;
+use loom_core::environment::DeploymentNode;
+use loom_core::id::Id;
 use loom_core::lint::lint;
+use loom_core::logical::Person;
 use loom_core::repository::{load_from_dir, save_to_dir};
 
 /// 每個測試用自己的暫存資料夾，避免互相干擾。
@@ -45,6 +49,140 @@ fn save_then_load_returns_an_identical_project() {
     let loaded = load_from_dir(dir.path()).unwrap();
 
     assert_eq!(loaded, original);
+}
+
+/// 每一種模型元素的備註都要能存得住。
+///
+/// 分開寫一個測試而不是靠上面那個往返比對：備註是**只有人在讀**的欄位，
+/// 沒有任何 lint 規則會因為它不見而叫。漏掉一層的話，
+/// 使用者是在重開專案、發現筆記不見了的時候才知道。
+#[test]
+fn every_kind_of_element_keeps_its_memo() {
+    let dir = TempDir::create("memo");
+    let mut project = healthy_project();
+    let stamped = stamp_memos(&mut project);
+
+    save_to_dir(&project, dir.path()).unwrap();
+    let loaded = load_from_dir(dir.path()).unwrap();
+
+    let mut found = collect_memos(&loaded);
+    found.sort();
+    let mut expected = stamped;
+    expected.sort();
+
+    assert_eq!(found, expected);
+}
+
+/// 在每一種模型元素上蓋一個獨一無二的備註，回傳蓋了哪些。
+fn stamp_memos(project: &mut Project) -> Vec<String> {
+    project.memo = "專案".into();
+
+    // 範例專案沒有人，補一個進去——這裡不跑 lint，只在乎存不存得住。
+    project.logical.people.push(Person {
+        id: Id::new("person-memo"),
+        slug: "shopper".into(),
+        name: "買家".into(),
+        memo: "人".into(),
+    });
+    project.logical.systems[0].memo = "系統".into();
+    project.logical.containers[0].memo = "服務".into();
+    project.logical.containers[0].endpoints[0].memo = "接點定義".into();
+    project.logical.relationships[0].memo = "契約".into();
+
+    let env = &mut project.environments[0];
+    env.memo = "環境".into();
+    env.nodes[0].memo = "機器".into();
+    env.nodes[0].instances[0].memo = "服務實體".into();
+    env.nodes[0].instances[0].endpoints[0].memo = "實體接點".into();
+    env.infra[0].memo = "設備".into();
+    env.infra[0].endpoints[0].memo = "設備接點".into();
+    env.systems[0].memo = "外部系統實體".into();
+    env.connections[0].memo = "連線".into();
+
+    [
+        "專案",
+        "人",
+        "系統",
+        "服務",
+        "接點定義",
+        "契約",
+        "環境",
+        "機器",
+        "服務實體",
+        "實體接點",
+        "設備",
+        "設備接點",
+        "外部系統實體",
+        "連線",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// 專案裡所有非空的備註，不管住在哪一層。
+fn collect_memos(project: &Project) -> Vec<String> {
+    fn push(out: &mut Vec<String>, memo: &str) {
+        if !memo.is_empty() {
+            out.push(memo.to_string());
+        }
+    }
+
+    fn walk_node(out: &mut Vec<String>, node: &DeploymentNode) {
+        push(out, &node.memo);
+        for instance in &node.instances {
+            push(out, &instance.memo);
+            for endpoint in &instance.endpoints {
+                push(out, &endpoint.memo);
+            }
+        }
+        for child in &node.children {
+            walk_node(out, child);
+        }
+    }
+
+    let mut out = vec![];
+    push(&mut out, &project.memo);
+    for person in &project.logical.people {
+        push(&mut out, &person.memo);
+    }
+    for system in &project.logical.systems {
+        push(&mut out, &system.memo);
+        for def in &system.endpoints {
+            push(&mut out, &def.memo);
+        }
+    }
+    for container in &project.logical.containers {
+        push(&mut out, &container.memo);
+        for def in &container.endpoints {
+            push(&mut out, &def.memo);
+        }
+    }
+    for relationship in &project.logical.relationships {
+        push(&mut out, &relationship.memo);
+    }
+    for env in &project.environments {
+        push(&mut out, &env.memo);
+        for node in &env.nodes {
+            walk_node(&mut out, node);
+        }
+        for infra in &env.infra {
+            push(&mut out, &infra.memo);
+            for endpoint in &infra.endpoints {
+                push(&mut out, &endpoint.memo);
+            }
+        }
+        for instance in &env.systems {
+            push(&mut out, &instance.memo);
+            for endpoint in &instance.endpoints {
+                push(&mut out, &endpoint.memo);
+            }
+        }
+        for connection in &env.connections {
+            push(&mut out, &connection.memo);
+        }
+    }
+    out
 }
 
 #[test]

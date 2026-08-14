@@ -135,6 +135,7 @@ mod tests {
             container: Id::from("c-app"),
             endpoints: vec![],
             standalone: false,
+            memo: String::new(),
         }
     }
 
@@ -145,6 +146,7 @@ mod tests {
             kind: NodeKind::VirtualMachine,
             children: vec![],
             instances,
+            memo: String::new(),
         }
     }
 
@@ -167,6 +169,7 @@ mod tests {
             kind: ConnectionKind::Primary,
             from,
             to,
+            memo: String::new(),
         }
     }
 
@@ -180,6 +183,7 @@ mod tests {
                     id: Id::from("per-1"),
                     slug: "客戶".into(),
                     name: "客戶".into(),
+                    memo: String::new(),
                 }],
                 systems: vec![],
                 containers: vec![Container {
@@ -188,6 +192,7 @@ mod tests {
                     name: "app".into(),
                     system: Id::from("s-1"),
                     endpoints: vec![],
+                    memo: String::new(),
                 }],
                 relationships: vec![Relationship {
                     id: Id::from("r-1"),
@@ -196,9 +201,11 @@ mod tests {
                     from: RelationshipEnd::Container(Id::from("c-app")),
                     to: RelationshipEnd::Container(Id::from("c-app")),
                     to_endpoint: Id::from("ep-1"),
+                    memo: String::new(),
                 }],
             },
             environments: vec![env],
+            memo: String::new(),
         }
     }
 
@@ -211,6 +218,7 @@ mod tests {
             infra: vec![],
             systems: vec![],
             connections,
+            memo: String::new(),
         }
     }
 

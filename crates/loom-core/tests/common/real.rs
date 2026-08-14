@@ -72,7 +72,9 @@ fn logical() -> Logical {
                 id: endpoint(slug),
                 slug: (*ep).into(),
                 protocol: *protocol,
+                memo: String::new(),
             }],
+            memo: String::new(),
         })
         .collect();
 
@@ -83,6 +85,7 @@ fn logical() -> Logical {
         from: RelationshipEnd::Container(Id::new(format!("c-{from}"))),
         to: RelationshipEnd::Container(Id::new(format!("c-{to}"))),
         to_endpoint: endpoint(to),
+        memo: String::new(),
     };
 
     Logical {
@@ -90,6 +93,7 @@ fn logical() -> Logical {
             id: Id::new("p-使用者"),
             slug: "end-user".into(),
             name: "End User".into(),
+            memo: String::new(),
         }],
         systems: vec![SoftwareSystem {
             id: Id::new(SYSTEM),
@@ -97,6 +101,7 @@ fn logical() -> Logical {
             name: "網路通路系統".into(),
             external: false,
             endpoints: vec![],
+            memo: String::new(),
         }],
         containers,
         relationships: vec![
@@ -109,6 +114,7 @@ fn logical() -> Logical {
                 from: RelationshipEnd::Person(Id::new("p-使用者")),
                 to: RelationshipEnd::Container(Id::new("c-apache")),
                 to_endpoint: endpoint("apache"),
+                memo: String::new(),
             },
             link("apache-連-gateway", "反向代理轉送請求", "apache", "gateway"),
             link(
@@ -158,8 +164,10 @@ fn instance(env: &str, slug: &str, container: &str, address: &str) -> ContainerI
             def: Some(endpoint(container)),
             protocol,
             address: Some(address.into()),
+            memo: String::new(),
         }],
         standalone: false,
+        memo: String::new(),
     }
 }
 
@@ -170,6 +178,7 @@ fn node(env: &str, slug: &str, instances: Vec<ContainerInstance>) -> DeploymentN
         kind: NodeKind::VirtualMachine,
         children: vec![],
         instances,
+        memo: String::new(),
     }
 }
 
@@ -181,6 +190,7 @@ fn site(env: &str, slug: &str, nodes: Vec<DeploymentNode>) -> DeploymentNode {
         kind: NodeKind::Site,
         children: nodes,
         instances: vec![],
+        memo: String::new(),
     }
 }
 
@@ -258,6 +268,7 @@ impl ConnectionRows {
             kind,
             from,
             to,
+            memo: String::new(),
         });
     }
 
@@ -317,7 +328,9 @@ fn vip(id: &str, slug: &str, address: &str) -> InfrastructureNode {
             def: None,
             protocol: Protocol::Tcp,
             address: Some(address.into()),
+            memo: String::new(),
         }],
+        memo: String::new(),
     }
 }
 
@@ -570,6 +583,7 @@ fn prod() -> Environment {
         ],
         systems: vec![],
         connections: c.out,
+        memo: String::new(),
     }
 }
 
@@ -705,6 +719,7 @@ fn test_env() -> Environment {
         infra: vec![],
         systems: Vec::<SoftwareSystemInstance>::new(),
         connections: c.out,
+        memo: String::new(),
     }
 }
 
@@ -715,5 +730,6 @@ pub fn project() -> Project {
         name: "網路通路系統".into(),
         logical: logical(),
         environments: vec![prod(), test_env()],
+        memo: String::new(),
     }
 }

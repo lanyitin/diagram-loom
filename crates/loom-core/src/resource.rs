@@ -139,6 +139,44 @@ impl Resource {
             Resource::SystemInstance { instance, .. } => &instance.slug,
         }
     }
+
+    /// 這個元素的備註。
+    ///
+    /// 每種資源身上的備註都是同一件事（見 [`crate::memo_is_empty`]），
+    /// 所以讀寫的人不必知道它住在哪一層——不然每個碰備註的地方
+    /// 都得再攤開一次這十一個變體。
+    pub fn memo(&self) -> &str {
+        match self {
+            Resource::Person(p) => &p.memo,
+            Resource::System(s) => &s.memo,
+            Resource::Container(c) => &c.memo,
+            Resource::EndpointDef { def, .. } => &def.memo,
+            Resource::Relationship(r) => &r.memo,
+            Resource::Environment(e) => &e.memo,
+            Resource::Node { node, .. } => &node.memo,
+            Resource::Infra { node, .. } => &node.memo,
+            Resource::InfraEndpoint { endpoint, .. } => &endpoint.memo,
+            Resource::Instance { instance, .. } => &instance.memo,
+            Resource::SystemInstance { instance, .. } => &instance.memo,
+        }
+    }
+
+    /// 同 [`Resource::memo`]，但可以改。
+    pub fn memo_mut(&mut self) -> &mut String {
+        match self {
+            Resource::Person(p) => &mut p.memo,
+            Resource::System(s) => &mut s.memo,
+            Resource::Container(c) => &mut c.memo,
+            Resource::EndpointDef { def, .. } => &mut def.memo,
+            Resource::Relationship(r) => &mut r.memo,
+            Resource::Environment(e) => &mut e.memo,
+            Resource::Node { node, .. } => &mut node.memo,
+            Resource::Infra { node, .. } => &mut node.memo,
+            Resource::InfraEndpoint { endpoint, .. } => &mut endpoint.memo,
+            Resource::Instance { instance, .. } => &mut instance.memo,
+            Resource::SystemInstance { instance, .. } => &mut instance.memo,
+        }
+    }
 }
 
 /// 照 id 把一個元素撈出來。
@@ -254,6 +292,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             id,
             slug: String::new(),
             name: String::new(),
+            memo: String::new(),
         }),
         Kind::System => Resource::System(SoftwareSystem {
             id,
@@ -263,6 +302,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             // 而使用者手動新增「系統」時，多半是在記一個對外的相依。
             external: true,
             endpoints: vec![],
+            memo: String::new(),
         }),
         Kind::Container => Resource::Container(Container {
             id,
@@ -270,6 +310,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             name: String::new(),
             system: owner.unwrap_or_else(|| Id::new("")),
             endpoints: vec![],
+            memo: String::new(),
         }),
         Kind::EndpointDef => Resource::EndpointDef {
             owner: owner.unwrap_or_else(|| Id::new("")),
@@ -277,6 +318,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 id,
                 slug: String::new(),
                 protocol: Protocol::Tcp,
+                memo: String::new(),
             },
         },
         Kind::Relationship => Resource::Relationship(Relationship {
@@ -288,6 +330,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             from: crate::logical::RelationshipEnd::Container(Id::new("")),
             to: crate::logical::RelationshipEnd::Container(Id::new("")),
             to_endpoint: Id::new(""),
+            memo: String::new(),
         }),
         Kind::Environment => Resource::Environment(Environment {
             id,
@@ -297,6 +340,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
             infra: vec![],
             systems: vec![],
             connections: vec![],
+            memo: String::new(),
         }),
         Kind::Node => Resource::Node {
             environment: environment.unwrap_or_else(|| Id::new("")),
@@ -307,6 +351,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 kind: NodeKind::VirtualMachine,
                 children: vec![],
                 instances: vec![],
+                memo: String::new(),
             },
         },
         Kind::Infra => Resource::Infra {
@@ -315,6 +360,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 id,
                 slug: String::new(),
                 endpoints: vec![],
+                memo: String::new(),
             },
         },
         Kind::InfraEndpoint => Resource::InfraEndpoint {
@@ -326,6 +372,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 def: None,
                 protocol: Protocol::Tcp,
                 address: None,
+                memo: String::new(),
             },
         },
         Kind::Instance => Resource::Instance {
@@ -337,6 +384,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 container: Id::new(""),
                 endpoints: vec![],
                 standalone: false,
+                memo: String::new(),
             },
         },
         Kind::SystemInstance => Resource::SystemInstance {
@@ -347,6 +395,7 @@ pub fn blank(kind: Kind, environment: Option<Id>, owner: Option<Id>) -> Resource
                 system: owner.unwrap_or_else(|| Id::new("")),
                 endpoints: vec![],
                 standalone: false,
+                memo: String::new(),
             },
         },
     }
@@ -837,6 +886,7 @@ pub fn new_project(name: &str) -> Project {
             relationships: vec![],
         },
         environments: vec![],
+        memo: String::new(),
     }
 }
 
