@@ -26,9 +26,42 @@ const store = useProject()
 const scale = ref<Scale>(loadScale())
 watch(scale, applyScale, { immediate: true })
 
+/**
+ * 開一個專案到這扇視窗。
+ *
+ * # 為什麼要先問未儲存
+ *
+ * 這會**取代**這扇視窗現在看的東西。以前沒有問，因為「開啟專案」是開機時
+ * 做一次的事；多視窗之後它變成日常操作，而沒問就蓋掉等於安靜地丟掉工作。
+ *
+ * 要同時看兩個專案請按「新視窗」——那條路不會動到任何現有的東西。
+ */
 async function pickProject() {
   const picked = await open({ directory: true, title: '選擇專案資料夾（.loom）' })
-  if (typeof picked === 'string') await store.open(picked)
+  if (typeof picked !== 'string') return
+  if (store.dirty) {
+    replacing.value = picked
+    return
+  }
+  await store.open(picked)
+}
+
+/** 使用者選好了、但這扇視窗還有未儲存的變更，等他決定。 */
+const replacing = ref<string | null>(null)
+
+async function saveThenOpen() {
+  await store.save()
+  // 存檔失敗就停在原地。開下去的話錯誤訊息會跟著被取代的專案一起消失。
+  if (store.error) return
+  const path = replacing.value
+  replacing.value = null
+  if (path) await store.open(path)
+}
+
+async function discardThenOpen() {
+  const path = replacing.value
+  replacing.value = null
+  if (path) await store.open(path)
 }
 
 /**
@@ -134,6 +167,9 @@ onUnmounted(() => {
 
       <button :disabled="store.busy" @click="newProject">新專案…</button>
       <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
+      <!-- 要同時看兩個專案就從這裡開始。「開啟專案…」是取代這一扇，
+           兩個入口分開才不會有人以為自己弄丟了東西。 -->
+      <button :disabled="store.busy" title="再開一扇空視窗" @click="store.newWindow()">新視窗</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.importing = true">匯入試算表…</button>
       <button :disabled="!store.isOpen || store.busy" @click="store.recheck()">重新檢查</button>
       <!-- 端點是開是關要在標頭看得出來。使用者踩過一次：重開 App 之後
@@ -152,6 +188,30 @@ onUnmounted(() => {
     </header>
 
     <p v-if="store.error" class="failure" role="alert">{{ store.error }}</p>
+    <!-- 不是錯誤，只是一句話。用紅字說「那個已經開在別的視窗」會像是
+         使用者做錯了什麼，而他只是選了一個他已經在看的東西。 -->
+    <p v-if="store.notice" class="notice-bar" role="status">
+      {{ store.notice }}
+      <button class="x" title="知道了" @click="store.notice = null">✕</button>
+    </p>
+
+    <!-- 取代這扇視窗現在看的專案之前先問。多視窗之後這變成日常操作，
+         沒問就蓋掉等於安靜地丟掉工作。 -->
+    <div v-if="replacing" class="scrim" @click.self="replacing = null">
+      <section class="ask" role="dialog" aria-modal="true" aria-label="有未儲存的變更">
+        <h2>有還沒存的變更</h2>
+        <p class="muted">
+          開別的專案會取代這扇視窗現在看的東西。要同時看兩個的話，
+          按「取消」再用<strong>新視窗</strong>。
+        </p>
+        <footer>
+          <button @click="replacing = null">取消</button>
+          <span class="grow" />
+          <button @click="discardThenOpen()">不存直接開</button>
+          <button class="primary" @click="saveThenOpen()">存了再開</button>
+        </footer>
+      </section>
+    </div>
 
     <template v-if="store.isOpen">
       <!--
@@ -380,6 +440,49 @@ header {
   color: var(--broken);
   user-select: text;
 }
+
+/* 不是錯誤，所以不是紅的。 */
+.notice-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 7px 14px;
+  background: color-mix(in srgb, var(--warp) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warp) 30%, transparent);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.notice-bar .x {
+  margin-left: auto;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #000 42%, transparent);
+}
+.ask {
+  width: min(430px, 92%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--raise);
+  box-shadow: 0 14px 40px var(--shadow);
+}
+.ask h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.ask p { margin: 0; font-size: 12.5px; line-height: 1.7; }
+.ask footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 
 .welcome {
   flex: 1;

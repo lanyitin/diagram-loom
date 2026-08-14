@@ -54,6 +54,7 @@ vi.mock('./lib/bindings', () => ({
     diagramContracts: vi.fn(),
     blankResource: vi.fn(),
     createProject: vi.fn(),
+    newWindow: vi.fn(),
     mcpStatus: vi.fn(),
     startMcp: vi.fn(),
     stopMcp: vi.fn(),
@@ -197,6 +198,79 @@ describe('視窗組裝', () => {
 
     expect(store.view).toBe('資源')
     expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
+  })
+
+  it('「新視窗」隨時都按得動，就算還沒開專案', async () => {
+    // 要同時看兩個專案就是從這裡開始。空視窗上也要能按——
+    // 不然使用者得先開一個專案才生得出第二扇窗。
+    vi.mocked(commands.newWindow).mockResolvedValue({ status: 'ok', data: null } as never)
+    const w = mount(App)
+
+    await headerButton(w, '新視窗').trigger('click')
+    expect(commands.newWindow).toHaveBeenCalled()
+  })
+
+  it('有未儲存時「開啟專案…」會先問，不直接蓋掉', async () => {
+    // 開啟專案是**取代**這扇視窗看的東西。多視窗之後它變成日常操作，
+    // 沒問就蓋掉等於安靜地丟掉工作。
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    vi.mocked(open).mockResolvedValue('/tmp/另一個.loom' as never)
+    store.snapshot = fakeSnapshot({ dirty: true })
+    const openProject = vi.spyOn(store, 'open').mockResolvedValue(undefined)
+    const w = mount(App)
+
+    await headerButton(w, '開啟專案…').trigger('click')
+    await flushPromises()
+
+    expect(openProject, '還沒問就開了').not.toHaveBeenCalled()
+    const ask = w.find('[aria-label="有未儲存的變更"]')
+    expect(ask.exists()).toBe(true)
+    // 三個選項都要在。少了「存了再開」的話，使用者得先取消、自己按儲存、
+    // 再開一次——三步做一件事。
+    expect(ask.text()).toContain('存了再開')
+    expect(ask.text()).toContain('不存直接開')
+    expect(ask.text()).toContain('取消')
+  })
+
+  it('沒有未儲存時就直接開，不要多問一句', async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    vi.mocked(open).mockResolvedValue('/tmp/另一個.loom' as never)
+    store.snapshot = fakeSnapshot({ dirty: false })
+    const openProject = vi.spyOn(store, 'open').mockResolvedValue(undefined)
+    const w = mount(App)
+
+    await headerButton(w, '開啟專案…').trigger('click')
+    await flushPromises()
+
+    expect(openProject).toHaveBeenCalledWith('/tmp/另一個.loom')
+    expect(w.find('[aria-label="有未儲存的變更"]').exists()).toBe(false)
+  })
+
+  it('那個專案已經開在別的視窗時，這扇窗維持原狀', async () => {
+    // Rust 會把那扇窗叫到前面。這扇窗**不能**跟著換過去——
+    // 換過去的話同一個專案就有兩份 History，兩邊各自存檔會互相蓋掉。
+    store.snapshot = fakeSnapshot()
+    const before = store.snapshot
+    vi.mocked(commands.openProject).mockResolvedValue({
+      status: 'ok',
+      data: { elsewhere: { name: 'payments' } },
+    } as never)
+
+    await store.open('/tmp/payments.loom')
+
+    expect(store.snapshot, '這扇視窗被換掉了').toBe(before)
+    expect(store.notice).toContain('payments')
+    expect(store.error).toBeNull()
+  })
+
+  it('「已經開在別的視窗」用一句話講，不是紅字', () => {
+    // 使用者沒做錯什麼，他只是選了一個他已經在看的東西。
+    store.snapshot = fakeSnapshot()
+    store.notice = '「payments」已經開在另一個視窗了，我把它叫到前面。'
+    const w = mount(App)
+
+    expect(w.find('.notice-bar').text()).toContain('已經開在另一個視窗')
+    expect(w.find('.failure').exists(), '不該用錯誤的紅字').toBe(false)
   })
 
   it('沒開專案時不顯示模式切換', () => {

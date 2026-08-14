@@ -6,7 +6,7 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	openProject: (path: string) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("open_project", { path })),
+	openProject: (path: string) => typedError<OpenOutcome_Serialize, Failure>(__TAURI_INVOKE("open_project", { path })),
 	/**
 	 *  重新檢查目前開著的專案。
 	 * 
@@ -86,6 +86,19 @@ export const commands = {
 	 *  資料夾（例如使用者的家目錄）就會蓋掉別人的檔案，而那沒辦法復原。
 	 */
 	createProject: (path: string, name: string) => typedError<Snapshot_Serialize, Failure>(__TAURI_INVOKE("create_project", { path, name })),
+	/**
+	 *  再開一扇空視窗。
+	 * 
+	 *  # 為什麼由 Rust 開，不是前端自己開
+	 * 
+	 *  前端呼叫 `WebviewWindow.create()` 需要 `core:webview:allow-create-webview-window`
+	 *  這個權限，而 `capabilities/default.json` 是安全邊界不是設定樣板——
+	 *  從 Rust 開就完全不需要它。
+	 * 
+	 *  label 用遞增的數字。它只是視窗的名字，**不是專案的身分**——
+	 *  專案的身分是資料夾路徑，兩者由登記簿配起來。
+	 */
+	newWindow: () => typedError<null, Failure>(__TAURI_INVOKE("new_window")),
 	/**
 	 *  打開給 AI Agent 用的本機端點。
 	 * 
@@ -1321,6 +1334,45 @@ export type NodeKind =
  *  沒有這個種類的話，「主中心」只能勉強標成實體機，畫出來會變成一台機器。
  */
 "site" | "physical" | "virtual-machine" | "linux-container";
+
+/**
+ *  開啟的結果。
+ * 
+ *  「已經開在別的視窗」不是錯誤——使用者只是選了一個他已經在看的東西，
+ *  而正確的回應是把那扇窗叫到前面。做成錯誤的話畫面會跳紅字，
+ *  像是他做錯了什麼。
+ */
+export type OpenOutcome = OpenOutcome_Serialize | OpenOutcome_Deserialize;
+
+/**
+ *  開啟的結果。
+ * 
+ *  「已經開在別的視窗」不是錯誤——使用者只是選了一個他已經在看的東西，
+ *  而正確的回應是把那扇窗叫到前面。做成錯誤的話畫面會跳紅字，
+ *  像是他做錯了什麼。
+ */
+export type OpenOutcome_Deserialize = 
+/**  開好了，這扇視窗現在看的是它。 */
+({ loaded: Snapshot_Deserialize }) & { elsewhere?: never } | 
+/**  已經開在另一扇視窗，那扇已經被叫到前面了。這扇視窗維持原狀。 */
+({ elsewhere: {
+	name: string,
+} }) & { loaded?: never };
+
+/**
+ *  開啟的結果。
+ * 
+ *  「已經開在別的視窗」不是錯誤——使用者只是選了一個他已經在看的東西，
+ *  而正確的回應是把那扇窗叫到前面。做成錯誤的話畫面會跳紅字，
+ *  像是他做錯了什麼。
+ */
+export type OpenOutcome_Serialize = 
+/**  開好了，這扇視窗現在看的是它。 */
+({ loaded: Snapshot_Serialize }) & { elsewhere?: never } | 
+/**  已經開在另一扇視窗，那扇已經被叫到前面了。這扇視窗維持原狀。 */
+({ elsewhere: {
+	name: string,
+} }) & { loaded?: never };
 
 /**  真人使用者。C4 的 `Person`，只出現在 Context 圖。 */
 export type Person = {

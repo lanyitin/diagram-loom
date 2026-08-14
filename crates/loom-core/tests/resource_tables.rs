@@ -85,7 +85,10 @@ fn without_an_environment_only_the_master_copy_shows_up() {
     // 剛開一個空專案就是這樣：還沒有環境，所以環境層一張表都沒有。
     let project = common::healthy_project();
 
-    let groups: Vec<TableGroup> = tables(&project, None).into_iter().map(|t| t.group).collect();
+    let groups: Vec<TableGroup> = tables(&project, None)
+        .into_iter()
+        .map(|t| t.group)
+        .collect();
 
     assert!(
         !groups.contains(&TableGroup::Environment),

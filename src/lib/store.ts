@@ -53,6 +53,14 @@ interface State {
   focus: FocusTarget | null
   busy: boolean
   error: string | null
+  /**
+   * 一句不算錯誤的話。
+   *
+   * 「那個專案已經開在另一個視窗」屬於這一類：使用者沒做錯什麼，
+   * 只是需要知道剛才那一下發生了什麼事。跟 `error` 用不同的欄位，
+   * 畫面才不會用紅字嚇人。
+   */
+  notice: string | null
   /** 使用者按了刪除、還沒確認的那一條。`null` 表示沒有對話框。 */
   deleting: PendingDelete | null
   /** 使用者要補一條連線給哪個環境的哪條契約。 */
@@ -128,6 +136,7 @@ export const useProject = defineStore('project', {
     focus: null,
     busy: false,
     error: null,
+    notice: null,
     deleting: null,
     addingConnection: null,
     addingInstances: null,
@@ -219,8 +228,45 @@ export const useProject = defineStore('project', {
       return this.environments.find((e) => e.id === id)?.slug ?? id
     },
 
+    /**
+     * 開一個專案到**這扇視窗**。
+     *
+     * 不走 `run()`，因為它可能不回 snapshot：那個專案已經開在另一扇視窗時，
+     * Rust 會把那扇窗叫到前面，而這扇窗要維持原狀。
+     *
+     * 那不是錯誤——使用者只是選了一個他已經在看的東西。用紅字回應會像是
+     * 他做錯了什麼，所以走 `notice` 那條溫和的線。
+     */
     async open(path: string) {
-      await this.run(() => commands.openProject(path))
+      this.busy = true
+      this.error = null
+      this.notice = null
+      try {
+        const res = await commands.openProject(path)
+        if (res.status !== 'ok') {
+          this.error = (res.error as { message?: string })?.message ?? String(res.error)
+          return
+        }
+        if ('elsewhere' in res.data && res.data.elsewhere) {
+          this.notice = `「${res.data.elsewhere.name}」已經開在另一個視窗了，我把它叫到前面。`
+          return
+        }
+        if ('loaded' in res.data && res.data.loaded) {
+          this.snapshot = res.data.loaded as Snapshot
+        }
+      } catch (e) {
+        this.error = e instanceof Error ? e.message : String(e)
+      } finally {
+        this.busy = false
+      }
+    },
+
+    /** 再開一扇空視窗。要同時看兩個專案就是從這裡開始。 */
+    async newWindow() {
+      const res = await commands.newWindow()
+      if (res.status !== 'ok') {
+        this.error = (res.error as { message?: string })?.message ?? String(res.error)
+      }
     },
 
     /** 端點開著沒有。App 一啟動就問一次——它可能是自動啟用的。 */

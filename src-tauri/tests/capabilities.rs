@@ -19,18 +19,24 @@
 
 use std::collections::HashSet;
 
-fn permissions() -> HashSet<String> {
+fn capability() -> serde_json::Value {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("讀不到 {}：{e}", path.display()));
-    let json: serde_json::Value = serde_json::from_str(&text).expect("權限檔不是合法的 JSON");
+    serde_json::from_str(&text).expect("權限檔不是合法的 JSON")
+}
 
-    json["permissions"]
+fn strings(key: &str) -> HashSet<String> {
+    capability()[key]
         .as_array()
-        .expect("權限檔少了 permissions 陣列")
+        .unwrap_or_else(|| panic!("權限檔少了 {key} 陣列"))
         .iter()
-        .map(|v| v.as_str().expect("權限必須是字串").to_string())
+        .map(|v| v.as_str().expect("必須是字串").to_string())
         .collect()
+}
+
+fn permissions() -> HashSet<String> {
+    strings("permissions")
 }
 
 #[test]
@@ -63,4 +69,25 @@ fn only_the_permissions_we_need() {
     .collect();
 
     assert_eq!(permissions(), expected);
+}
+
+#[test]
+fn the_extra_windows_get_the_permissions_too() {
+    // 權限是**綁在視窗 label 上**的。多視窗之後新開的視窗叫 `w-1`、`w-2`…，
+    // 而這個檔如果只寫 `main`，那些視窗會一個權限都拿不到。
+    //
+    // 症狀跟上面那個坑一模一樣，而且更難查：主視窗一切正常，
+    // 只有「新視窗」開出來的那幾扇關不掉、也叫不出檔案選擇器，
+    // 沒有任何錯誤訊息。
+    let windows = strings("windows");
+    assert!(
+        windows.contains("main"),
+        "主視窗不見了。tauri.conf.json 定義的那扇叫 main。"
+    );
+    assert!(
+        windows.contains("w-*"),
+        "少了 w-* 這個樣式。`new_window` 開出來的視窗叫 w-1、w-2…，\
+         沒有這一條它們會拿不到任何權限——關不掉，也開不了檔案選擇器，\
+         而且完全沒有錯誤訊息。"
+    );
 }

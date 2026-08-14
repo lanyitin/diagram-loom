@@ -37,6 +37,13 @@ use crate::refs;
 /// 寫不清楚它就會用錯，而用錯的成本是使用者的專案被弄髒。
 pub fn list() -> Value {
     json!([
+        tool("projects", "\
+使用者現在開著哪幾個專案，各自有沒有未儲存、lint 還剩幾項。
+
+**同時開著多個的時候先叫這個。** 其他工具都收一個選填的 `project`，
+只開一個時可以省略，開著多個又沒給的話會被擋下來——不會替你猜一個。",
+            json!({"type": "object", "properties": {}})),
+
         tool("describe", "\
 看目前這份專案裡已經有什麼：系統、服務、接點定義、契約、環境、機器、設備。
 **動手之前先叫這個。** 不然你會重複建立已經存在的東西，而那會撞名失敗。",
@@ -239,17 +246,56 @@ pub fn list() -> Value {
     ])
 }
 
-fn tool(name: &str, description: &str, schema: Value) -> Value {
+/// 每個工具都自動長出一個選填的 `project`。
+///
+/// 在這裡補而不是在十個 schema 裡各抄一次：抄的話遲早有一個會漏掉，
+/// 而症狀是「那個工具沒辦法指定專案」——Agent 只會覺得莫名其妙。
+fn tool(name: &str, description: &str, mut schema: Value) -> Value {
+    if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert(
+            "project".into(),
+            json!({
+                "type": "string",
+                "description": "要動哪一個專案（名字或路徑片段）。\
+                    只開著一個的時候可以省略；開著多個又沒給，會回一份清單要你指定。"
+            }),
+        );
+    }
     json!({ "name": name, "description": description, "inputSchema": schema })
 }
 
+/// Agent 說要動哪一個專案。呼叫端要先拿它去 [`crate::pick::resolve`]。
+///
+/// 挑選的規則不放在這裡，因為挑選要看**全部**開著的專案，而 `ws` 只代表
+/// 已經挑好的那一個。分開之後，呼叫端才有辦法先解析、再只鎖那一個專案。
+pub fn wanted(args: &Value) -> Option<&str> {
+    args.get("project").and_then(Value::as_str)
+}
+
+/// 這個工具需不需要先挑一個專案。
+///
+/// 只有 `projects` 不需要——它問的正是「有哪些可以挑」。少了這個判斷，
+/// 開著兩個專案時它會被「你沒說要動哪一個」擋下來，
+/// 於是 Agent 唯一能問路的工具剛好是唯一問不到的那個。
+pub fn needs_project(name: &str) -> bool {
+    name != "projects"
+}
+
 /// 呼叫一個工具。回的是給 Agent 讀的文字。
-pub fn call(ws: &mut dyn Workspace, name: &str, args: &Value) -> Result<String, String> {
+///
+/// `ws` 是**已經挑好的那一個專案**；`open` 是全部開著的，只給 `projects`
+/// 與錯誤訊息用——工具本身不該有辦法碰到別的專案。
+pub fn call(
+    ws: &mut dyn Workspace,
+    open: &[crate::pick::Open],
+    name: &str,
+    args: &Value,
+) -> Result<String, String> {
+    if name == "projects" {
+        return Ok(crate::pick::listing(open));
+    }
     if ws.project().is_none() {
-        return Err(
-            "使用者還沒有開啟任何專案。請他在 diagram-loom 裡開一個，或用「新專案…」建一個。"
-                .into(),
-        );
+        return Err(crate::pick::NOTHING_OPEN.into());
     }
     match name {
         "describe" => Ok(describe(ws.project().unwrap())),

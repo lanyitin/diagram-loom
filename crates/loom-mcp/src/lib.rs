@@ -31,6 +31,7 @@
 //! 這個 crate 因此維持**同步、無 async、只有 serde 相依**：
 //! 所有工具的行為都能用 `cargo test` 驗，不必開 runtime 也不必跑 server。
 
+pub mod pick;
 pub mod refs;
 pub mod tools;
 
@@ -65,7 +66,14 @@ pub trait Workspace {
 /// 沒有任何錯誤訊息會提醒 Agent 這樣很慢。等到有人發現時，
 /// 已經是一個大型系統建到一半、跑了很久的時候了。
 pub const INSTRUCTIONS: &str = "\
-這是使用者當下開著的那份 diagram-loom 專案。
+這是使用者當下開著的 diagram-loom 專案。**他可能同時開著好幾個。**
+
+每個工具都收一個選填的 `project`（名字或路徑片段）。只開著一個時可以省略；
+開著多個又沒給，呼叫會被擋下來並附上一份清單——**不會替你猜一個**，
+因為猜錯是安靜地改到別的專案，那比失敗糟得多。
+
+不確定有哪些就先叫 projects，它會列出每一個的未儲存與 lint 狀況。
+一趟只動一個專案，所以要改三個就跑三輪。
 
 動手之前先叫 describe——不然你會重複建立已經有的東西。
 

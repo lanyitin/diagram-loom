@@ -47,14 +47,27 @@ pub fn empty() -> Desk {
     })))
 }
 
+/// 這幾個測試都只有一個專案，所以「開著哪些」永遠是這一份。
+/// 挑選的規則本身由 `pick` 的單元測試守著。
+fn only_one() -> Vec<loom_mcp::pick::Open> {
+    vec![loom_mcp::pick::Open {
+        slug: "測試".into(),
+        name: "測試專案".into(),
+        root: "/tmp/測試.loom".into(),
+        dirty: false,
+        errors: 0,
+        warnings: 0,
+    }]
+}
+
 /// 叫一個工具，成功就回文字，失敗就 panic 並附上原因。
 pub fn ok(ws: &mut Desk, name: &str, args: Value) -> String {
-    tools::call(ws, name, &args).unwrap_or_else(|e| panic!("{name} 失敗了：{e}"))
+    tools::call(ws, &only_one(), name, &args).unwrap_or_else(|e| panic!("{name} 失敗了：{e}"))
 }
 
 /// 叫一個工具並預期失敗，回錯誤訊息。
 pub fn err(ws: &mut Desk, name: &str, args: Value) -> String {
-    match tools::call(ws, name, &args) {
+    match tools::call(ws, &only_one(), name, &args) {
         Err(e) => e,
         Ok(text) => panic!("{name} 竟然成功了：{text}"),
     }

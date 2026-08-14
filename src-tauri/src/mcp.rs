@@ -154,10 +154,16 @@ pub trait Desk: Send + Sync + 'static {
     fn call(&self, name: &str, args: &Value) -> Result<String, String>;
 }
 
-/// App 的實作：Agent 操作的就是使用者眼前那份。
+/// App 的實作：Agent 操作的就是使用者眼前那幾份。
 ///
 /// 拿的是同一個 `History`，所以修改會進同一條復原鏈，畫面重畫時
 /// 看到的也是同一份資料。
+///
+/// # 使用者開著什麼，Agent 就看得到什麼
+///
+/// 清單直接來自視窗登記簿（`crate::Desk`），所以**沒有視窗在看的專案，
+/// Agent 一定碰不到**。它的觸及範圍恰好等於使用者看得到的範圍——
+/// 那正是把 MCP 掛在 App 裡而不是做成獨立程序的全部理由。
 struct AppDesk(AppHandle);
 
 /// `Opened` 借出來當 workspace 用。
@@ -165,33 +171,63 @@ struct Borrowed<'a>(&'a mut Opened);
 
 impl Workspace for Borrowed<'_> {
     fn project(&self) -> Option<&Project> {
-        self.0
-            .history
-            .as_ref()
-            .map(loom_core::history::History::project)
+        Some(self.0.history.project())
     }
 
     fn edit(&mut self, edit: &Edit) -> Result<(), String> {
-        self.0
-            .history
-            .as_mut()
-            .ok_or("還沒有開啟任何專案")?
-            .edit(edit)
-            .map_err(|e| e.to_string())
+        self.0.history.edit(edit).map_err(|e| e.to_string())
     }
 }
 
 impl Desk for AppDesk {
     fn call(&self, name: &str, args: &Value) -> Result<String, String> {
-        let state = self.0.state::<Mutex<Opened>>();
+        // 一、看使用者現在開著什麼。
+        //
+        // lint 每次都重跑：數百條連線是毫秒級，而 `projects` 與所有錯誤訊息
+        // 都會印出這些數字——只在某些情況算的話，其他情況就會印 0，
+        // 那比慢一點糟得多。
+        let projects = self.0.state::<crate::Desk>().all();
+        let mut open = Vec::with_capacity(projects.len());
+        for p in &projects {
+            let guard = p.state.lock().map_err(|_| "內部狀態毀損")?;
+            let project = guard.history.project();
+            let findings = loom_core::lint::lint(project);
+            open.push(loom_mcp::pick::Open {
+                slug: project.slug.clone(),
+                name: project.name.clone(),
+                root: p.root.display().to_string(),
+                dirty: guard.history.is_dirty(),
+                errors: findings
+                    .iter()
+                    .filter(|f| f.severity() == loom_core::lint::Severity::Error)
+                    .count(),
+                warnings: findings
+                    .iter()
+                    .filter(|f| f.severity() == loom_core::lint::Severity::Warning)
+                    .count(),
+            });
+        }
+
+        // 二、Agent 說要動哪一個。規則在 `loom_mcp::pick`，那裡不知道
+        //     Tauri 存在，所以「多個時會不會亂猜」用 cargo test 就驗得到。
+        //
+        //     `projects` 不必挑——它問的正是「有哪些可以挑」。
+        if !loom_mcp::tools::needs_project(name) {
+            return Ok(loom_mcp::pick::listing(&open));
+        }
+        let picked = loom_mcp::pick::resolve(&open, loom_mcp::tools::wanted(args))?;
+
+        // 三、只鎖那一個。其他專案的視窗完全不受影響——
+        //     一批三百項跑得再久，隔壁那扇窗照樣能動。
+        let target = &projects[picked];
         let outcome = {
-            let mut opened = state.lock().map_err(|_| "內部狀態毀損")?;
-            loom_mcp::tools::call(&mut Borrowed(&mut opened), name, args)
+            let mut opened = target.state.lock().map_err(|_| "內部狀態毀損")?;
+            loom_mcp::tools::call(&mut Borrowed(&mut opened), &open, name, args)
         };
 
-        // 通知畫面重畫。Agent 在改東西的時候使用者要看得到——
-        // 看不到的話，等他發現時已經是一整批改完了，那就沒辦法逐項判斷。
-        let _ = self.0.emit("loom://changed", ());
+        // 四、只通知那一扇視窗重畫。Agent 在改東西的時候使用者要看得到——
+        //     看不到的話，等他發現時已經是一整批改完了，那就沒辦法逐項判斷。
+        let _ = self.0.emit_to(target.window.as_str(), "loom://changed", ());
         outcome
     }
 }
