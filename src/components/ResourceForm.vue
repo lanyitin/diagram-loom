@@ -88,13 +88,72 @@ function removeEndpoint(id: Id) {
 const logical = computed(() => store.snapshot?.project.logical)
 const containers = computed(() => logical.value?.containers ?? [])
 const systems = computed(() => logical.value?.systems ?? [])
+
+/**
+ * 外部系統實體只能對應到**外部**系統。
+ *
+ * 自家系統是靠自己的 `Container` 部署的，沒有獨立的系統實例
+ * （見 `loom_core::logical::Logical::external_systems` 的說明）。
+ * 列出來的話使用者建得出一個模型上不該存在的東西，而 lint 不會叫——
+ * L001 只走 `external_systems()`，根本不會看到它。
+ */
+const externalSystems = computed(() =>
+  systems.value
+    .filter((s) => s.external)
+    .map((s) => ({ value: s.id, label: s.slug, hint: s.name })),
+)
 const people = computed(() => logical.value?.people ?? [])
 
-/** 契約的一端：三種來源攤成一個選單，選了就換掉那一端的形狀。 */
+/**
+ * 全部系統，標明自家還是外部。
+ *
+ * 這裡**不篩掉外部系統**：Rust 沒有禁止服務掛在外部系統底下
+ * （L012 只檢查那個 id 存在）。文件說「C4 不拆外部系統」是設計意圖，
+ * 但把意圖偷偷實作成 UI 的篩選，就是在前端養第二套規則——
+ * 而且既有專案裡真的有這種資料時，畫面會顯示成一片空白。
+ *
+ * 所以做法是**標出來讓人看得見**，不是替他決定。
+ */
+const allSystems = computed(() =>
+  systems.value.map((s) => ({
+    value: s.id,
+    label: s.slug,
+    hint: s.external ? '外部' : '自家',
+  })),
+)
+
+/** 接點定義掛在服務或系統身上（`resource.rs` 兩邊都收）。 */
+const endpointOwners = computed(() => [
+  ...containers.value.map((c) => ({ value: c.id, label: c.slug, group: '服務', hint: c.name })),
+  ...systems.value.map((s) => ({
+    value: s.id,
+    label: s.slug,
+    group: '系統',
+    hint: s.external ? '外部' : '自家',
+  })),
+])
+
+/**
+ * 契約的一端：三種來源攤成一個選單，選了就換掉那一端的形狀。
+ *
+ * 「人」兩端都列得出來。`RelationshipEnd::Person` 的註解說它**只該出現在
+ * 來源端**，但那是意圖不是規則——Rust 沒有擋，lint 也沒有對應的條目。
+ * 在這裡自己擋掉等於前端多一套規則；該做的是去 `loom-core` 加一條 lint。
+ */
 const endChoices = computed(() => [
-  ...people.value.map((p) => ({ v: `person:${p.id}`, label: `人：${p.slug}` })),
-  ...containers.value.map((c) => ({ v: `container:${c.id}`, label: `服務：${c.slug}` })),
-  ...systems.value.map((s) => ({ v: `system:${s.id}`, label: `系統：${s.slug}` })),
+  ...people.value.map((p) => ({ value: `person:${p.id}`, label: p.slug, group: '人' })),
+  ...containers.value.map((c) => ({
+    value: `container:${c.id}`,
+    label: c.slug,
+    group: '服務',
+    hint: c.name,
+  })),
+  ...systems.value.map((s) => ({
+    value: `system:${s.id}`,
+    label: s.slug,
+    group: '系統',
+    hint: s.external ? '外部' : '自家',
+  })),
 ])
 
 function endValue(end: unknown): string {
@@ -183,25 +242,24 @@ function write(path: string, v: unknown) {
         <label>名稱<input :value="read('container.slug')" class="mono" @input="write('container.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>顯示名<input :value="read('container.name')" @input="write('container.name', ($event.target as HTMLInputElement).value)"></label>
         <label>所屬系統
-          <select :value="read('container.system')" @change="write('container.system', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <option v-for="s in systems" :key="s.id" :value="s.id">{{ s.slug }}</option>
-          </select>
+          <Picker
+            :model-value="read('container.system') || null"
+            :options="allSystems"
+            placeholder="打字搜尋系統…"
+            @update:model-value="write('container.system', $event)"
+          />
         </label>
       </template>
 
       <!-- 接點定義 -->
       <template v-else-if="'endpointDef' in draft">
         <label>掛在誰身上
-          <select :value="read('endpointDef.owner')" @change="write('endpointDef.owner', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <optgroup label="服務">
-              <option v-for="c in containers" :key="c.id" :value="c.id">{{ c.slug }}</option>
-            </optgroup>
-            <optgroup label="外部系統">
-              <option v-for="s in systems" :key="s.id" :value="s.id">{{ s.slug }}</option>
-            </optgroup>
-          </select>
+          <Picker
+            :model-value="read('endpointDef.owner') || null"
+            :options="endpointOwners"
+            placeholder="打字搜尋服務或系統…"
+            @update:model-value="write('endpointDef.owner', $event)"
+          />
         </label>
         <label>名稱<input :value="read('endpointDef.def.slug')" class="mono" @input="write('endpointDef.def.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>協定
@@ -220,22 +278,28 @@ function write(path: string, v: unknown) {
         <label>名稱<input :value="read('relationship.slug')" class="mono" @input="write('relationship.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>用途<input :value="read('relationship.purpose')" placeholder="這條連線是做什麼用的" @input="write('relationship.purpose', ($event.target as HTMLInputElement).value)"></label>
         <label>來源
-          <select :value="endValue(draft.relationship?.from)" @change="setEnd('from', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <option v-for="o in endChoices" :key="o.v" :value="o.v">{{ o.label }}</option>
-          </select>
+          <Picker
+            :model-value="endValue(draft.relationship?.from) || null"
+            :options="endChoices"
+            placeholder="打字搜尋人、服務或系統…"
+            @update:model-value="setEnd('from', $event ?? '')"
+          />
         </label>
         <label>目標
-          <select :value="endValue(draft.relationship?.to)" @change="setEnd('to', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <option v-for="o in endChoices" :key="o.v" :value="o.v">{{ o.label }}</option>
-          </select>
+          <Picker
+            :model-value="endValue(draft.relationship?.to) || null"
+            :options="endChoices"
+            placeholder="打字搜尋人、服務或系統…"
+            @update:model-value="setEnd('to', $event ?? '')"
+          />
         </label>
         <label>連到目標的哪個接點
-          <select :value="read('relationship.toEndpoint')" @change="write('relationship.toEndpoint', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <option v-for="e in targetEndpoints" :key="e.id" :value="e.id">{{ e.slug }}</option>
-          </select>
+          <Picker
+            :model-value="read('relationship.toEndpoint') || null"
+            :options="targetEndpoints.map((e) => ({ value: e.id, label: e.slug, hint: e.protocol }))"
+            placeholder="打字搜尋接點定義…"
+            @update:model-value="write('relationship.toEndpoint', $event)"
+          />
         </label>
         <p v-if="targetEndpoints.length === 0" class="muted hint">
           目標身上還沒有任何接點定義。要先去「接點定義」那一頁建一個。
@@ -260,10 +324,14 @@ function write(path: string, v: unknown) {
           </select>
         </label>
         <label v-if="store.editingResource.isNew">放在哪個節點底下
-          <select :value="read('node.within')" @change="write('node.within', ($event.target as HTMLSelectElement).value || null)">
-            <option value="">（環境最上層）</option>
-            <option v-for="n in placeableNodes" :key="n.id" :value="n.id">{{ n.label }}</option>
-          </select>
+          <Picker
+            :model-value="read('node.within') || null"
+            :options="placeableNodes.map((n) => ({ value: n.id, label: n.label }))"
+            allow-empty
+            empty-label="（環境最上層）"
+            placeholder="打字搜尋機器…"
+            @update:model-value="write('node.within', $event)"
+          />
         </label>
       </template>
 
@@ -334,11 +402,19 @@ function write(path: string, v: unknown) {
       <template v-else-if="'systemInstance' in draft">
         <label>名稱<input :value="read('systemInstance.instance.slug')" class="mono" @input="write('systemInstance.instance.slug', ($event.target as HTMLInputElement).value)"></label>
         <label>對應哪個外部系統
-          <select :value="read('systemInstance.instance.system')" @change="write('systemInstance.instance.system', ($event.target as HTMLSelectElement).value)">
-            <option value="">（尚未選擇）</option>
-            <option v-for="s in systems" :key="s.id" :value="s.id">{{ s.slug }}</option>
-          </select>
+          <Picker
+            :model-value="read('systemInstance.instance.system') || null"
+            :options="externalSystems"
+            placeholder="打字搜尋外部系統…"
+            @update:model-value="write('systemInstance.instance.system', $event)"
+          />
         </label>
+        <!-- 一個外部系統都還沒建的話，這個表單填不出東西來。
+             空的選單跟「壞掉了」長得一樣，所以要說清楚下一步在哪。 -->
+        <p v-if="!externalSystems.length" class="muted hint">
+          還沒有<strong>外部系統</strong>可以對應。先到「系統」那一頁建一個並勾起
+          <strong>外部</strong>——自家系統是靠自己的服務部署的，沒有獨立的系統實例。
+        </p>
       </template>
 
       <footer>
