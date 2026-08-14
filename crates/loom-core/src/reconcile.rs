@@ -33,6 +33,7 @@ pub const SYNC_STATE_PATH: &str = "diagrams/.sync-state.yaml";
 
 /// 模型裡的元素是什麼東西。只用於顯示與「要不要建到模型裡」的提示。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum ElementKind {
     DeploymentNode,

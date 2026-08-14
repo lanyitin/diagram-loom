@@ -71,6 +71,23 @@ export const commands = {
 	 */
 	diagramFocus: (environment: Id, focus: Focus) => typedError<FocusView, Failure>(__TAURI_INVOKE("diagram_focus", { environment, focus })),
 	/**
+	 *  圖上還沒指定的形狀可以指給哪個模型元素。
+	 * 
+	 *  # 為什麼要把圖上的東西送過來
+	 * 
+	 *  「哪些元素還沒被用掉」需要同時知道模型與**這張圖**，而圖只有前端手上有
+	 *  （它住在編輯器裡，不是磁碟上）。所以 JS 說「圖上有這些形狀、這些已經綁著
+	 *  了」，這裡回答「這代表什麼」——跟對帳同一條分界線。
+	 */
+	diagramTargets: (environment: Id, bound: Id[], shapes: UnboundShape[]) => typedError<Annotation, Failure>(__TAURI_INVOKE("diagram_targets", { environment, bound, shapes })),
+	diagramCatalog: (environment: Id) => typedError<DiagramsView, Failure>(__TAURI_INVOKE("diagram_catalog", { environment })),
+	/**  讀一張存過的圖，連同它是照哪一版模型畫的。 */
+	diagramRead: (environment: Id, name: string) => typedError<Loaded, Failure>(__TAURI_INVOKE("diagram_read", { environment, name })),
+	/**  使用者自己建一張新圖。名字不可以是 App 保留的那個。 */
+	diagramCreate: (environment: Id, name: string, xml: string) => typedError<DiagramInfo, Failure>(__TAURI_INVOKE("diagram_create", { environment, name, xml })),
+	/**  存檔。**模型變了就不存**，判斷在 `diagrams::save`。 */
+	diagramSave: (environment: Id, name: string, xml: string, drawnFrom: string) => typedError<string, Failure>(__TAURI_INVOKE("diagram_save", { environment, name, xml, drawnFrom })),
+	/**
 	 *  一個空白的新資源，給表單當起點。
 	 * 
 	 *  id 在這裡就發好，所以 `apply` 是決定性的——復原之後重做會得到
@@ -143,6 +160,16 @@ export const commands = {
 };
 
 /* Types */
+/**  一次標註要用的全部材料。 */
+export type Annotation = {
+	/**  框可以指給誰。 */
+	shapes: Target[],
+	/**  線可以指給誰。 */
+	connections: Target[],
+	/**  猜得到的那幾個。清單很長時，這是唯一讓它跑得完的東西。 */
+	guesses: Guess[],
+};
+
 /**
  *  展開之後的樣子，加上它會放在哪。
  * 
@@ -457,6 +484,34 @@ export type DeploymentNode_Serialize = {
 	instances?: ContainerInstance_Serialize[],
 };
 
+/**  給畫面看的一張圖。 */
+export type DiagramInfo = {
+	name: string,
+	/**  是不是 App 產的那一張。畫面要標出來：它會被重畫整份蓋掉。 */
+	generated: boolean,
+	/**  存檔之後模型又變了。這張圖畫的是舊的。 */
+	stale: boolean,
+};
+
+/**
+ *  這個環境有哪些圖，以及模型現在的指紋。
+ * 
+ *  兩件事一次給：分開問的話，畫面會有一瞬間拿舊的指紋配新的清單，
+ *  而那個指紋正是「這張圖存不存得下去」的依據。
+ */
+export type DiagramsView = {
+	diagrams: DiagramInfo[],
+	/**  模型現在長什麼樣。畫面重畫之後拿它當新的 `drawnFrom`。 */
+	model: string,
+	/**
+	 *  App 自動產生的那張圖叫什麼。
+	 * 
+	 *  從這裡給，前端就不必自己抄一份名字——抄了就會有兩個「保留字」，
+	 *  而改名的那天只會有一邊跟著改。
+	 */
+	details: string,
+};
+
 /**  對專案的一次修改。 */
 export type Edit = Edit_Serialize | Edit_Deserialize;
 
@@ -730,6 +785,9 @@ export type Element = "environment" |
 "relationship" | "deploymentNode" | "containerInstance" | 
 /**  某個 Endpoint 的實際位址。 */
 "address" | "infrastructureNode" | "softwareSystemInstance" | "connection";
+
+/**  模型裡的元素是什麼東西。只用於顯示與「要不要建到模型裡」的提示。 */
+export type ElementKind = "deployment-node" | "container-instance" | "infrastructure-node" | "software-system-instance" | "connection";
 
 /**  Endpoint 在某環境的實際樣貌：定義加上位址。 */
 export type Endpoint = Endpoint_Serialize | Endpoint_Deserialize;
@@ -1158,6 +1216,17 @@ export type FocusView = {
 	shapes: number,
 };
 
+/**
+ *  「這個框看起來就是那個元素」。
+ * 
+ *  只是建議，**不會自己套用**。指定要由人按下去——猜錯一個綁定，
+ *  之後的對帳會拿它當事實，而使用者不會知道自己沒看過那一項。
+ */
+export type Guess = {
+	cell: string,
+	target: Id,
+};
+
 /**  該亮的東西。沒被列到的就是要調暗的。 */
 export type Highlight = {
 	/**  該亮的形狀。含機器與站點——見 [`highlight`] 裡祖先那一段。 */
@@ -1320,6 +1389,13 @@ export type Link = {
 	kind: ConnectionKind,
 	/**  線上的字。空白會被 L007 叫。 */
 	purpose: string,
+};
+
+/**  讀回來的一張圖。 */
+export type Loaded = {
+	xml: string,
+	/**  這張圖畫的是哪一版模型。存檔時要拿它跟當下的比。 */
+	model: string,
 };
 
 /**  邏輯層的全部內容。 */
@@ -2027,6 +2103,26 @@ export type Table_Serialize = {
 	environment: Id | null,
 	/**  沒有半列時要說什麼。空白的表格看起來像壞掉。 */
 	emptyHint: string,
+};
+
+/**  一個可以被指定的模型元素。 */
+export type Target = {
+	id: Id,
+	kind: ElementKind,
+	label: string,
+};
+
+/**  圖上一個沒有 `loomId` 的形狀。由 JS 從 XML 挖出來。 */
+export type UnboundShape = {
+	/**  XML 裡的 cell id。指定時要改的就是它，所以它是這裡唯一的身分。 */
+	cell: string,
+	/**
+	 *  圖上的文字。**可能是空的**——沒有文字的形狀通常是裝飾，
+	 *  但它仍然要送進來，否則畫面上的「還剩幾個」會少算。
+	 */
+	label: string,
+	/**  是線還是框。線只能指給連線，框只能指給元素——見 [`annotate`]。 */
+	edge?: boolean,
 };
 
 /* Tauri Specta runtime */

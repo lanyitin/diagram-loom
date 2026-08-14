@@ -23,10 +23,12 @@
 // 註解要講清楚一件事，常常得指到私有的函式——那正是讀的人接下來要看的地方。
 #![allow(rustdoc::private_intra_doc_links)]
 
+pub mod annotate;
 pub mod batch;
 pub mod cascade;
 pub mod connect;
 pub mod coverage;
+pub mod diagrams;
 pub mod edit;
 pub mod environment;
 pub mod highlight;

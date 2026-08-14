@@ -30,7 +30,9 @@
  * 對帳那邊看到的仍然是「一條連線一個 id」。
  */
 
-import type { DeploymentNode, Environment, Link, Project } from './model'
+// `UnboundShape` 用 Rust 產的那份，不自己再定義一個：它是要送過去給
+// `annotate` 的東西，兩邊各寫一份的話，改了欄位不會有人叫。
+import type { DeploymentNode, Environment, Link, Project, UnboundShape } from './model'
 
 /** 一個要畫出來的形狀。 */
 interface Shape {
@@ -211,15 +213,32 @@ export function toXml(project: Project, environment: Environment, links: Link[] 
     })
     .join('\n')
 
+  return mxfile(environment.id, environment.slug, [cells, edges])
+}
+
+/**
+ * 一張空白的圖。
+ *
+ * 使用者自己建的圖從這裡開始——他要自己畫，或者把畫好的貼進來，
+ * 然後用「標註」把形狀接上模型。
+ *
+ * ⚠️ **那兩個 root cell 少了 draw.io 會讀不進去**，而症狀是編輯器一片空白，
+ * 跟「這張圖本來就是空的」長得一模一樣。
+ */
+export function blankXml(id: string, name: string): string {
+  return mxfile(id, name, [])
+}
+
+/** `.drawio` 的外殼。只有這裡知道那兩個 root cell 非有不可。 */
+function mxfile(id: string, name: string, body: string[]): string {
   return [
     '<mxfile host="diagram-loom">',
-    `  <diagram id="${esc(environment.id)}" name="${esc(environment.slug)}">`,
+    `  <diagram id="${esc(id)}" name="${esc(name)}">`,
     '    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" page="1" pageWidth="1169" pageHeight="827">',
     '      <root>',
     '        <mxCell id="0"/>',
     '        <mxCell id="1" parent="0"/>',
-    cells,
-    edges,
+    ...body,
     '      </root>',
     '    </mxGraphModel>',
     '  </diagram>',
@@ -257,6 +276,156 @@ export function boundShapes(xml: string): { id: string; label: string }[] {
   return [...out.values()]
 }
 
+/**
+ * 拿到一個形狀的「擁有者」：帶著 id 與自訂屬性的那一個元素。
+ *
+ * draw.io 的形狀有兩種寫法：光禿禿的 `<mxCell id=... value=...>`，
+ * 或者被 `<object label=... id=...>` 包起來（要帶自訂屬性時就會變成這樣，
+ * `<UserObject>` 也是同一回事）。**只有後者放得下 `loomId`。**
+ *
+ * 認的是「父元素有沒有 id」而不是標籤名字：`<root>` 沒有 id，
+ * 而包裝元素一定有——這樣就不必去記 draw.io 用過幾種包裝的名字。
+ */
+function ownerOf(cell: Element): Element {
+  const parent = cell.parentElement
+  return parent?.hasAttribute('id') ? parent : cell
+}
+
+/** 圖上所有形狀（含線）。root 的那兩個 cell 不算。 */
+function allCells(doc: Document): Element[] {
+  return Array.from(doc.querySelectorAll('mxCell')).filter(
+    (c) => c.getAttribute('vertex') === '1' || c.getAttribute('edge') === '1',
+  )
+}
+
+/**
+ * 把 draw.io 的標籤變成一行純文字。
+ *
+ * 標籤可以是 HTML（`html=1` 是預設），所以使用者畫的圖上常常是
+ * `<b>Apache</b><br>叢集`。直接拿去比對名字會一個都對不上。
+ */
+function plain(label: string): string {
+  return label
+    .replace(/<br\s*\/?>|<\/(div|p|li)>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // `&amp;` 最後才解，否則 `&amp;lt;` 會被解兩次變成 `<`。
+    .replace(/&amp;/g, '&')
+    .split('\n')[0]!
+    .trim()
+}
+
+/**
+ * 圖上**還沒指定**代表誰的形狀。
+ *
+ * 這是 [`boundShapes`] 的反面，而反面才是使用者上傳自己畫的圖時看到的東西：
+ * 整張圖沒有一個形狀綁著模型。
+ *
+ * # 沒有文字的也要列
+ *
+ * 空白的方框多半是裝飾，列出來很吵。但**這個工具的命是怕漏**——自己決定
+ * 「這個不用管」，使用者就永遠不知道有這回事了。所以照樣送出來，
+ * 由畫面決定要不要摺起來，而「還剩幾個」那個數字仍然是誠實的。
+ *
+ * # 我們自己畫的不算
+ *
+ * 帶 `loomKind` 的形狀是我們產的（例如「人」，它刻意沒有 `loomId`）。
+ * 那些不是「還沒指定」，是「本來就不該指定」。
+ */
+export function unboundShapes(xml: string): UnboundShape[] {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+
+  return allCells(doc).flatMap((cell) => {
+    const owner = ownerOf(cell)
+    if (owner.hasAttribute('loomId') || owner.hasAttribute('loomKind')) return []
+
+    const id = owner.getAttribute('id')
+    if (!id) return []
+
+    // 包起來的時候文字在 `label`，沒包的時候在 `value`。
+    const label = owner === cell ? cell.getAttribute('value') : owner.getAttribute('label')
+    return [{ cell: id, label: plain(label ?? ''), edge: cell.getAttribute('edge') === '1' }]
+  })
+}
+
+/**
+ * 把一個形狀指給某個模型元素。
+ *
+ * # 為什麼要動 XML 的結構
+ *
+ * `loomId` 是自訂屬性，而**自訂屬性只放得進 `<object>`**。使用者自己畫的
+ * 方框是光禿禿的 `<mxCell>`，所以指定的動作實際上是「把它包起來」：
+ * `value` 變成 `label`、`id` 搬到外層。draw.io 自己按「編輯資料」時做的
+ * 也是這件事。
+ *
+ * 改的是**編輯器剛剛交出來的那份 XML**，不是從模型重產一張——
+ * 重產會洗掉使用者排好的版面，而這裡動的每一個形狀都是他自己畫的。
+ */
+export function bind(xml: string, cell: string, loomId: string): string {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+  const target = elementWithId(doc, cell)
+  if (!target) return xml
+
+  if (target.tagName === 'mxCell') {
+    // ⚠️ 一定要走 `NS` 這一對。`createElement` / `setAttribute` 走的是 HTML 的
+    // 規矩：屬性名會被轉成小寫（`loomId` → `loomid`），而元素還會被塞上
+    // XHTML 的 namespace。兩個都足以讓 draw.io 與我們自己的 `[loomId]`
+    // 查詢通通看不見這個綁定——而且失敗得很安靜。
+    const wrapper = doc.createElementNS(null, 'object')
+    wrapper.setAttributeNS(null, 'label', target.getAttribute('value') ?? '')
+    wrapper.setAttributeNS(null, 'loomId', loomId)
+    wrapper.setAttributeNS(null, 'id', cell)
+    // 包起來之後 `id` 與 `value` 就歸外層管。留在裡面的話 draw.io 讀進去
+    // 會有兩個 id，而它認的是外面那個——留著只是等著哪天對不上。
+    target.removeAttribute('id')
+    target.removeAttribute('value')
+    target.parentNode?.replaceChild(wrapper, target)
+    wrapper.appendChild(target)
+  } else {
+    // 同上：`setAttribute` 會把名字轉成小寫。
+    target.setAttributeNS(null, 'loomId', loomId)
+  }
+
+  return new XMLSerializer().serializeToString(doc)
+}
+
+/**
+ * 取消指定。
+ *
+ * 指錯了一定要收得回來：綁定之後對帳就會把它當事實，而錯的那一項
+ * 不會有人再檢查它。
+ *
+ * 包裝元素若是我們剛剛才加上去的（只剩 `label` 與 `id`），就拆回原本的
+ * `<mxCell>`。使用者自己加過資料的 `<object>` 則原樣留著——那是他的東西。
+ */
+export function unbind(xml: string, cell: string): string {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+  const target = elementWithId(doc, cell)
+  if (!target || !target.hasAttribute('loomId')) return xml
+
+  target.removeAttribute('loomId')
+
+  const inner = target.querySelector('mxCell')
+  const bare = target.getAttributeNames().every((n) => n === 'label' || n === 'id')
+  if (inner && bare && !target.hasAttribute('loomKind')) {
+    inner.setAttribute('id', cell)
+    const label = target.getAttribute('label')
+    if (label) inner.setAttribute('value', label)
+    target.parentNode?.replaceChild(inner, target)
+  }
+
+  return new XMLSerializer().serializeToString(doc)
+}
+
+/** 依 id 找元素。不用 `querySelector`：id 裡可能有引號，選擇器會被它咬到。 */
+function elementWithId(doc: Document, id: string): Element | null {
+  return Array.from(doc.querySelectorAll('[id]')).find((e) => e.getAttribute('id') === id) ?? null
+}
+
 /** 調暗的透明度。25% 淡到不會搶，但還看得出那裡有東西。 */
 const DIM = 25
 
@@ -282,14 +451,50 @@ const DIM = 25
  * 使用者自己畫的裝飾（沒有 `loomKind`）不碰：那不是我們的東西。
  */
 export function dim(xml: string, lit: Set<string>): string {
+  return paint(xml, (key) => lit.has(key), false)
+}
+
+/**
+ * 只讓一個形狀亮著，其他全部調暗——包括使用者自己畫的。
+ *
+ * 標註清單用它回答「這一項到底是圖上哪一個框」。清單有 47 個名字時，
+ * 光靠名字對不出來，而**對不出來的人就會亂指**——那比沒有這個功能更糟。
+ *
+ * 這裡刻意連沒有 `loomKind` 的形狀也調暗（[`dim`] 不會）：要指定的東西
+ * 正是使用者自己畫的那些，不碰它們就等於整張圖都亮著，等於沒指。
+ */
+export function spotlight(xml: string, cell: string): string {
+  return paint(xml, (key) => key === cell, true)
+}
+
+/**
+ * 把我們塗上去的螢光筆擦掉。
+ *
+ * 少了它，關掉篩選之後圖還是暗的——`opacity` 已經寫進編輯器交回來的 XML 了，
+ * 而下一次重塗看到「沒有在篩選」就原封不動送回去。
+ */
+export function undim(xml: string): string {
+  return paint(xml, () => true, true)
+}
+
+/**
+ * 螢光筆的本體。
+ *
+ * `unbound` 決定碰不碰使用者自己畫的形狀：篩選只講模型的事，所以不碰；
+ * 標註要指的正是那些形狀，所以碰。
+ */
+function paint(xml: string, isLit: (key: string) => boolean, unbound: boolean): string {
   const doc = new DOMParser().parseFromString(xml, 'text/xml')
 
-  for (const el of Array.from(doc.querySelectorAll('[loomKind]'))) {
+  for (const cell of allCells(doc)) {
+    const owner = ownerOf(cell)
+    const ours = owner.hasAttribute('loomKind') || owner.hasAttribute('loomId')
+    if (!ours && !unbound) continue
+
     // 線的 `loomId` 是連線 id，形狀的是元素 id；人沒有 `loomId`，
     // 用 cell id 認（`Highlight.shapes` 裡放的就是人的 id）。
-    const key = el.getAttribute('loomId') ?? el.getAttribute('id') ?? ''
-    const cell = el.querySelector('mxCell') ?? el
-    cell.setAttribute('style', withOpacity(cell.getAttribute('style') ?? '', lit.has(key)))
+    const key = owner.getAttribute('loomId') ?? owner.getAttribute('id') ?? ''
+    cell.setAttribute('style', withOpacity(cell.getAttribute('style') ?? '', isLit(key)))
   }
 
   return new XMLSerializer().serializeToString(doc)

@@ -32,9 +32,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use loom_core::Project;
+use loom_core::annotate::{self, Annotation, UnboundShape};
 use loom_core::batch::{self, BatchPlan, BatchSpec};
 use loom_core::connect::{self, Choice, Proposal};
 use loom_core::coverage::{self, Matrix};
+use loom_core::diagrams::{self, DiagramInfo, Loaded};
 use loom_core::edit::{self, Edit, Fix, FixValue, Impact};
 use loom_core::highlight::{self, Focus, Highlight};
 use loom_core::history::History;
@@ -44,6 +46,7 @@ use loom_core::lint::{self, Finding, Rule, Severity};
 use loom_core::plan::{self, Plan};
 use loom_core::repository;
 use loom_core::resource::{self, Kind, Resource};
+use loom_core::store::FsStore;
 use loom_core::table::{self, Row};
 use loom_core::wiring;
 use serde::Serialize;
@@ -716,6 +719,126 @@ fn diagram_focus(
     })
 }
 
+/// 圖上還沒指定的形狀可以指給哪個模型元素。
+///
+/// # 為什麼要把圖上的東西送過來
+///
+/// 「哪些元素還沒被用掉」需要同時知道模型與**這張圖**，而圖只有前端手上有
+/// （它住在編輯器裡，不是磁碟上）。所以 JS 說「圖上有這些形狀、這些已經綁著
+/// 了」，這裡回答「這代表什麼」——跟對帳同一條分界線。
+#[tauri::command]
+#[specta::specta]
+fn diagram_targets(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+    bound: Vec<loom_core::id::Id>,
+    shapes: Vec<UnboundShape>,
+) -> Result<Annotation, Failure> {
+    with_opened(&desk, &window, |_, o| {
+        let env = environment_of(o.history.project(), &environment)?;
+        Ok(annotate::annotate(env, &bound, &shapes))
+    })
+}
+
+/// 這個環境有哪些圖，以及模型現在的指紋。
+///
+/// 兩件事一次給：分開問的話，畫面會有一瞬間拿舊的指紋配新的清單，
+/// 而那個指紋正是「這張圖存不存得下去」的依據。
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramsView {
+    pub diagrams: Vec<DiagramInfo>,
+    /// 模型現在長什麼樣。畫面重畫之後拿它當新的 `drawnFrom`。
+    pub model: String,
+    /// App 自動產生的那張圖叫什麼。
+    ///
+    /// 從這裡給，前端就不必自己抄一份名字——抄了就會有兩個「保留字」，
+    /// 而改名的那天只會有一邊跟著改。
+    pub details: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn diagram_catalog(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+) -> Result<DiagramsView, Failure> {
+    with_opened(&desk, &window, |root, o| {
+        let project = o.history.project();
+        let env = environment_of(project, &environment)?;
+        Ok(DiagramsView {
+            diagrams: diagrams::list(&FsStore::new(root), project, env)?,
+            model: diagrams::fingerprint(project, env),
+            details: diagrams::DETAILS.into(),
+        })
+    })
+}
+
+/// 讀一張存過的圖，連同它是照哪一版模型畫的。
+#[tauri::command]
+#[specta::specta]
+fn diagram_read(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+    name: String,
+) -> Result<Loaded, Failure> {
+    with_opened(&desk, &window, |root, o| {
+        let env = environment_of(o.history.project(), &environment)?;
+        Ok(diagrams::read(&FsStore::new(root), env, &name)?)
+    })
+}
+
+/// 使用者自己建一張新圖。名字不可以是 App 保留的那個。
+#[tauri::command]
+#[specta::specta]
+fn diagram_create(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+    name: String,
+    xml: String,
+) -> Result<DiagramInfo, Failure> {
+    with_opened(&desk, &window, |root, o| {
+        let project = o.history.project();
+        let env = environment_of(project, &environment)?;
+        Ok(diagrams::create(
+            &mut FsStore::new(root),
+            project,
+            env,
+            &name,
+            &xml,
+        )?)
+    })
+}
+
+/// 存檔。**模型變了就不存**，判斷在 `diagrams::save`。
+#[tauri::command]
+#[specta::specta]
+fn diagram_save(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+    name: String,
+    xml: String,
+    drawn_from: String,
+) -> Result<String, Failure> {
+    with_opened(&desk, &window, |root, o| {
+        let project = o.history.project();
+        let env = environment_of(project, &environment)?;
+        Ok(diagrams::save(
+            &mut FsStore::new(root),
+            project,
+            env,
+            &name,
+            &xml,
+            &drawn_from,
+        )?)
+    })
+}
+
 /// 「找不到環境 X」這句話原本抄了五遍。
 fn environment_of<'a>(
     project: &'a Project,
@@ -859,6 +982,11 @@ pub fn builder() -> Builder<tauri::Wry> {
         resource_tables,
         diagram_links,
         diagram_focus,
+        diagram_targets,
+        diagram_catalog,
+        diagram_read,
+        diagram_create,
+        diagram_save,
         blank_resource,
         create_project,
         new_window,

@@ -15,12 +15,14 @@
  */
 
 export type {
+  Annotation,
   Cell,
   BatchPlan,
   BatchSpec,
   Change,
   ChangeKind,
   Choice,
+  DiagramInfo,
   Contract,
   ConnectionEnd,
   ConnectionKind,
@@ -51,6 +53,8 @@ export type {
   SideKind,
   Status,
   TableGroup,
+  Target,
+  UnboundShape,
 } from './bindings'
 
 export type {

@@ -12,7 +12,19 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { boundShapes, dim, peopleOf, shapesOf, toXml } from './diagram'
+import {
+  bind,
+  blankXml,
+  boundShapes,
+  dim,
+  peopleOf,
+  shapesOf,
+  spotlight,
+  toXml,
+  unbind,
+  unboundShapes,
+  undim,
+} from './diagram'
 import type { Environment, Link, Project } from './model'
 
 function project(): Project {
@@ -332,5 +344,168 @@ describe('調暗', () => {
   it('線也調得暗', () => {
     const xml = lit(['i-redis'])
     expect(xml).toMatch(/loomKind="connection"[\s\S]*?opacity=25/)
+  })
+})
+
+/**
+ * 標註：使用者上傳自己畫的圖，我們在上面補「這個框是誰」。
+ *
+ * 這裡守的是三件事：**沒指定的一個都不能漏掉**（漏掉的那個沒有人會發現）、
+ * **指定過的收得回來**（指錯不能變成永久事實）、
+ * **指定不會弄壞圖**（座標與使用者的樣式都要留著）。
+ */
+describe('標註沒指定的形狀', () => {
+  /** 一張使用者自己畫的圖：兩個框、一條線，全部沒有 loomId。 */
+  const theirs = `<mxfile><diagram><mxGraphModel><root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <mxCell id="a" value="Apache 叢集" style="rounded=1;fillColor=#ffcc00;" vertex="1" parent="1">
+      <mxGeometry x="120" y="80" width="180" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="b" value="&lt;b&gt;F5&lt;/b&gt;&lt;br&gt;北區" style="shape=hexagon;" vertex="1" parent="1"/>
+    <mxCell id="line" value="查快取" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a" target="b"/>
+    <mxCell id="deco" style="ellipse;" vertex="1" parent="1"/>
+  </root></mxGraphModel></diagram></mxfile>`
+
+  it('使用者畫的形狀全部列得出來', () => {
+    expect(unboundShapes(theirs).map((s) => s.cell)).toEqual(['a', 'b', 'line', 'deco'])
+  })
+
+  it('線標成線，框標成框', () => {
+    // 線只能指給連線、框只能指給元素（Rust 那邊分兩份清單）。
+    // 分不出來的話，一個方框可以被指成一條連線，而對帳會永遠對不上它。
+    const byCell = Object.fromEntries(unboundShapes(theirs).map((s) => [s.cell, s.edge]))
+    expect(byCell).toEqual({ a: false, b: false, line: true, deco: false })
+  })
+
+  it('標籤是 HTML 也讀得出字', () => {
+    // 使用者的圖上常常是 <b>F5</b><br>北區。整段拿去比對名字會一個都對不上。
+    expect(unboundShapes(theirs).find((s) => s.cell === 'b')!.label).toBe('F5')
+  })
+
+  it('沒有文字的形狀照樣列出來', () => {
+    // 空白方框多半是裝飾，但自己決定「這個不用管」，
+    // 使用者就永遠不知道有這回事——這個工具的命是怕漏。
+    expect(unboundShapes(theirs).find((s) => s.cell === 'deco')!.label).toBe('')
+  })
+
+  it('root 的那兩個 cell 不算形狀', () => {
+    expect(unboundShapes(theirs).map((s) => s.cell)).not.toContain('0')
+  })
+
+  it('我們自己畫的圖，一個都不會被當成沒指定', () => {
+    // 反過來說：這裡若有漏網之魚，使用者會被叫去指定一個他根本沒畫的東西。
+    expect(unboundShapes(toXml(project(), environment(), [link({})]))).toEqual([])
+  })
+
+  it('人不算沒指定——它本來就不該有 loomId', () => {
+    const xml = toXml(project(), environment(), [link({ from: 'per-1', fromPerson: true })])
+    expect(unboundShapes(xml).map((s) => s.cell)).not.toContain('per-1')
+  })
+})
+
+describe('指定一個形狀代表誰', () => {
+  const box = `<root><mxCell id="a" value="Apache 叢集" style="rounded=1;fillColor=#ffcc00;" vertex="1" parent="1">
+    <mxGeometry x="120" y="80" width="180" height="60" as="geometry"/>
+  </mxCell></root>`
+
+  it('指定之後對帳看得見它了', () => {
+    // 這就是整件事的目的：使用者自己畫的框，從此跟模型接上。
+    expect(boundShapes(bind(box, 'a', 'i-apache'))).toEqual([
+      { id: 'i-apache', label: 'Apache 叢集' },
+    ])
+  })
+
+  it('指定之後就不再是「沒指定」', () => {
+    expect(unboundShapes(bind(box, 'a', 'i-apache'))).toEqual([])
+  })
+
+  it('座標與使用者的樣式原封不動', () => {
+    // 這是他自己排的版、自己挑的顏色。指定只是貼一張標籤上去。
+    const after = bind(box, 'a', 'i-apache')
+    expect(after).toContain('x="120"')
+    expect(after).toContain('fillColor=#ffcc00')
+  })
+
+  it('包起來之後 id 只留一個', () => {
+    // draw.io 認外層那個。裡面再留一個，遲早會對不上。
+    const after = bind(box, 'a', 'i-apache')
+    expect(after.match(/id="a"/g)).toHaveLength(1)
+  })
+
+  it('本來就有 object 包著的，直接加屬性', () => {
+    // 使用者自己用「編輯資料」加過欄位的形狀。不能把他的東西拆掉。
+    const withData = `<root><object label="F5" id="b" tooltip="北區"><mxCell vertex="1"/></object></root>`
+    const after = bind(withData, 'b', 'n-f5')
+    expect(after).toContain('tooltip="北區"')
+    expect(boundShapes(after)).toEqual([{ id: 'n-f5', label: 'F5' }])
+  })
+
+  it('找不到那個 cell 就原樣退回', () => {
+    expect(bind(box, '不存在', 'i-apache')).toBe(box)
+  })
+
+  it('取消指定會回到原本的樣子', () => {
+    // 指錯了一定要收得回來：綁定之後對帳就會把它當事實。
+    const back = unbind(bind(box, 'a', 'i-apache'), 'a')
+    expect(unboundShapes(back).map((s) => s.label)).toEqual(['Apache 叢集'])
+    expect(boundShapes(back)).toEqual([])
+    expect(back).toContain('x="120"')
+  })
+
+  it('取消指定不會拆掉使用者自己加的資料', () => {
+    const withData = `<root><object label="F5" id="b" tooltip="北區"><mxCell vertex="1"/></object></root>`
+    const back = unbind(bind(withData, 'b', 'n-f5'), 'b')
+    expect(back).toContain('tooltip="北區"')
+    expect(back).not.toContain('loomId')
+  })
+})
+
+describe('標示是圖上哪一個', () => {
+  const two = `<root>
+    <mxCell id="a" value="一" style="rounded=1;" vertex="1" parent="1"/>
+    <mxCell id="b" value="二" style="rounded=1;" vertex="1" parent="1"/>
+  </root>`
+
+  it('只有選中的那個亮著', () => {
+    // 清單上 47 個名字，光靠名字對不出來——而對不出來的人就會亂指。
+    const xml = spotlight(two, 'a')
+    expect(xml).toMatch(/id="a"[^>]*style="rounded=1;"/)
+    expect(xml).toMatch(/id="b"[^>]*opacity=25/)
+  })
+
+  it('擦得掉，圖會回到全部亮著', () => {
+    // 少了這個，關掉標註之後圖還是暗的——opacity 已經寫進 XML 了。
+    expect(undim(spotlight(two, 'a'))).not.toContain('opacity')
+  })
+
+  it('關掉篩選也擦得乾淨', () => {
+    const filtered = dim(toXml(project(), environment(), [link({})]), new Set())
+    expect(undim(filtered)).not.toContain('opacity=25')
+  })
+
+  it('標示不會弄丟形狀', () => {
+    // 跟篩選同一條規矩：調暗不是隱藏，圖上的東西一個都沒少。
+    expect(unboundShapes(spotlight(two, 'a')).map((s) => s.cell)).toEqual(['a', 'b'])
+  })
+})
+
+describe('空白的新圖', () => {
+  it('draw.io 讀得進去', () => {
+    // 那兩個 root cell 少了會變成一片空白——跟「這張圖本來就是空的」
+    // 長得一模一樣，看不出是壞掉了。
+    const xml = blankXml('env-prod', '我的簡報圖')
+    expect(xml).toContain('<mxCell id="0"/>')
+    expect(xml).toContain('<mxCell id="1" parent="0"/>')
+    expect(xml).toContain('name="我的簡報圖"')
+  })
+
+  it('上面一個形狀都沒有', () => {
+    expect(unboundShapes(blankXml('e', '空的'))).toEqual([])
+    expect(boundShapes(blankXml('e', '空的'))).toEqual([])
+  })
+
+  it('名字裡的特殊字元會跳脫', () => {
+    expect(blankXml('e', 'A & B')).toContain('A &amp; B')
   })
 })
