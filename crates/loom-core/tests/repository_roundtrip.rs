@@ -283,3 +283,59 @@ fn the_real_architecture_fixture_round_trips() {
         "prod 必須完全乾淨，只有 test 環境刻意留的三個洞"
     );
 }
+
+/// 會被省略的欄位，**每一個都要用非預設值來回一次**。
+///
+/// # 為什麼不能只靠既有的來回測試
+///
+/// YAML 省略空集合、`None` 與 `false`（見 `docs/decisions.md`），靠的是
+/// `skip_serializing_if` 與 `default` 成對而且**條件剛好等於預設值**。
+/// 寫反一個的話，一個非預設值會被寫成「不存在」，讀回來變成預設值——
+/// 存檔靜靜地改掉了資料。
+///
+/// 但來回測試只證明得了**素材裡有的東西**。而 `healthy_project()` 裡
+/// `standalone: true` 出現 0 次，於是 `skip_serializing_if = "is_false"`
+/// 那一條從來沒有被真正走過。這裡把它補上。
+#[test]
+fn every_omitted_field_survives_a_round_trip() {
+    let dir = TempDir::create("omitted-fields");
+    let mut project = healthy_project();
+
+    // 兩種實體的 standalone 都翻成 true——這是唯一沒被素材涵蓋的省略條件。
+    let env = &mut project.environments[0];
+    fn mark(nodes: &mut [loom_core::environment::DeploymentNode]) {
+        for n in nodes {
+            for i in &mut n.instances {
+                i.standalone = true;
+            }
+            mark(&mut n.children);
+        }
+    }
+    mark(&mut env.nodes);
+    for s in &mut env.systems {
+        s.standalone = true;
+    }
+
+    // 其餘的省略條件素材本來就踩得到，先確認一下，免得哪天素材被簡化了
+    // 這條測試會安靜地失去意義。
+    let env = &project.environments[0];
+    assert!(!env.nodes.is_empty() && !env.infra.is_empty() && !env.systems.is_empty());
+    assert!(env.instances().iter().any(|i| !i.endpoints.is_empty()));
+    assert!(
+        env.instances()
+            .iter()
+            .any(|i| i.endpoints.iter().any(|e| e.def.is_some()))
+    );
+    // 備援連線素材裡也沒有（`Fallback` 只出現在真實架構那份），所以這裡
+    // 自己造一條。靠素材剛好有什麼，是這條測試原本失去意義的方式。
+    let env = &mut project.environments[0];
+    env.connections
+        .first_mut()
+        .expect("素材裡總該有一條連線")
+        .kind = loom_core::environment::ConnectionKind::Fallback;
+
+    save_to_dir(&project, dir.path()).unwrap();
+    let loaded = load_from_dir(dir.path()).unwrap();
+
+    assert_eq!(loaded, project);
+}

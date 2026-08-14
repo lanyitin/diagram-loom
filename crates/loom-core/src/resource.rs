@@ -688,12 +688,20 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
                 env.systems.iter().map(|s| (s.id.clone(), s.slug.clone())),
                 r,
             )?;
+            // **整個換掉，不要逐欄複製。**
+            //
+            // 原本只抄 slug / system / standalone，於是 `endpoints` 每次修改
+            // 都被丟掉——而位址就住在那裡。症狀是「填了位址、按了儲存、
+            // lint 還是說沒有位址」，完全看不出是這裡。
+            //
+            // 環境與機器那兩處逐欄複製是**刻意**的：被略過的欄位是巢狀的
+            // 子結構（機器、連線、子節點），整份換掉會把它們洗掉。設備也是
+            // ——它的接點由 `Resource::InfraEndpoint` 自己負責。
+            //
+            // 外部系統實體兩者都不是：`endpoints` 就是它自己的欄位，而且
+            // 沒有別的入口編輯得到。所以它跟服務實體一樣，整份帶著走。
             match env.systems.iter_mut().find(|s| s.id == instance.id) {
-                Some(existing) => {
-                    existing.slug = instance.slug.clone();
-                    existing.system = instance.system.clone();
-                    existing.standalone = instance.standalone;
-                }
+                Some(existing) => *existing = instance.clone(),
                 None => env.systems.push(instance.clone()),
             }
         }

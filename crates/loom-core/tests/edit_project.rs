@@ -344,10 +344,11 @@ fn filling_in_each_fix_cleans_a_broken_project() {
             Fix::Text { .. } => FixValue::Text("補上去了".into()),
             Fix::Count { suggestion } => FixValue::Count(suggestion),
             Fix::Toggle { .. } => FixValue::Toggle(true),
-            // 這幾種要開表單，不在這個「填一格」的迴圈裡。
+            // 這幾種不是「填一格」，不在這個迴圈裡。
             Fix::AddConnection { .. } | Fix::AddInstances { .. } | Fix::AddResource { .. } => {
                 unreachable!("這份素材不該有 L001")
             }
+            Fix::Manual { hint } => unreachable!("這份素材不該有只能手動處理的發現：{hint}"),
         };
         let e = edit::edit_for(&f, &value).expect("交不出 Edit");
         edit::apply(&mut project, &e).expect("套用失敗");
@@ -582,5 +583,92 @@ mod wildcards_on_both_ends {
 
         assert_eq!(expects(&project), (Some(1), Some(3)));
         assert_eq!(rules(&project), Vec::<Rule>::new());
+    }
+}
+
+/// 修改**不可以偷偷丟掉欄位**。
+///
+/// # 這一組守的是什麼
+///
+/// `write_into` 對某些資源是逐欄複製，那是刻意的：環境與機器底下掛著
+/// 巢狀的子結構（機器、連線、子節點），整份換掉會把它們洗掉。
+///
+/// 但逐欄複製有個安靜的失敗模式——**漏抄一個欄位**。漏掉的那一欄每次
+/// 修改都被丟回預設值，而畫面上看起來完全正常：使用者填了、按了儲存、
+/// 沒有任何錯誤，只是東西沒進去。
+///
+/// 外部系統實體真的踩過：`endpoints` 被漏掉，於是「位址」這個欄位
+/// **從畫面到 MCP 都存不進去**，而 lint 一直說沒有位址。
+mod updating_keeps_every_field {
+    use super::*;
+    use loom_core::environment::Endpoint;
+    use loom_core::logical::Protocol;
+    use loom_core::resource::Resource;
+
+    #[test]
+    fn an_external_system_instance_keeps_its_address() {
+        let mut project = healthy_project();
+        let env = project.environments[0].clone();
+        let mut instance = env.systems[0].clone();
+
+        instance.endpoints = vec![Endpoint {
+            id: Id::new("ep-新的"),
+            slug: "https".into(),
+            def: None,
+            protocol: Protocol::Tcp,
+            address: Some("pay.example.com:443".into()),
+        }];
+
+        edit::apply(
+            &mut project,
+            &Edit::UpdateResource(Resource::SystemInstance {
+                environment: env.id.clone(),
+                instance,
+            }),
+        )
+        .expect("套用失敗");
+
+        let after = &project.environments[0].systems[0];
+        assert_eq!(
+            after
+                .endpoints
+                .iter()
+                .filter_map(|e| e.address.as_deref())
+                .collect::<Vec<_>>(),
+            ["pay.example.com:443"],
+            "位址被丟掉了——逐欄複製漏抄 endpoints",
+        );
+    }
+
+    #[test]
+    fn renaming_it_does_not_wipe_the_address() {
+        // 更陰險的版本：使用者只是改個名字，位址卻不見了。
+        let mut project = healthy_project();
+        let env = project.environments[0].clone();
+        let before: Vec<String> = env.systems[0]
+            .endpoints
+            .iter()
+            .filter_map(|e| e.address.clone())
+            .collect();
+        assert!(!before.is_empty(), "這份素材本來就該有位址");
+
+        let mut instance = env.systems[0].clone();
+        instance.slug = "改個名字".into();
+
+        edit::apply(
+            &mut project,
+            &Edit::UpdateResource(Resource::SystemInstance {
+                environment: env.id.clone(),
+                instance,
+            }),
+        )
+        .expect("套用失敗");
+
+        let after: Vec<String> = project.environments[0].systems[0]
+            .endpoints
+            .iter()
+            .filter_map(|e| e.address.clone())
+            .collect();
+        assert_eq!(after, before);
     }
 }
