@@ -1,0 +1,21 @@
+{
+  "name": "maxgraph-prototype",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "可丟棄的原型：maxGraph 換不換得掉 draw.io",
+  "scripts": {
+    "probe": "node src/probe.mjs",
+    "app": "vite",
+    "click": "node src/click-probe.mjs"
+  },
+  "dependencies": {
+    "@maxgraph/core": "^0.24.0",
+    "elkjs": "^0.12.0"
+  },
+  "devDependencies": {
+    "happy-dom": "^20",
+    "puppeteer-core": "^25.6.0",
+    "vite": "^8"
+  }
+}

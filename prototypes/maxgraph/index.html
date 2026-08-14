@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>maxGraph 原型</title>
+<style>
+  :root { --rule: #d8d5cf; --ink: #2b2b2b; --ink-3: #8a8783; --warp: #b4552d; --surface: #faf8f4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; font: 13px/1.6 system-ui, sans-serif; color: var(--ink); }
+  #canvas { flex: 1; min-width: 0; background: var(--surface); overflow: hidden; position: relative; }
+  aside { width: 300px; border-left: 1px solid var(--rule); padding: 12px; overflow-y: auto; background: #fff; }
+  h1 { font-size: 13px; margin: 0 0 8px; }
+  .left { color: var(--ink-3); font-size: 12px; }
+  ul { list-style: none; margin: 8px 0; padding: 0; }
+  li { display: flex; gap: 6px; align-items: center; padding: 3px 0; }
+  li + li { border-top: 1px solid #eee; }
+  button { font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+  .picked { color: var(--warp); font-weight: 600; }
+  .hint { color: var(--ink-3); font-size: 12px; margin: 8px 0; }
+  #log { white-space: pre-wrap; font: 11px/1.5 ui-monospace, monospace; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+  <div id="canvas"></div>
+  <aside>
+    <h1>標註</h1>
+    <p class="left" id="left">還剩 — 個沒指定</p>
+    <p class="hint" id="hint">在左邊點一個方框。</p>
+    <ul id="targets"></ul>
+    <div id="log"></div>
+  </aside>
+  <script type="module" src="/src/app.mjs"></script>
+</body>
+</html>
