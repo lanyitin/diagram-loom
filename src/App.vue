@@ -79,21 +79,33 @@ async function newProject() {
 }
 
 /**
- * Cmd+Z / Cmd+Shift+Z / Cmd+S。
+ * 系統選單按下去了。
  *
- * 復原若只有畫面上一顆按鈕，使用者不會相信它——他會改成「不敢亂按」。
- * 快捷鍵是「這個工具可以放心亂試」的訊號。
+ * # 為什麼快捷鍵不再由這裡的 keydown 處理
+ *
+ * 原本 `⌘Z`／`⌘S` 是掛在主文件 `window` 上的監聽。但 draw.io 跑在
+ * `drawio://` 這個**不同 origin 的 iframe** 裡，跨 origin 的 iframe
+ * 不會把 keydown 冒泡給父文件——所以焦點在畫布裡的時候，`⌘S`
+ * **完全沒有存到東西**，而畫面上沒有任何跡象。
+ *
+ * 原生選單的 accelerator 由系統派送，不管焦點在哪裡都會到。
+ * 兩份實作留著只會漂，所以那個監聽整個拿掉了。
+ *
+ * # 動作留在這裡，選單只負責「按下去了」
+ *
+ * 開檔對話框、未儲存確認、匯入精靈本來就都在前端。Rust 那邊再做一次的話，
+ * 「開啟專案之前要問未儲存」就會有兩份，而且遲早只有一份被改到。
  */
-function onKeydown(e: KeyboardEvent) {
-  if (!(e.metaKey || e.ctrlKey) || !store.isOpen) return
-  const key = e.key.toLowerCase()
-  if (key === 'z') {
-    e.preventDefault()
-    void (e.shiftKey ? store.redo() : store.undo())
-  } else if (key === 's') {
-    e.preventDefault()
-    void store.save()
-  }
+const MENU: Record<string, () => void> = {
+  'new-project': () => void newProject(),
+  'open-project': () => void pickProject(),
+  'new-window': () => void store.newWindow(),
+  import: () => { store.importing = true },
+  save: () => void store.save(),
+  undo: () => void store.undo(),
+  redo: () => void store.redo(),
+  recheck: () => void store.recheck(),
+  agent: () => { store.agentPanelOpen = true },
 }
 
 /**
@@ -107,16 +119,18 @@ function onKeydown(e: KeyboardEvent) {
  */
 let unlisten: (() => void) | null = null
 
+let unlistenMenu: (() => void) | null = null
+
 onMounted(async () => {
-  window.addEventListener('keydown', onKeydown)
+  unlistenMenu = await listen<string>('loom://menu', (e) => MENU[e.payload]?.())
   unlisten = await listen('loom://changed', () => void store.recheck())
   // 端點可能是自動啟用的，所以一開始就要問一次真正的狀態。
   await store.refreshAgent()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
   unlisten?.()
+  unlistenMenu?.()
 })
 </script>
 
@@ -124,7 +138,14 @@ onUnmounted(() => {
   <div class="app">
     <header>
       <strong v-if="store.isOpen">{{ store.snapshot!.project.name }}</strong>
-      <span v-else class="muted">尚未開啟專案</span>
+      <!-- 還沒開專案時畫面上要有一條看得見的路。選單列不是每個人第一件事
+           就會去看的地方，而一扇空視窗沒有別的線索。開了之後這兩顆就消失，
+           日常操作走「檔案」選單。 -->
+      <template v-else>
+        <span class="muted">尚未開啟專案</span>
+        <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
+        <button :disabled="store.busy" @click="newProject">新專案…</button>
+      </template>
       <!-- 未儲存要看得出來，但不必用紅字嚇人——這個工具本來就是拿來一直改的。 -->
       <span v-if="store.dirty" class="dirty" title="有未儲存的變更">未儲存</span>
       <span v-if="store.isOpen" class="muted mono path">{{ store.snapshot!.root }}</span>
@@ -143,18 +164,9 @@ onUnmounted(() => {
       </div>
       <span v-if="store.isOpen" class="divider" />
 
-      <div v-if="store.isOpen" class="seg">
-        <button
-          :disabled="!store.undoLabel || store.busy"
-          :title="store.undoLabel ? `復原：${store.undoLabel}` : '沒有可以復原的動作'"
-          @click="store.undo()"
-        >↶ 復原</button>
-        <button
-          :disabled="!store.redoLabel || store.busy"
-          :title="store.redoLabel ? `重做：${store.redoLabel}` : '沒有可以重做的動作'"
-          @click="store.redo()"
-        >↷ 重做</button>
-      </div>
+      <!-- 復原／重做搬進「編輯」選單了。那裡的項目直接寫「復原 新增服務」，
+           比這兩顆按鈕的 tooltip 更說得出剛剛做了什麼，而且不必把滑鼠
+           移過去停住才看得到。 -->
 
       <div class="seg scale" role="group" aria-label="介面大小">
         <button
@@ -165,12 +177,8 @@ onUnmounted(() => {
         >{{ s.label }}</button>
       </div>
 
-      <button :disabled="store.busy" @click="newProject">新專案…</button>
-      <button :disabled="store.busy" @click="pickProject">開啟專案…</button>
-      <!-- 要同時看兩個專案就從這裡開始。「開啟專案…」是取代這一扇，
-           兩個入口分開才不會有人以為自己弄丟了東西。 -->
-      <button :disabled="store.busy" title="再開一扇空視窗" @click="store.newWindow()">新視窗</button>
-      <button :disabled="!store.isOpen || store.busy" @click="store.importing = true">匯入試算表…</button>
+      <!-- 新專案／開啟／新視窗／匯入都搬進「檔案」選單了。它們是每次只做
+           一下、做完就離開的動作，擠在標頭上只是佔掉每天都在看的表格的位置。 -->
       <button :disabled="!store.isOpen || store.busy" @click="store.recheck()">重新檢查</button>
       <!-- 端點是開是關要在標頭看得出來。使用者踩過一次：重開 App 之後
            它預設是關的，而畫面上沒有任何地方講這件事，只能點進面板才知道。 -->

@@ -19,14 +19,27 @@ import { commands } from './lib/bindings'
 import type { Snapshot } from './lib/model'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
-/** Rust 那邊 emit 的事件。測試裡自己觸發它。 */
-const listeners: (() => void)[] = []
+/**
+ * Rust 那邊 emit 的事件。測試裡自己觸發它。
+ *
+ * 分事件名記錄：現在有兩個（`loom://changed` 與 `loom://menu`），
+ * 混在一個陣列裡的話，測試會變成靠註冊順序猜——加第三個就會壞。
+ */
+const listeners: Record<string, ((e: { payload: unknown }) => void)[]> = {}
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: (_name: string, handler: () => void) => {
-    listeners.push(handler)
+  listen: (name: string, handler: (e: { payload: unknown }) => void) => {
+    ;(listeners[name] ??= []).push(handler)
     return Promise.resolve(() => {})
   },
 }))
+
+/** 按下系統選單裡的某一項。 */
+async function menu(id: string) {
+  const handlers = listeners['loom://menu'] ?? []
+  expect(handlers.length, '沒有人在聽 loom://menu').toBe(1)
+  handlers[0]!({ payload: id })
+  await flushPromises()
+}
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     onCloseRequested: () => Promise.resolve(() => {}),
@@ -95,6 +108,9 @@ describe('視窗組裝', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useProject()
+    // 每個測試各自掛一次 App，不清掉的話監聽會累積，
+    // 而「有幾個人在聽」正是底下幾條測試在斷言的東西。
+    for (const key of Object.keys(listeners)) delete listeners[key]
     // App 一掛載就會問一次端點狀態。沒有這個預設值，每個測試都會
     // 噴一個看不出來源的 unhandled rejection。
     vi.mocked(commands.mcpStatus).mockResolvedValue({
@@ -200,13 +216,14 @@ describe('視窗組裝', () => {
     expect(w.findComponent({ name: 'ResourceView' }).exists()).toBe(true)
   })
 
-  it('「新視窗」隨時都按得動，就算還沒開專案', async () => {
-    // 要同時看兩個專案就是從這裡開始。空視窗上也要能按——
+  it('「新視窗」隨時都叫得動，就算還沒開專案', async () => {
+    // 要同時看兩個專案就是從這裡開始。空視窗上也要能用——
     // 不然使用者得先開一個專案才生得出第二扇窗。
     vi.mocked(commands.newWindow).mockResolvedValue({ status: 'ok', data: null } as never)
-    const w = mount(App)
+    mount(App)
+    await flushPromises()
 
-    await headerButton(w, '新視窗').trigger('click')
+    await menu('new-window')
     expect(commands.newWindow).toHaveBeenCalled()
   })
 
@@ -218,9 +235,9 @@ describe('視窗組裝', () => {
     store.snapshot = fakeSnapshot({ dirty: true })
     const openProject = vi.spyOn(store, 'open').mockResolvedValue(undefined)
     const w = mount(App)
-
-    await headerButton(w, '開啟專案…').trigger('click')
     await flushPromises()
+
+    await menu('open-project')
 
     expect(openProject, '還沒問就開了').not.toHaveBeenCalled()
     const ask = w.find('[aria-label="有未儲存的變更"]')
@@ -238,9 +255,9 @@ describe('視窗組裝', () => {
     store.snapshot = fakeSnapshot({ dirty: false })
     const openProject = vi.spyOn(store, 'open').mockResolvedValue(undefined)
     const w = mount(App)
-
-    await headerButton(w, '開啟專案…').trigger('click')
     await flushPromises()
+
+    await menu('open-project')
 
     expect(openProject).toHaveBeenCalledWith('/tmp/另一個.loom')
     expect(w.find('[aria-label="有未儲存的變更"]').exists()).toBe(false)
@@ -300,13 +317,29 @@ describe('視窗組裝', () => {
     expect(w.findComponent({ name: 'ConnectionTable' }).exists()).toBe(true)
   })
 
-  it('沒開專案時不能按儲存與匯入', () => {
+  it('沒開專案時不能按儲存', () => {
     const w = mount(App)
     const disabled = w.findAll('header button')
       .filter((b) => b.attributes('disabled') !== undefined)
       .map((b) => b.text())
     expect(disabled).toContain('儲存')
-    expect(disabled).toContain('匯入試算表…')
+  })
+
+  it('還沒開專案時，畫面上要有一條看得見的路', () => {
+    // 選單列不是每個人第一件事就會去看的地方，而一扇空視窗沒有別的線索。
+    const w = mount(App)
+    const labels = w.findAll('header button').map((b) => b.text())
+    expect(labels).toContain('開啟專案…')
+    expect(labels).toContain('新專案…')
+  })
+
+  it('開了專案之後那兩顆就收起來，日常操作走選單', () => {
+    // 每天在看的是表格，不是標頭。做完就離開的動作不該一直佔位置。
+    store.snapshot = fakeSnapshot()
+    const labels = mount(App).findAll('header button').map((b) => b.text())
+    for (const gone of ['開啟專案…', '新專案…', '新視窗', '匯入試算表…', '復原', '重做']) {
+      expect(labels.some((t) => t.includes(gone)), `${gone} 應該只在選單裡`).toBe(false)
+    }
   })
 
   it('沒有未儲存的變更時儲存是停用的', () => {
@@ -320,20 +353,15 @@ describe('視窗組裝', () => {
     expect(w.find('.dirty').exists()).toBe(true)
   })
 
-  it('復原與重做各自看自己有沒有東西可做', () => {
-    store.snapshot = fakeSnapshot({ undoLabel: '刪除連線', redoLabel: null })
-    const w = mount(App)
-
-    expect(headerButton(w, '復原').attributes('disabled')).toBeUndefined()
-    expect(headerButton(w, '復原').attributes('title')).toBe('復原：刪除連線')
-    expect(headerButton(w, '重做').attributes('disabled')).toBeDefined()
-  })
-
   it('按了復原就往 Rust 送，畫面不自己算', async () => {
+    // 「有沒有東西可以復原」現在由選單項目的灰不灰表示，而那是 Rust
+    // 照 `History::undo_label` 設的（見 `menu.rs`）。前端只負責轉送。
     store.snapshot = fakeSnapshot({ undoLabel: '修改用途' })
     const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
+    mount(App)
+    await flushPromises()
 
-    await headerButton(mount(App), '復原').trigger('click')
+    await menu('undo')
     expect(undo).toHaveBeenCalled()
   })
 
@@ -363,38 +391,59 @@ describe('視窗組裝', () => {
   it('AI Agent 改了東西之後畫面會自己拉新', async () => {
     // 少了這個，Agent 做的事使用者完全看不到——而「看得到它在改什麼」
     // 正是把 MCP 掛在 App 裡而不是做成獨立程序的全部理由。
-    listeners.length = 0
     store.snapshot = fakeSnapshot()
     const recheck = vi.spyOn(store, 'recheck').mockResolvedValue(undefined)
     mount(App)
     await flushPromises()
 
-    expect(listeners.length, '沒有人在聽 loom://changed').toBe(1)
-    listeners[0]!()
+    const changed = listeners['loom://changed'] ?? []
+    expect(changed.length, '沒有人在聽 loom://changed').toBe(1)
+    changed[0]!({ payload: null })
     expect(recheck).toHaveBeenCalled()
   })
 
-  it('⌘Z 復原、⇧⌘Z 重做', async () => {
-    // 只有一顆按鈕的復原，使用者不會相信它——他會改成「不敢亂按」。
-    store.snapshot = fakeSnapshot({ undoLabel: '修改用途', redoLabel: '修改用途' })
+  it('快捷鍵不再自己聽 keydown', async () => {
+    // ⚠️ 這條守的是一個安靜的 bug：draw.io 跑在 `drawio://` 這個**不同
+    // origin 的 iframe** 裡，跨 origin 的 iframe 不會把 keydown 冒泡給
+    // 父文件。所以焦點在畫布裡的時候，掛在 window 上的 ⌘S **完全沒有
+    // 存到東西**，而畫面上沒有任何跡象。
+    //
+    // 原生選單的 accelerator 由系統派送，不管焦點在哪都會到。
+    // 兩份實作留著只會漂，所以那個監聽整個拿掉了。
+    store.snapshot = fakeSnapshot({ undoLabel: '修改用途' })
     const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
-    const redo = vi.spyOn(store, 'redo').mockResolvedValue(undefined)
+    const save = vi.spyOn(store, 'save').mockResolvedValue(undefined)
     mount(App, { attachTo: document.body })
+    await flushPromises()
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
-    expect(undo).toHaveBeenCalled()
-    expect(redo).not.toHaveBeenCalled()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+    expect(undo).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true }))
-    expect(redo).toHaveBeenCalled()
+    // 同一件事改走選單就會動。
+    await menu('undo')
+    expect(undo).toHaveBeenCalled()
   })
 
-  it('沒開專案時快捷鍵不做事', () => {
-    const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
-    mount(App, { attachTo: document.body })
+  it('選單每一項都有人接', async () => {
+    // Rust 那邊列了哪些 id 是一份契約。前端漏接一項的話，按下去
+    // **什麼都不會發生，而且沒有錯誤**——所以照著 menu.rs 對一次。
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const rust = readFileSync(
+      join(import.meta.dirname, '..', 'src-tauri', 'src', 'menu.rs'), 'utf8',
+    )
+    const declared = rust
+      .split('pub const ACTIONS')[1]!.split('];')[0]!
+      .match(/"([a-z-]+)"/g)!.map((q) => q.slice(1, -1))
+    const handled = readFileSync(join(import.meta.dirname, 'App.vue'), 'utf8')
+      .split('const MENU')[1]!.split('\n}')[0]!
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
-    expect(undo).not.toHaveBeenCalled()
+    expect(declared.length).toBeGreaterThan(0)
+    for (const id of declared) {
+      expect(handled.includes(`'${id}'`) || handled.includes(`\n  ${id}:`), `沒人接 ${id}`).toBe(true)
+    }
   })
 
   it('聚焦時工具列會說出來，而且按一下就沒', async () => {

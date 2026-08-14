@@ -26,6 +26,7 @@
 
 pub mod drawio;
 pub mod mcp;
+pub mod menu;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -248,7 +249,17 @@ fn with_opened<R>(
         message: "還沒有開啟任何專案".into(),
     })?;
     let mut opened = project.state.lock().map_err(|_| poisoned())?;
-    f(&project.root, &mut opened)
+    let outcome = f(&project.root, &mut opened);
+    // 選單上的「復原 新增服務」「儲存」要跟著這扇視窗變。放在這裡是因為
+    // 每個需要專案的 command 都經過這裡——散在 25 個 command 裡的話，
+    // 下一個新增的 command 一定會忘記，而症狀是選單安靜地停在舊狀態。
+    //
+    // 只在這扇視窗有焦點時更新：選單是整個 App 共用一份，Agent 在改
+    // B 專案的時候，A 的使用者不該看到 B 的復原標籤。
+    if window.is_focused().unwrap_or(false) {
+        menu::apply(&window.app_handle().clone(), &menu::MenuState::of(&opened));
+    }
+    outcome
 }
 
 /// 每個 command 都以這個結尾，所以前端永遠拿到自洽的一份：
@@ -334,11 +345,19 @@ fn open_project(
     Ok(OpenOutcome::Loaded(Box::new(out)))
 }
 
-/// 視窗標題掛上專案名。
+/// 視窗標題掛上專案名，順便讓選單跟上。
 ///
 /// 多視窗之下，標題是唯一能從工作列或 Mission Control 分出誰是誰的東西。
+///
+/// 選單也在這裡更新：開專案與建專案**不走 `with_opened`**（那時候登記簿裡
+/// 還沒有這一份），所以它們是唯一漏得掉的兩條路——而漏掉的症狀是
+/// 剛開好一個專案，「匯入試算表」卻還是灰的。
 fn retitle(window: &tauri::WebviewWindow, history: &History) {
     let _ = window.set_title(&format!("{} — diagram-loom", history.project().name));
+    menu::apply(
+        &window.app_handle().clone(),
+        &menu::MenuState::of_history(history),
+    );
 }
 
 /// 再開一扇空視窗。
@@ -906,6 +925,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // ⚠️ 選單一定要走這裡。在 `setup` 裡呼叫 `app.set_menu` 在 macOS 上
+        // **回 Ok 但什麼也沒發生**——實測過，選單列還是 Tauri 的預設那份。
+        .menu(menu::build)
         // draw.io 的靜態檔。152 MB，不能放 frontendDist（會嵌進執行檔）。
         .register_uri_scheme_protocol("drawio", |ctx, request| {
             serve_drawio(ctx.app_handle(), request)
@@ -916,11 +938,25 @@ pub fn run() {
         // 這條維持了登記簿最重要的不變條件：**開著的專案 ⟺ 有視窗在看它**。
         // 漏了它，Agent 會去改一個沒有任何人看得到的專案——而「看得到它在改
         // 什麼」正是把 MCP 掛在 App 裡而不是做成獨立程序的全部理由。
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Destroyed => {
                 window.state::<Desk>().release(window.label());
             }
+            // 選單是整個 App 共用一份，所以「復原什麼」得跟著焦點走。
+            // 少了這條，切到另一扇視窗之後選單還停在前一個專案的狀態——
+            // 而它看起來完全正常，只是按下去改到別的地方。
+            tauri::WindowEvent::Focused(true) => {
+                let app = window.app_handle().clone();
+                let state = window
+                    .state::<Desk>()
+                    .of_window(window.label())
+                    .and_then(|p| p.state.lock().ok().map(|o| menu::MenuState::of(&o)))
+                    .unwrap_or_else(menu::MenuState::closed);
+                menu::apply(&app, &state);
+            }
+            _ => {}
         })
+        .on_menu_event(|app, event| menu::dispatch(app, event.id().as_ref()))
         .setup(move |app| {
             builder.mount_events(app);
             app.manage(Desk::default());
