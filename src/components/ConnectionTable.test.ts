@@ -314,16 +314,25 @@ describe('Lint 面板', () => {
     expect(applyFix).toHaveBeenCalledWith(expect.objectContaining({ rule: 'L008' }), { toggle: true })
   })
 
-  it('完全沒有修法的那幾條不放假按鈕', () => {
+  it('只能手動處理的那幾條不放假按鈕，而且那句話是 Rust 給的', () => {
     // 按下去只會說「這個還沒做」的按鈕，比沒有按鈕更糟。
+    //
+    // 這句提示原本寫死成「要改接」——那是規則知識放在畫面上，而且只對
+    // L003 與 L012 成立：L013 要對調兩端、L014 要改名字。現在由
+    // `Fix::Manual` 帶過來，前端照著印就好。
     store.snapshot = fakeSnapshot([rows('c1')], [
-      { rule: 'L003', severity: 'error', environment: 'env-prod', subject: 'conn-9', end: null, detail: '指向不存在的機器', fix: null },
+      {
+        rule: 'L014', severity: 'warning', environment: 'env-prod', subject: 'i-1',
+        end: null, detail: '兩個東西同名',
+        fix: { manual: { hint: '改掉其中一個的名字' } },
+      } as unknown as Finding,
     ])
     store.panelOpen = true
     const w = mount(LintPanel)
 
-    expect(w.find('.list .fix').exists()).toBe(false)
-    expect(w.find('.list .act').text()).toContain('要改接')
+    expect(w.find('.list .fix').exists(), '不該有按鈕').toBe(false)
+    expect(w.find('.list .act').text()).toBe('改掉其中一個的名字')
+    expect(w.find('.editor').exists(), '也不該就地展開輸入框').toBe(false)
   })
 
   it('L001／L002 走的是「補連線」表單，不是就地填一格', () => {

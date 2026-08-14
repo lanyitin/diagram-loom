@@ -148,21 +148,25 @@ function jumpTo(f: Finding) {
                   v-else-if="f.fix?.addResource" class="fix" :disabled="store.busy"
                   @click="openAddResource(f)"
                 >建實體…</button>
+                <!-- 沒有可以填的一格，也沒有表單可以開——但下一步是什麼由
+                     Rust 給。這句話原本寫死成「要改接」，而那只對 L003 與
+                     L012 成立：L013 要對調兩端、L014 要改名字。
+                     一個按下去只會跳「這個還沒做」的按鈕比沒有按鈕更糟，
+                     所以這裡是一句話，不是按鈕。 -->
+                <span v-else-if="f.fix?.manual" class="muted hint">{{ f.fix.manual.hint }}</span>
                 <button
                   v-else-if="f.fix" class="fix" :disabled="store.busy"
                   @click="editingIndex = editingIndex === i ? null : i"
                 >
                   {{ editingIndex === i ? '取消' : '修…' }}
                 </button>
-                <!-- 剩下沒有修法的（L003：指到了不存在的東西）不放假按鈕。
-                     一個按下去只會跳「這個還沒做」的按鈕，比沒有按鈕更糟。 -->
-                <span v-else class="muted hint">要改接</span>
+                <span v-else class="muted hint">—</span>
               </td>
             </tr>
 
             <tr
               v-if="editingIndex === i && f.fix && !f.fix.addConnection && !f.fix.addInstances
-                && !f.fix.addResource"
+                && !f.fix.addResource && !f.fix.manual"
               class="editor"
             >
               <td colspan="5">

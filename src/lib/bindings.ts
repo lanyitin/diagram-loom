@@ -1061,15 +1061,15 @@ export type Fix =
 	/**  欄位提示，例如「10.0.1.11:6379」。 */
 	hint: string,
 	current: string | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; manual?: never; toggle?: never } | 
 /**  填一個數字（expect）。附上實際符合的數量當預設值。 */
 ({ count: {
 	suggestion: number | null,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; text?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; manual?: never; text?: never; toggle?: never } | 
 /**  一個開關（standalone）。 */
 ({ toggle: {
 	label: string,
-} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; text?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; manual?: never; text?: never } | 
 /**
  *  開一張「新增連線」的表單。**這個沒辦法在 lint 面板上填一格解決**，
  *  但它仍然是個修法——所以它有值，不是 `None`。
@@ -1078,14 +1078,14 @@ export type Fix =
  */
 ({ addConnection: {
 	relationship: Id,
-} }) & { addInstances?: never; addResource?: never; count?: never; text?: never; toggle?: never } | 
+} }) & { addInstances?: never; addResource?: never; count?: never; manual?: never; text?: never; toggle?: never } | 
 /**
  *  開一張「批次建立機器」的表單。L001 報在**服務**上時的修法——
  *  那個服務在這個環境一台都還沒建。
  */
 ({ addInstances: {
 	container: Id,
-} }) & { addConnection?: never; addResource?: never; count?: never; text?: never; toggle?: never } | 
+} }) & { addConnection?: never; addResource?: never; count?: never; manual?: never; text?: never; toggle?: never } | 
 /**
  *  開一張**空白資源**的表單。L001 報在**外部系統**上時的修法——
  *  那個外部系統在這個環境還沒有實體，所以也就沒有位址。
@@ -1106,7 +1106,21 @@ export type Fix =
 	environment: Id | null,
 	/**  掛在誰底下。外部系統實體是它對應的那個系統。 */
 	owner: Id | null,
-} }) & { addConnection?: never; addInstances?: never; count?: never; text?: never; toggle?: never };
+} }) & { addConnection?: never; addInstances?: never; count?: never; manual?: never; text?: never; toggle?: never } | 
+/**
+ *  **沒有**可以填的一格，也沒有表單可以開——但下一步是什麼講得出來。
+ * 
+ *  # 為什麼這也是一種 `Fix`
+ * 
+ *  畫面上原本對這些發現寫死一句「要改接」。那句話是規則知識
+ *  （它只對 L003／L012 成立），寫在前端就是規則漏出去了——
+ *  而 L013「把兩端對調」與 L014「改一個名字」都不是改接。
+ * 
+ *  所以連這句話都由這裡給。前端照著印就好，一樣不必認得規則代號。
+ */
+({ manual: {
+	hint: string,
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; text?: never; toggle?: never };
 
 /**  使用者在 [`Fix`] 的控制項裡填的東西。 */
 export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };
@@ -1763,7 +1777,29 @@ export type Rule =
  *  於是模型裡留下一條永遠不可能被實現的契約，而工具一句話都不說。
  *  對一個賣點是「怕漏」的工具，「說沒問題但東西是錯的」是最糟的狀態。
  */
-"L013";
+"L013" | 
+/**
+ *  同一個環境裡，兩個不同種類的東西叫同一個名字。
+ * 
+ *  # 為什麼這值得叫
+ * 
+ *  新增時的唯一性檢查是**分開的**：服務實體只跟服務實體比、設備只跟
+ *  設備比、外部系統實體只跟外部系統實體比。所以一台叫 `pay-01` 的
+ *  服務實體與一台叫 `pay-01` 的設備可以同時存在，兩邊的檢查都會過。
+ * 
+ *  但 Agent 是**用名字**指涉東西的（`loom-mcp` 的 `refs`），而它依序找
+ *  服務實體 → 設備 → 外部系統實體，**先找到的贏**。於是「連到 pay-01」
+ *  會安靜地接到服務實體上，而使用者要的是那台設備——連線看起來完全正常。
+ * 
+ *  `refs` 的註解一直寫著「名字撞在一起本來就是該被 lint 抓的問題」。
+ *  這條就是那個 lint。
+ * 
+ *  # 為什麼是警告不是錯誤
+ * 
+ *  資料本身沒有壞，壞的是「用名字指涉」這一條路。而現實中 VIP 跟它
+ *  服務的那個東西同名是有可能的，用錯誤會變成一個拿不掉的紅字。
+ */
+"L014";
 
 export type Severity = "info" | "warning" | "error";
 

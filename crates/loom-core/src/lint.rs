@@ -74,6 +74,26 @@ pub enum Rule {
     /// 於是模型裡留下一條永遠不可能被實現的契約，而工具一句話都不說。
     /// 對一個賣點是「怕漏」的工具，「說沒問題但東西是錯的」是最糟的狀態。
     L013,
+    /// 同一個環境裡，兩個不同種類的東西叫同一個名字。
+    ///
+    /// # 為什麼這值得叫
+    ///
+    /// 新增時的唯一性檢查是**分開的**：服務實體只跟服務實體比、設備只跟
+    /// 設備比、外部系統實體只跟外部系統實體比。所以一台叫 `pay-01` 的
+    /// 服務實體與一台叫 `pay-01` 的設備可以同時存在，兩邊的檢查都會過。
+    ///
+    /// 但 Agent 是**用名字**指涉東西的（`loom-mcp` 的 `refs`），而它依序找
+    /// 服務實體 → 設備 → 外部系統實體，**先找到的贏**。於是「連到 pay-01」
+    /// 會安靜地接到服務實體上，而使用者要的是那台設備——連線看起來完全正常。
+    ///
+    /// `refs` 的註解一直寫著「名字撞在一起本來就是該被 lint 抓的問題」。
+    /// 這條就是那個 lint。
+    ///
+    /// # 為什麼是警告不是錯誤
+    ///
+    /// 資料本身沒有壞，壞的是「用名字指涉」這一條路。而現實中 VIP 跟它
+    /// 服務的那個東西同名是有可能的，用錯誤會變成一個拿不掉的紅字。
+    L014,
 }
 
 impl Rule {
@@ -89,6 +109,7 @@ impl Rule {
             Rule::L008 => "L008",
             Rule::L012 => "L012",
             Rule::L013 => "L013",
+            Rule::L014 => "L014",
         }
     }
 
@@ -101,7 +122,7 @@ impl Rule {
             | Rule::L006
             | Rule::L012
             | Rule::L013 => Severity::Error,
-            Rule::L005 | Rule::L007 | Rule::L008 => Severity::Warning,
+            Rule::L005 | Rule::L007 | Rule::L008 | Rule::L014 => Severity::Warning,
         }
     }
 }
@@ -188,6 +209,55 @@ fn lint_environment(project: &Project, env: &Environment, findings: &mut Vec<Fin
     check_relationships_reachable(project, env, &index, findings);
     check_orphan_instances(env, &index, findings);
     check_environment_references(project, env, findings);
+    check_name_collisions(env, findings);
+}
+
+/// L014：同一個環境裡兩個不同種類的東西叫同一個名字。
+///
+/// # 順序就是 `loom-mcp` 解析名字的順序
+///
+/// 服務實體 → 設備 → 外部系統實體，**先找到的贏**。所以報在**輸的那個**
+/// 身上：贏的那個用名字還指得到，輸的那個指不到——需要改名的是它。
+///
+/// 名字相同但**同一種**的情況不會走到這裡：那在新增時就被
+/// `resource::check_slug_unique` 擋掉了。
+fn check_name_collisions(env: &Environment, findings: &mut Vec<Finding>) {
+    // (名字, 種類, id)，照解析順序排。
+    let mut seen: std::collections::HashMap<&str, &'static str> = std::collections::HashMap::new();
+    let ordered = env
+        .instances()
+        .into_iter()
+        .map(|i| (i.slug.as_str(), "服務實體", i.id.clone()))
+        .chain(
+            env.infra
+                .iter()
+                .map(|n| (n.slug.as_str(), "設備", n.id.clone())),
+        )
+        .chain(
+            env.systems
+                .iter()
+                .map(|s| (s.slug.as_str(), "外部系統實體", s.id.clone())),
+        )
+        .collect::<Vec<_>>();
+
+    for (slug, kind, id) in ordered {
+        match seen.get(slug) {
+            None => {
+                seen.insert(slug, kind);
+            }
+            Some(winner) => findings.push(Finding {
+                rule: Rule::L014,
+                environment: Some(env.id.clone()),
+                subject: id,
+                end: None,
+                detail: format!(
+                    "環境 {} 裡有兩個東西叫 {slug}：這個{kind}，以及一個{winner}。\
+                     用名字指涉時會指到那個{winner}，這個{kind}指不到——改一個名字。",
+                    env.slug
+                ),
+            }),
+        }
+    }
 }
 
 /// L012（邏輯層）：契約與服務指到的東西要真的存在。
