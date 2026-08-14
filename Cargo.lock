@@ -764,6 +764,7 @@ dependencies = [
  "axum",
  "loom-core",
  "loom-mcp",
+ "objc2-foundation",
  "rmcp",
  "serde",
  "serde_json",

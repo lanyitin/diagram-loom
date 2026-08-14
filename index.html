@@ -1,5 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<!-- autocorrect / autocapitalize 是**會繼承的**全域屬性，所以掛在 <html> 上
+     一次就蓋住全部的輸入框，包括之後才加的那些。四十幾個 <input> 逐一標記
+     的話，下一個新增的欄位一定會漏，而且沒有人會發現。
+
+     這裡打的幾乎都是會被逐字比對的字串：slug、IP、JDBC URL、萬用字元樣式。
+     自動大寫把 `redis-01` 變成 `Redis-01`，那是一個不同的名字。
+
+     ⚠️ 系統層的「替代符號」（智慧型引號、破折號、文字替換）關不到——
+     那是 NSSpellChecker 的設定，網頁碰不到。見 src-tauri/src/lib.rs 的
+     `stop_the_os_from_rewriting_what_you_type`。兩層都要。
+
+     spellcheck 沒有關：紅色波浪底線只是提示，不會偷改字。 -->
+<html lang="zh-Hant" autocorrect="off" autocapitalize="off">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">

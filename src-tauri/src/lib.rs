@@ -846,7 +846,53 @@ pub fn builder() -> Builder<tauri::Wry> {
     ])
 }
 
+/// 叫作業系統不要改寫使用者打的字。
+///
+/// # 為什麼這件事非做不可
+///
+/// 這個工具裡打的幾乎都是**會被逐字比對的字串**：slug（`redis-01`）、
+/// 位址（`10.0.1.11:6379`）、JDBC URL、萬用字元樣式（`redis-*`）。
+///
+/// macOS 預設開著「自動大寫」，於是在空白欄位打 `redis-01` 會變成
+/// `Redis-01`——而那是一個**不同的名字**。使用者看不出自己按錯了什麼，
+/// 只會發現連線接不起來、或多出一個他沒建過的東西。「智慧型引號」把
+/// `"` 換成 `""`，對一段 JDBC URL 是同樣的效果。
+///
+/// # 為什麼不能只靠 HTML 屬性
+///
+/// `autocorrect` / `autocapitalize` 管得到 WebKit 自己的那一層，但
+/// **替代符號（引號、破折號、文字替換）是 NSSpellChecker 的**，
+/// 它從 NSUserDefaults 讀設定，網頁那一層碰不到。
+///
+/// 寫的是**本 App 自己的** domain，不是 `NSGlobalDomain`——它蓋過使用者的
+/// 全域設定，但只蓋在這個 App 裡。別的程式照他原本的設定跑。
+/// （`registerDefaults` 不行：那是最低優先權的 domain，全域設定會贏過它。）
+///
+/// iframe 裡的 draw.io 也一起吃到，因為這是整個 process 的設定。
+#[cfg(target_os = "macos")]
+fn stop_the_os_from_rewriting_what_you_type() {
+    use objc2_foundation::{NSString, NSUserDefaults};
+
+    let defaults = NSUserDefaults::standardUserDefaults();
+    for key in [
+        "NSAutomaticQuoteSubstitutionEnabled",
+        "NSAutomaticDashSubstitutionEnabled",
+        "NSAutomaticTextReplacementEnabled",
+        "NSAutomaticSpellingCorrectionEnabled",
+        "NSAutomaticCapitalizationEnabled",
+        "NSAutomaticPeriodSubstitutionEnabled",
+    ] {
+        defaults.setBool_forKey(false, &NSString::from_str(key));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stop_the_os_from_rewriting_what_you_type() {}
+
 pub fn run() {
+    // 要在視窗開起來之前。
+    stop_the_os_from_rewriting_what_you_type();
+
     let builder = builder();
 
     tauri::Builder::default()
