@@ -829,7 +829,7 @@ mod adding_a_connection {
 
     #[test]
     fn a_connection_serving_nothing_is_rejected() {
-        // 沒有契約的連線 lint 會叫（L011），而且覆蓋矩陣上看不到它——
+        // 沒有契約的連線 lint 會叫（L003），而且覆蓋矩陣上看不到它——
         // 也就是「怕漏」的那張表看不到它。
         let (mut h, env, _, a, b) = ready();
         assert!(h.edit(&add(&env, &Id::new(""), at(&a), at(&b))).is_err());

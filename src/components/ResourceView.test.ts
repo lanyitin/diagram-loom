@@ -401,7 +401,7 @@ describe('連線分頁', () => {
   })
 
   it('新增連線先問是實現哪一條契約', async () => {
-    // 沒有契約的連線 lint 會叫（L011），所以這裡不給「不選」這個選項。
+    // 沒有契約的連線 lint 會叫（L003），所以這裡不給「不選」這個選項。
     store.snapshot!.project.logical.relationships = [
       { id: 'r-1', slug: 'app-連-redis' },
     ] as never

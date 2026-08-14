@@ -198,6 +198,38 @@ fn a_missing_owner_does_not_also_flag_its_endpoints() {
     );
 }
 
+/// 一條不實現任何契約的連線，也要有人叫。
+///
+/// # 為什麼這條測試該存在
+///
+/// `EditError::NoServes` 的訊息告訴使用者「沒有契約的連線 lint 會叫」，
+/// 而它原本掛的代號是 draw.io 那三條裡的一條——**還沒實作**，而且講的是
+/// 完全不同的一件事。照著代號去查文件的人，會查到一條無關的規則。
+///
+/// 真正會叫的是 L003。既然錯誤訊息對使用者做了承諾，那個承諾就該有測試——
+/// 不然它只是另一句「指向不存在的機制」的話。（`mise run check:rules`
+/// 現在會擋住寫錯代號這件事，但擋不了「代號對、規則其實不會叫」。）
+///
+/// 建立時擋得住（見 `from_scratch.rs`），但 YAML 是純文字，本來就是給人改的。
+#[test]
+fn a_connection_serving_a_missing_contract_is_flagged() {
+    let mut project = healthy_project();
+    project.environments[0].connections[0].serves = Id::new("被刪掉的契約");
+
+    let complaints: Vec<String> = lint(&project)
+        .iter()
+        .filter(|f| f.rule == Rule::L003)
+        .map(|f| f.detail.clone())
+        .collect();
+
+    assert!(
+        complaints
+            .iter()
+            .any(|d| d.contains("指向不存在的邏輯連線")),
+        "連線指著一條不存在的契約，lint 竟然沒話說：{complaints:?}"
+    );
+}
+
 #[test]
 fn an_infra_endpoint_has_no_logical_counterpart_and_is_not_flagged() {
     // F5 這類設備不對應任何邏輯層元素，它的 endpoint 沒有 `def`。

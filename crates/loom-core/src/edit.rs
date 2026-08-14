@@ -259,7 +259,7 @@ impl fmt::Display for EditError {
             ),
             EditError::NoServes => write!(
                 f,
-                "這條連線沒有說它在實現哪一條契約。沒有契約的連線 lint 會叫（L011），\
+                "這條連線沒有說它在實現哪一條契約。沒有契約的連線 lint 會叫（L003），\
                  而且覆蓋矩陣上看不到它"
             ),
             EditError::NotAPattern { connection, side } => write!(
@@ -752,7 +752,7 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
         }
         // 剩下的 L001 是外部系統在這個環境還沒有實體 → 開一張空白表單。
         //
-        // subject 是**邏輯層那個系統**（見 `lint::check_realisation`），
+        // subject 是**邏輯層那個系統**（見 `lint::check_logical_realized`），
         // 而要建的是它在這個環境的實體，所以 owner 填 subject。
         Rule::L001 if project.logical.system(&finding.subject).is_some() => {
             Some(Fix::AddResource {
@@ -864,7 +864,7 @@ fn find_endpoint<'a>(env: &'a mut Environment, id: &Id) -> Option<&'a mut Endpoi
     None
 }
 
-/// [`找端點`] 的唯讀版。
+/// [`find_endpoint`] 的唯讀版。
 fn endpoint_of<'a>(env: &'a Environment, id: &Id) -> Option<&'a Endpoint> {
     env.instances()
         .into_iter()

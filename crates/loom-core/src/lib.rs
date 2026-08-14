@@ -18,6 +18,11 @@
 //! 所以缺漏必須是可以表示的：`Endpoint::address` 是 `Option`、萬用字元的
 //! `expect` 是 `Option`。型別若強制它們存在，對應的 lint 規則就永遠不會觸發。
 
+// rustdoc 在這裡的用途是**檢查註解裡的連結指不指得到東西**（`mise run
+// check:docs`，跑的是 `--document-private-items`），不是產一份要發佈的手冊。
+// 註解要講清楚一件事，常常得指到私有的函式——那正是讀的人接下來要看的地方。
+#![allow(rustdoc::private_intra_doc_links)]
+
 pub mod batch;
 pub mod cascade;
 pub mod connect;

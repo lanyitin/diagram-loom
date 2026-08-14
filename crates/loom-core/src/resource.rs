@@ -557,7 +557,7 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             //
             // # 為什麼建立時就擋，而不是只靠 L013
             //
-            // 環境層的連線早就在 `edit::validate_connection` 擋同一件事，
+            // 環境層的連線早就在 `edit::check_connection` 擋同一件事，
             // 理由寫在那裡：lint 是**事後**的——東西已經建進去了才叫你回頭修。
             // 對「一看就知道錯」的東西那太晚了，而且它建出來之後長得像一條
             // 正常的契約。

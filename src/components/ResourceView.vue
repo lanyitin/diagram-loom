@@ -350,7 +350,7 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
     </div>
 
     <!-- 新增連線要先問補給哪一條契約。連線一定屬於某條契約——
-         沒有契約的連線 lint 會叫（L011），所以這裡不給「不選」這個選項。 -->
+         沒有契約的連線 lint 會叫（L003），所以這裡不給「不選」這個選項。 -->
     <div v-if="pickingContract" class="scrim" @click.self="pickingContract = false">
       <section class="box" role="dialog" aria-modal="true">
         <h2>新增一條連線</h2>

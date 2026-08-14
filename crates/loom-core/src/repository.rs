@@ -28,7 +28,7 @@
 //! # 這裡不碰磁碟
 //!
 //! 佈局與 YAML 是領域知識，留在核心；「字串放哪裡」交給
-//! [`FileStore`](crate::store::FileStore)。
+//! [`crate::store::FileStore`]。
 //! 想直接對資料夾操作可以用 [`save_to_dir`] / [`load_from_dir`]。
 
 use std::collections::HashSet;

@@ -2,8 +2,11 @@
 //!
 //! 這是本工具的靈魂。痛點是數百條連線怕漏掉，lint 就是防漏機制。
 //!
-//! 規則代號與 `docs/lint-rules.md` 對應。目前實作 L001–L008；
-//! L009–L011 與 draw.io 有關，等圖的部分做好再補。
+//! 規則代號與 `docs/lint-rules.md` 對應。目前實作 L001–L008 與 L012–L014；
+//! 只差 L009–L011，那三條與 draw.io 有關，等圖的部分做好再補。
+//!
+//! **底下的 [`Rule`] 才是唯一的名冊。** 這段話是給人看的摘要，會過期；
+//! `mise run check:rules` 認的是那個 enum，程式碼裡別處提到的代號都要在裡面。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
