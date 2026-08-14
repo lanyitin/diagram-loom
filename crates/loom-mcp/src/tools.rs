@@ -382,6 +382,9 @@ fn how_to_fix(rule: Rule) -> &'static str {
         Rule::L007 => " → 用 update 補上用途",
         Rule::L008 => " → 沒有連線碰到它。補一條連線，或它真的是冷備機就 update standalone=true",
         Rule::L012 => " → 參照壞了。用 update 改掉，或把懸空的那個元素 delete",
+        // 兩條路都要講。只說「人不能當目標」的話，Agent 最常見的亂試是
+        // 把整條契約刪掉——而那條關係是真的存在的，只是方向寫反了。
+        Rule::L013 => " → 人只能當來源。用 update 把兩端對調，或把目標改成對方的服務",
     }
 }
 

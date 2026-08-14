@@ -57,6 +57,23 @@ pub enum Rule {
     ///
     /// 代號接在 draw.io 那三條（L009–L011）後面，是因為那三條先被寫進文件。
     L012,
+    /// 契約的**目標端**是人。
+    ///
+    /// # 為什麼這需要一條規則
+    ///
+    /// `RelationshipEnd::Person` 的註解寫著「**只該出現在來源端**」——
+    /// 「使用者連上系統」是 C4 Context 圖最常見的關係，但反過來沒有意義：
+    /// 人沒有接點、沒有位址、也不會被部署。
+    ///
+    /// 而那句話一直只是註解。在這條規則之前，把人放到目標端是**完全安靜**的：
+    ///
+    /// - `missing_relationship_end` 只檢查那個人存在，他確實存在
+    /// - `target_has_endpoint` 對人直接回 `true`，因為人本來就沒有接點
+    /// - 可達性 BFS 把人當成葉節點，走到他就停了，不算斷裂
+    ///
+    /// 於是模型裡留下一條永遠不可能被實現的契約，而工具一句話都不說。
+    /// 對一個賣點是「怕漏」的工具，「說沒問題但東西是錯的」是最糟的狀態。
+    L013,
 }
 
 impl Rule {
@@ -71,14 +88,19 @@ impl Rule {
             Rule::L007 => "L007",
             Rule::L008 => "L008",
             Rule::L012 => "L012",
+            Rule::L013 => "L013",
         }
     }
 
     pub fn severity(self) -> Severity {
         match self {
-            Rule::L001 | Rule::L002 | Rule::L003 | Rule::L004 | Rule::L006 | Rule::L012 => {
-                Severity::Error
-            }
+            Rule::L001
+            | Rule::L002
+            | Rule::L003
+            | Rule::L004
+            | Rule::L006
+            | Rule::L012
+            | Rule::L013 => Severity::Error,
             Rule::L005 | Rule::L007 | Rule::L008 => Severity::Warning,
         }
     }
@@ -203,6 +225,29 @@ fn check_logical_references(project: &Project, findings: &mut Vec<Finding>) {
             }
         }
 
+        // L013：人只能當來源。
+        //
+        // 放在 `to_endpoint` 那條前面，因為它是更根本的錯——目標是人的時候，
+        // 「目標身上有沒有那個接點」根本是個沒有意義的問題。
+        if let RelationshipEnd::Person(person) = &rel.to {
+            findings.push(Finding {
+                rule: Rule::L013,
+                environment: None,
+                subject: rel.id.clone(),
+                end: Some(ConnectionEnd::To),
+                detail: format!(
+                    "契約 {} 的目標端是人（{}）。人沒有接點也不會被部署，\
+                     只能當來源——把兩端對調，或改成連到對方的服務。",
+                    rel.slug,
+                    logical
+                        .people
+                        .iter()
+                        .find(|p| &p.id == person)
+                        .map_or(person.to_string(), |p| p.slug.clone()),
+                ),
+            });
+        }
+
         // `to_endpoint` 必須是**目標那一端身上**的接點定義。指到別人身上的
         // 一樣算壞掉——連線展開時會找不到對應的實際 endpoint。
         if !target_has_endpoint(logical, rel) {
@@ -253,7 +298,7 @@ fn target_has_endpoint(
             .iter()
             .find(|s| &s.id == id)
             .is_none_or(|s| s.endpoints.iter().any(|e| e.id == rel.to_endpoint)),
-        // 人沒有接點，那是模型層級的錯，交給 `契約端不存在` 之外的規則管。
+        // 人沒有接點。那是模型層級的錯，由 L013 負責叫——這裡不重複。
         RelationshipEnd::Person(_) => true,
     }
 }
