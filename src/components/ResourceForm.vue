@@ -52,37 +52,78 @@ function kindLabel(kind: string): string {
   return { site: '站點', physical: '實體機', 'virtual-machine': '虛擬機', 'linux-container': 'Linux 容器' }[kind] ?? kind
 }
 
+interface EndpointDraft {
+  id: Id
+  slug: string
+  def: Id | null
+  protocol: string
+  address: string | null
+}
+
 /**
- * 服務實體的接點。**IP 與 port 就填在這裡。**
+ * 正在編輯的那個實體——服務實體或外部系統實體。
+ *
+ * # 為什麼兩種要走同一條路
+ *
+ * **IP 與 port 住在接點上，兩種實體都一樣。** 原本只有服務實體有這段編輯
+ * 介面，於是外部系統實體的清單有一欄「位址」，卻沒有任何畫面填得了它——
+ * 而 lint 會為此叫（L001「外部系統在這個環境沒有指定位址」），
+ * 一個指著問題卻沒給任何辦法的工具比不叫還糟。
+ *
+ * 差別只在 `def` 該從誰身上找：服務實體看它對應的服務，外部系統實體看
+ * 它對應的那個外部系統（見 `docs/domain-model.md` 的不對稱表）。
+ */
+/** 兩種實體共通的部分：接點住在這裡，`standalone` 也是。 */
+interface InstanceHolder {
+  endpoints?: EndpointDraft[]
+  standalone: boolean
+}
+
+const editingInstance = computed<{ holder: InstanceHolder; owner: Id } | null>(() => {
+  const d = draft.value as {
+    instance?: { instance: InstanceHolder & { container: Id } }
+    systemInstance?: { instance: InstanceHolder & { system: Id } }
+  } | null
+  if (d?.instance) return { holder: d.instance.instance, owner: d.instance.instance.container }
+  if (d?.systemInstance) {
+    return { holder: d.systemInstance.instance, owner: d.systemInstance.instance.system }
+  }
+  return null
+})
+
+/**
+ * 接點。**IP 與 port 就填在這裡。**
  *
  * `def` 指向邏輯層的接點定義——填了之後 lint 才知道「這台的 client-port
  * 對應到契約上的哪一個」。沒填也可以，只是那條連線接不上。
  */
-const instanceEndpoints = computed(() => {
-  const inst = (draft.value as { instance?: { instance: { endpoints?: unknown[] } } })?.instance?.instance
-  return (inst?.endpoints ?? []) as { id: Id; slug: string; def: Id | null; protocol: string; address: string | null }[]
-})
+const instanceEndpoints = computed<EndpointDraft[]>(
+  () => (editingInstance.value?.holder.endpoints ?? []) as EndpointDraft[],
+)
 
-/** 這個服務實體對應的服務上，定義了哪些接點。 */
-const defsOfContainer = computed(() => {
-  const inst = (draft.value as { instance?: { instance: { container: Id } } })?.instance?.instance
-  const c = containers.value.find((x) => x.id === inst?.container)
-  return (c?.endpoints ?? []).map((d) => ({ value: d.id, label: d.slug, hint: d.protocol }))
+/** 這個實體對應的服務或外部系統上，定義了哪些接點。 */
+const defsOfOwner = computed(() => {
+  const owner = editingInstance.value?.owner
+  const defs =
+    containers.value.find((c) => c.id === owner)?.endpoints
+    ?? systems.value.find((s) => s.id === owner)?.endpoints
+    ?? []
+  return defs.map((d) => ({ value: d.id, label: d.slug, hint: d.protocol }))
 })
 
 function addEndpoint() {
-  const inst = (draft.value as { instance?: { instance: { endpoints: unknown[] } } })?.instance?.instance
-  if (!inst) return
-  inst.endpoints = [
-    ...(inst.endpoints ?? []),
+  const holder = editingInstance.value?.holder
+  if (!holder) return
+  holder.endpoints = [
+    ...(holder.endpoints ?? []),
     { id: crypto.randomUUID(), slug: '', def: null, protocol: 'tcp', address: null },
   ]
 }
 
 function removeEndpoint(id: Id) {
-  const inst = (draft.value as { instance?: { instance: { endpoints: { id: Id }[] } } })?.instance?.instance
-  if (!inst) return
-  inst.endpoints = inst.endpoints.filter((e) => e.id !== id)
+  const holder = editingInstance.value?.holder
+  if (!holder) return
+  holder.endpoints = (holder.endpoints ?? []).filter((e) => e.id !== id)
 }
 
 const logical = computed(() => store.snapshot?.project.logical)
@@ -366,36 +407,6 @@ function write(path: string, v: unknown) {
             @update:model-value="write('instance.node', $event)"
           />
         </label>
-
-        <!-- 接點：IP 與 port 在這裡。之前只能等 L006 叫了才改得到。 -->
-        <div class="sub">
-          <div class="subhead">
-            <strong>接點與位址</strong>
-            <button type="button" class="link" @click="addEndpoint()">＋ 加一個</button>
-          </div>
-          <p v-if="!instanceEndpoints.length" class="muted hint">
-            還沒有接點。<strong>IP 與 port 填在接點上</strong>——一個服務可以有好幾個
-            （對外一個、管理介面一個）。
-          </p>
-          <div v-for="e in instanceEndpoints" :key="e.id" class="ep">
-            <input v-model="e.slug" class="mono" placeholder="client-port">
-            <input v-model="e.address" class="mono" placeholder="10.0.1.11:6379">
-            <Picker
-              :model-value="e.def"
-              :options="defsOfContainer"
-              allow-empty
-              empty-label="（沒對應到契約）"
-              placeholder="對應哪個接點定義…"
-              @update:model-value="e.def = $event"
-            />
-            <button type="button" class="icon del" title="拿掉這個接點" @click="removeEndpoint(e.id)">✕</button>
-          </div>
-        </div>
-
-        <label class="check">
-          <input type="checkbox" :checked="!!read('instance.instance.standalone')" @change="write('instance.instance.standalone', ($event.target as HTMLInputElement).checked)">
-          刻意獨立（沒有任何連線碰到它也不要叫）
-        </label>
       </template>
 
       <!-- 外部系統實體 -->
@@ -415,6 +426,51 @@ function write(path: string, v: unknown) {
           還沒有<strong>外部系統</strong>可以對應。先到「系統」那一頁建一個並勾起
           <strong>外部</strong>——自家系統是靠自己的服務部署的，沒有獨立的系統實例。
         </p>
+      </template>
+
+      <!--
+        接點與位址、刻意獨立：**兩種實體共用**。
+
+        IP 與 port 住在接點上，服務實體與外部系統實體都一樣。原本只有服務
+        實體有這一段，於是外部系統實體的清單有一欄「位址」卻沒有任何畫面
+        填得了它——而 lint 會為此叫（L001「外部系統在這個環境沒有指定位址」）。
+        工具指著問題卻沒給任何辦法，比不叫還糟。
+
+        放在 if/else 鏈之後而不是抄兩份：抄的話遲早只有一邊會被修到。
+      -->
+      <template v-if="editingInstance">
+        <div class="sub">
+          <div class="subhead">
+            <strong>接點與位址</strong>
+            <button type="button" class="link" @click="addEndpoint()">＋ 加一個</button>
+          </div>
+          <p v-if="!instanceEndpoints.length" class="muted hint">
+            還沒有接點。<strong>IP 與 port 填在接點上</strong>——一個東西可以有好幾個
+            （對外一個、管理介面一個）。
+          </p>
+          <div v-for="e in instanceEndpoints" :key="e.id" class="ep">
+            <input v-model="e.slug" class="mono" placeholder="client-port">
+            <input v-model="e.address" class="mono" placeholder="10.0.1.11:6379">
+            <Picker
+              :model-value="e.def"
+              :options="defsOfOwner"
+              allow-empty
+              empty-label="（沒對應到契約）"
+              placeholder="對應哪個接點定義…"
+              @update:model-value="e.def = $event"
+            />
+            <button type="button" class="icon del" title="拿掉這個接點" @click="removeEndpoint(e.id)">✕</button>
+          </div>
+        </div>
+
+        <label class="check">
+          <input
+            type="checkbox"
+            :checked="editingInstance.holder.standalone"
+            @change="editingInstance.holder.standalone = ($event.target as HTMLInputElement).checked"
+          >
+          刻意獨立（沒有任何連線碰到它也不要叫）
+        </label>
       </template>
 
       <footer>

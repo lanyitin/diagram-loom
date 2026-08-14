@@ -103,6 +103,68 @@ describe('新增外部系統實體', () => {
   })
 })
 
+describe('位址填得到', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+  })
+
+  function open(resource: Resource) {
+    store.editingResource = { resource, isNew: true, kind: '外部系統實體' }
+    return mount(ResourceForm)
+  }
+
+  it('外部系統實體有「接點與位址」可以填', () => {
+    // 清單上有一欄「位址」，卻沒有任何畫面填得了它——而 lint 會為此叫
+    // （L001「外部系統在這個環境沒有指定位址」）。工具指著問題卻沒給
+    // 任何辦法，比不叫還糟。
+    const w = open(blankSystemInstance)
+
+    expect(w.text()).toContain('接點與位址')
+    expect(w.find('.sub .link').exists(), '要能加一個接點').toBe(true)
+  })
+
+  it('加一個接點就填得了 IP', async () => {
+    const w = open(blankSystemInstance)
+    await w.find('.sub .link').trigger('click')
+
+    const boxes = w.findAll('.ep input')
+    expect(boxes.length, '接點名稱與位址兩格').toBeGreaterThanOrEqual(2)
+    await boxes[1]!.setValue('sso.corp.local:443')
+
+    const draft = (w.vm as unknown as { editingInstance: { holder: { endpoints: { address: string }[] } } })
+    expect(draft.editingInstance.holder.endpoints[0]!.address).toBe('sso.corp.local:443')
+  })
+
+  it('接點定義是從**對應的那個外部系統**身上找的', () => {
+    // 這是兩種實體唯一的差別，也是最容易寫錯的地方：服務實體看它對應的
+    // 服務，外部系統實體看它對應的系統（見 domain-model.md 的不對稱表）。
+    store.snapshot!.project.logical.systems[1]!.endpoints = [
+      { id: 'ed-sso-https', slug: 'https', protocol: 'tcp' },
+    ] as never
+    const resource = {
+      systemInstance: {
+        environment: 'env-prod',
+        instance: { id: 'si-1', slug: 'sso-prod', system: 's-sso', endpoints: [] },
+      },
+    } as unknown as Resource
+
+    const w = open(resource)
+    const options = (w.vm as unknown as { defsOfOwner: { label: string }[] }).defsOfOwner
+
+    expect(options.map((o) => o.label)).toEqual(['https'])
+  })
+
+  it('「刻意獨立」兩種實體都有', () => {
+    // L008 對外部系統實體也會叫，也吃 standalone。只有一邊有的話，
+    // 使用者只能繞去 lint 面板才關得掉。
+    expect(open(blankSystemInstance).text()).toContain('刻意獨立')
+  })
+})
+
 describe('選單的規矩', () => {
   /**
    * **從模型裡挑一個元素 → `Picker`；封閉列舉 → 原生 `<select>`。**
