@@ -22,9 +22,10 @@
  * 由 Rust 的 `edit_for` 決定要寫進哪個欄位。
  */
 import { ref } from 'vue'
+import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
 import FixEditor from './FixEditor.vue'
-import type { Finding } from '../lib/model'
+import type { Finding, Kind } from '../lib/model'
 
 const store = useProject()
 
@@ -62,6 +63,35 @@ function openAddInstances(f: Finding) {
     container: f.fix.addInstances.container,
     label: f.detail,
   }
+}
+
+/**
+ * 開一張空白資源的表單。外部系統在這個環境還沒有實體時走這條。
+ *
+ * 空白的那份**跟 Rust 要**，不在這裡拼——id 要在 Rust 發好，`apply` 才是
+ * 決定性的（復原之後重做會拿到同一個元素，不是一個新 UUID）。
+ * 而「空白的外部系統實體長什麼樣」本來就是模型知識。
+ */
+async function openAddResource(f: Finding) {
+  const fix = f.fix?.addResource
+  if (!fix) return
+  const res = await commands.blankResource(fix.kind, fix.environment, fix.owner)
+  if (res.status !== 'ok') {
+    store.error = (res.error as { message?: string })?.message ?? String(res.error)
+    return
+  }
+  store.editingResource = { resource: res.data, isNew: true, kind: KIND_LABEL[fix.kind] ?? '資源' }
+}
+
+/**
+ * 表單標題上的那個字。
+ *
+ * 只是稱呼，不是規則——`Kind` 的中文名在 Rust 那邊是給 `Resource` 用的
+ * （`kind_name_label`），沒有走出來的管道，而為了一個標題開一個 command
+ * 不划算。漏掉某一種也只是標題變成「資源」，不會做錯事。
+ */
+const KIND_LABEL: Partial<Record<Kind, string>> = {
+  systemInstance: '外部系統實體',
 }
 
 function jumpTo(f: Finding) {
@@ -115,6 +145,10 @@ function jumpTo(f: Finding) {
                   @click="openAddInstances(f)"
                 >建機器…</button>
                 <button
+                  v-else-if="f.fix?.addResource" class="fix" :disabled="store.busy"
+                  @click="openAddResource(f)"
+                >建實體…</button>
+                <button
                   v-else-if="f.fix" class="fix" :disabled="store.busy"
                   @click="editingIndex = editingIndex === i ? null : i"
                 >
@@ -127,7 +161,8 @@ function jumpTo(f: Finding) {
             </tr>
 
             <tr
-              v-if="editingIndex === i && f.fix && !f.fix.addConnection && !f.fix.addInstances"
+              v-if="editingIndex === i && f.fix && !f.fix.addConnection && !f.fix.addInstances
+                && !f.fix.addResource"
               class="editor"
             >
               <td colspan="5">
@@ -147,7 +182,10 @@ function jumpTo(f: Finding) {
 
 <style scoped>
 .panel { border-top: 1px solid var(--rule); background: var(--surface-2); }
-.panel.展開 { display: flex; flex-direction: column; max-height: 44%; }
+/* 樣板套的是 `expanded`。這裡原本寫成中文的 `.展開`，於是這三行從來沒有
+   生效過——展開時面板沒有高度上限，`.list` 的捲動也就沒有東西可以捲。
+   （識別字用英文本來就是這個專案的規矩，見 CLAUDE.md。） */
+.panel.expanded { display: flex; flex-direction: column; max-height: 44%; }
 
 .bar {
   display: flex;

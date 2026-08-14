@@ -344,8 +344,8 @@ fn filling_in_each_fix_cleans_a_broken_project() {
             Fix::Text { .. } => FixValue::Text("補上去了".into()),
             Fix::Count { suggestion } => FixValue::Count(suggestion),
             Fix::Toggle { .. } => FixValue::Toggle(true),
-            // 這兩種要開表單，不在這個「填一格」的迴圈裡。
-            Fix::AddConnection { .. } | Fix::AddInstances { .. } => {
+            // 這幾種要開表單，不在這個「填一格」的迴圈裡。
+            Fix::AddConnection { .. } | Fix::AddInstances { .. } | Fix::AddResource { .. } => {
                 unreachable!("這份素材不該有 L001")
             }
         };

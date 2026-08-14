@@ -6,12 +6,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import ConnectionTable from './ConnectionTable.vue'
 import LintPanel from './LintPanel.vue'
 import { useProject } from '../lib/store'
+import { commands } from '../lib/bindings'
 import type { Finding, Row, Side, Snapshot } from '../lib/model'
+
+vi.mock('../lib/bindings', () => ({ commands: { blankResource: vi.fn() } }))
 
 function side(label: string, extra: Partial<Side> = {}): Side {
   return { kind: 'instance', label, endpoint: null, addresses: [], matched: 1, expect: null, ...extra }
@@ -431,5 +434,50 @@ describe('連線表的排序', () => {
     const w = mount(ConnectionTable)
     await th(w, '實際／期望').trigger('click')
     expect(columnValues(w, '契約')).toEqual(['缺三台', '缺一台', '剛好'])
+  })
+})
+
+describe('外部系統沒有實體時的修法', () => {
+  let store: ReturnType<typeof useProject>
+
+  /** L001 報在**邏輯層那個外部系統**上：它在這個環境還沒有實體。 */
+  const noInstance: Finding = {
+    rule: 'L001', severity: 'error', environment: 'env-prod', subject: 's-sso',
+    end: null, detail: '外部系統 sso 在環境 prod 沒有指定位址',
+    fix: { addResource: { kind: 'systemInstance', environment: 'env-prod', owner: 's-sso' } },
+  } as unknown as Finding
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot([rows('c1')], [noInstance])
+    store.panelOpen = true
+    // 兩個測試都會按到那顆鈕，沒有預設值的話會噴一個看不出來源的 rejection。
+    vi.mocked(commands.blankResource).mockResolvedValue({
+      status: 'ok',
+      data: { systemInstance: { environment: 'env-prod', instance: { id: 'si-新的' } } },
+    } as never)
+  })
+
+  it('給的是「開一張表單」的鈕，不是就地填一格', async () => {
+    // 它要一個名字跟一個位址，兩個都只有人知道。填一格的框裝不下。
+    const w = mount(LintPanel)
+    expect(w.find('.list .fix').text()).toBe('建實體…')
+
+    await w.find('.list .fix').trigger('click')
+    expect(w.find('.editor').exists(), '不該同時就地展開').toBe(false)
+  })
+
+  it('空白的那份跟 Rust 要，不是前端自己拼', async () => {
+    // id 要在 Rust 發好，apply 才是決定性的——復原之後重做要拿到同一個
+    // 元素，不是一個新 UUID。
+    const w = mount(LintPanel)
+
+    await w.find('.list .fix').trigger('click')
+    await flushPromises()
+
+    expect(commands.blankResource).toHaveBeenCalledWith('systemInstance', 'env-prod', 's-sso')
+    expect(store.editingResource?.isNew).toBe(true)
+    expect(store.editingResource?.kind).toBe('外部系統實體')
   })
 })

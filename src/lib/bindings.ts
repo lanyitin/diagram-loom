@@ -1061,15 +1061,15 @@ export type Fix =
 	/**  欄位提示，例如「10.0.1.11:6379」。 */
 	hint: string,
 	current: string | null,
-} }) & { addConnection?: never; addInstances?: never; count?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; toggle?: never } | 
 /**  填一個數字（expect）。附上實際符合的數量當預設值。 */
 ({ count: {
 	suggestion: number | null,
-} }) & { addConnection?: never; addInstances?: never; text?: never; toggle?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; text?: never; toggle?: never } | 
 /**  一個開關（standalone）。 */
 ({ toggle: {
 	label: string,
-} }) & { addConnection?: never; addInstances?: never; count?: never; text?: never } | 
+} }) & { addConnection?: never; addInstances?: never; addResource?: never; count?: never; text?: never } | 
 /**
  *  開一張「新增連線」的表單。**這個沒辦法在 lint 面板上填一格解決**，
  *  但它仍然是個修法——所以它有值，不是 `None`。
@@ -1078,14 +1078,35 @@ export type Fix =
  */
 ({ addConnection: {
 	relationship: Id,
-} }) & { addInstances?: never; count?: never; text?: never; toggle?: never } | 
+} }) & { addInstances?: never; addResource?: never; count?: never; text?: never; toggle?: never } | 
 /**
  *  開一張「批次建立機器」的表單。L001 報在**服務**上時的修法——
  *  那個服務在這個環境一台都還沒建。
  */
 ({ addInstances: {
 	container: Id,
-} }) & { addConnection?: never; count?: never; text?: never; toggle?: never };
+} }) & { addConnection?: never; addResource?: never; count?: never; text?: never; toggle?: never } | 
+/**
+ *  開一張**空白資源**的表單。L001 報在**外部系統**上時的修法——
+ *  那個外部系統在這個環境還沒有實體，所以也就沒有位址。
+ * 
+ *  # 為什麼不直接建一個
+ * 
+ *  它要一個名字跟一個位址，兩個都只有人知道。工具替他填一個假的，
+ *  只會把「缺位址」換成「位址是錯的」——而後者不會再被 lint 叫。
+ * 
+ *  # 為什麼欄位剛好是這三個
+ * 
+ *  因為它們就是 `resource::blank` 的參數。前端拿到之後原樣轉給
+ *  既有的 `blank_resource` command 就好，不必知道空白的
+ *  `SoftwareSystemInstance` 長什麼樣——那是模型知識。
+ */
+({ addResource: {
+	kind: Kind,
+	environment: Id | null,
+	/**  掛在誰底下。外部系統實體是它對應的那個系統。 */
+	owner: Id | null,
+} }) & { addConnection?: never; addInstances?: never; count?: never; text?: never; toggle?: never };
 
 /**  使用者在 [`Fix`] 的控制項裡填的東西。 */
 export type FixValue = ({ text: string }) & { count?: never; toggle?: never } | ({ count: number | null }) & { text?: never; toggle?: never } | ({ toggle: boolean }) & { count?: never; text?: never };

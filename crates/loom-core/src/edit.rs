@@ -573,6 +573,25 @@ pub enum Fix {
     /// 開一張「批次建立機器」的表單。L001 報在**服務**上時的修法——
     /// 那個服務在這個環境一台都還沒建。
     AddInstances { container: Id },
+    /// 開一張**空白資源**的表單。L001 報在**外部系統**上時的修法——
+    /// 那個外部系統在這個環境還沒有實體，所以也就沒有位址。
+    ///
+    /// # 為什麼不直接建一個
+    ///
+    /// 它要一個名字跟一個位址，兩個都只有人知道。工具替他填一個假的，
+    /// 只會把「缺位址」換成「位址是錯的」——而後者不會再被 lint 叫。
+    ///
+    /// # 為什麼欄位剛好是這三個
+    ///
+    /// 因為它們就是 `resource::blank` 的參數。前端拿到之後原樣轉給
+    /// 既有的 `blank_resource` command 就好，不必知道空白的
+    /// `SoftwareSystemInstance` 長什麼樣——那是模型知識。
+    AddResource {
+        kind: crate::resource::Kind,
+        environment: Option<Id>,
+        /// 掛在誰底下。外部系統實體是它對應的那個系統。
+        owner: Option<Id>,
+    },
 }
 
 /// 使用者在 [`Fix`] 的控制項裡填的東西。
@@ -721,7 +740,17 @@ pub fn fix_for(project: &Project, finding: &Finding) -> Option<Fix> {
                 container: finding.subject.clone(),
             })
         }
-        // 剩下的 L001 是外部系統沒指定位址，那還沒做。
+        // 剩下的 L001 是外部系統在這個環境還沒有實體 → 開一張空白表單。
+        //
+        // subject 是**邏輯層那個系統**（見 `lint::check_realisation`），
+        // 而要建的是它在這個環境的實體，所以 owner 填 subject。
+        Rule::L001 if project.logical.system(&finding.subject).is_some() => {
+            Some(Fix::AddResource {
+                kind: crate::resource::Kind::SystemInstance,
+                environment: finding.environment.clone(),
+                owner: Some(finding.subject.clone()),
+            })
+        }
         Rule::L001 | Rule::L002 => None,
         // L003 要改既有連線的接法、L012 要改元素之間的指向——
         // 兩者都不是填一格或新增一個，留給之後的「改接」功能。
