@@ -88,7 +88,9 @@ pub fn list() -> Value {
   node              environment, slug, kind(site/physical/virtual-machine/linux-container), within(選填)
   infra             environment, slug
   infra_endpoint    environment, owner(設備的 slug), slug, address
-  system_instance   environment, slug, system(系統的 slug)
+  system_instance   environment, slug, system(系統的 slug), address, endpoint(選填)
+                    address 是「這個外部系統在這個環境打哪裡」，例如 sso.corp.local:443。
+                    那個系統有好幾個接點定義時才需要 endpoint 指名要填哪一個。
 
 要一次建很多台**同一個服務**的機器請改用 create_nodes，它會照樣板配 IP。",
             json!({
@@ -361,7 +363,7 @@ fn report(project: &Project) -> String {
             f.rule.code(),
             f.detail,
             f.subject,
-            how_to_fix(f.rule)
+            how_to_fix(project, f)
         ));
     }
     out
@@ -371,9 +373,38 @@ fn report(project: &Project) -> String {
 ///
 /// 少了這一句，Agent 看到 L002 只會知道「有東西壞了」，
 /// 然後開始亂試——最常見的亂試是把契約刪掉，那完全是反效果。
-fn how_to_fix(rule: Rule) -> &'static str {
-    match rule {
-        Rule::L001 => " → 用 create_nodes 建機器，或用 add_connection 補連線",
+///
+/// # L001 要看 subject 才知道怎麼修
+///
+/// 同一條規則會報在三種東西上，而三種的修法完全不同：契約要補連線、
+/// 服務要建機器、外部系統要建實體。原本三種給同一句「用 create_nodes
+/// 建機器，或用 add_connection 補連線」——兩句話裡至少有一句是錯的，
+/// 而外部系統那種**兩句都是錯的**。
+///
+/// 分辨的邏輯**不在這裡重寫**：`edit::fix_for` 已經為了畫面上的按鈕
+/// 做過同一件事。抄一份的話，兩邊遲早會對同一項發現給出不同的建議。
+fn how_to_fix(project: &Project, finding: &loom_core::lint::Finding) -> &'static str {
+    use loom_core::edit::Fix;
+
+    if finding.rule == Rule::L001 {
+        return match loom_core::edit::fix_for(project, finding) {
+            Some(Fix::AddConnection { .. }) => {
+                " → 這條契約在這個環境還沒有任何連線。用 add_connection 補"
+            }
+            Some(Fix::AddInstances { .. }) => {
+                " → 這個服務在這個環境一台都還沒建。用 create_nodes 建機器"
+            }
+            Some(Fix::AddResource { .. }) => {
+                " → 這個外部系統在這個環境還沒有實體。用 create 建一個 \
+                 system_instance，記得填 address"
+            }
+            _ => " → 這個邏輯層元素在這個環境還沒有實現",
+        };
+    }
+
+    match finding.rule {
+        // 上面已經處理掉了，這裡是為了讓 match 保持窮舉。
+        Rule::L001 => unreachable!(),
         Rule::L002 => " → 路徑斷了。用 add_connection 補上缺的那一段（經過 F5 要拆兩段）",
         Rule::L003 => " → 指到了不存在的東西。用 update 改掉那個參照",
         Rule::L004 => " → 用 update 改 expect，或補上少的那幾台機器",
@@ -385,6 +416,9 @@ fn how_to_fix(rule: Rule) -> &'static str {
         // 兩條路都要講。只說「人不能當目標」的話，Agent 最常見的亂試是
         // 把整條契約刪掉——而那條關係是真的存在的，只是方向寫反了。
         Rule::L013 => " → 人只能當來源。用 update 把兩端對調，或把目標改成對方的服務",
+        // 你是用**名字**在指涉東西的，所以撞名對你的影響比對人大得多：
+        // 「連到 pay-01」會安靜地接到先找到的那一個。
+        Rule::L014 => " → 兩個東西同名。用 update 改掉其中一個的 slug",
     }
 }
 
@@ -410,12 +444,14 @@ fn with_lint_delta(ws: &mut dyn Workspace, edit: &Edit, done: &str) -> Result<St
         out.push_str("\n沒有多出任何問題。");
     } else {
         out.push_str(&format!("\n但多出 {} 項問題：", introduced.len()));
+        // 用改完之後的專案分類——這些發現描述的就是改完的狀態。
+        let now = ws.project().unwrap();
         for f in introduced {
             out.push_str(&format!(
                 "\n- {} {}{}",
                 f.rule.code(),
                 f.detail,
-                how_to_fix(f.rule)
+                how_to_fix(now, f)
             ));
         }
     }
@@ -686,7 +722,9 @@ fn delete_preview(
                     "\n- {} {}{}",
                     f.rule.code(),
                     f.detail,
-                    how_to_fix(f.rule)
+                    // 只有刪之前那份專案可用。分不出來時 fix_for 回 None，
+                    // 退回一句通用的話——不會亂講。
+                    how_to_fix(project, f)
                 ));
             }
             if !wants_cascade {
@@ -889,7 +927,68 @@ fn build_connection(project: &Project, env_slug: &str, item: &Value) -> Result<E
 // ── 把 fields 填進 Resource ──────────────────────────────────────
 
 /// 只動有填的欄位。沒填的維持原樣——`update` 就靠這個做到「只改一部分」。
+/// 每種資源收哪些欄位。**唯一的一份**——`fill` 照著擋，錯誤訊息照著列。
+///
+/// 順序跟 `list()` 裡的說明一致，這樣 Agent 看到的兩份是同一份。
+fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
+    match resource {
+        Resource::Person(_) => &["slug", "name"],
+        Resource::System(_) => &["slug", "name", "external"],
+        Resource::Container(_) => &["slug", "name", "system"],
+        Resource::EndpointDef { .. } => &["owner", "slug", "protocol"],
+        Resource::Relationship(_) => &["slug", "purpose", "from", "to", "to_endpoint"],
+        Resource::Environment(_) => &["slug", "name"],
+        Resource::Node { .. } => &["environment", "slug", "kind", "within"],
+        Resource::Infra { .. } => &["environment", "slug"],
+        Resource::InfraEndpoint { .. } => &["environment", "owner", "slug", "address", "protocol"],
+        // 服務實體只有 `update` 走得到（建立走 create_nodes）。**不列
+        // `environment` 與 `node`**：`fill` 沒有讀它們，列上去等於宣稱
+        // 收得下卻還是忽略——那跟原本的坑一模一樣，只是換個講法。
+        // 想把服務實體搬到別台機器上，目前 MCP 做不到。
+        Resource::Instance { .. } => &["slug", "container", "standalone"],
+        Resource::SystemInstance { .. } => &[
+            "environment",
+            "slug",
+            "system",
+            "standalone",
+            "address",
+            "endpoint",
+        ],
+    }
+}
+
+/// 把值填進去。
+///
+/// # ⚠️ 不認得的欄位一定要報錯
+///
+/// 這裡原本只讀認得的鍵，其餘**靜靜忽略**。於是 Agent 打錯一個字
+/// （`adress`、`standalon`、給機器一個 `name`）就是：欄位沒進去、
+/// 沒有任何錯誤、回一句「建好了」。
+///
+/// 對人來說那只是要重來一次；對 Agent 來說它會**照著往下走**，
+/// 而錯誤要到很後面才以「lint 說缺位址」的形式冒出來，那時它已經
+/// 完全不知道是哪一步的問題了。
+///
+/// 這也正是這個 crate 開頭寫的原則：錯誤一律附上候選。
 fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<(), String> {
+    if let Some(map) = fields.as_object() {
+        let accepted = accepted_fields(resource);
+        // `kind` 是 create 用來挑資源種類的，不是欄位；它會跟著整包送進來。
+        let unknown: Vec<&str> = map
+            .keys()
+            .map(String::as_str)
+            .filter(|k| *k != "kind" && !accepted.contains(k))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(format!(
+                "{} 認不得這些欄位：{}。它收的是：{}",
+                resource.kind_name(),
+                unknown.join("、"),
+                accepted.join("、"),
+            ));
+        }
+    }
+
     let s = |k: &str| opt_str(fields, k).map(str::to_string);
 
     match resource {
@@ -1011,6 +1110,12 @@ fn fill(resource: &mut Resource, fields: &Value, project: &Project) -> Result<()
             if let Some(v) = fields.get("standalone").and_then(Value::as_bool) {
                 instance.standalone = v
             }
+            // 位址。**這是這種元素存在的唯一理由**——「金流在 prod 打哪個
+            // 位址」。少了它，Agent 建出來的是一個空殼，而 lint 會立刻叫
+            // L001，它卻沒有任何工具解得掉。
+            if let Some(address) = s("address") {
+                set_system_address(instance, project, &address, s("endpoint").as_deref())?;
+            }
         }
     }
     Ok(())
@@ -1071,6 +1176,83 @@ fn endpoint_def_id(project: &Project, to: &RelationshipEnd, slug: &str) -> Resul
                 slugs(defs.iter().map(|d| &d.slug))
             )
         })
+}
+
+/// 把位址寫到外部系統實體身上。
+///
+/// # 為什麼位址不是一個欄位，而要經過接點
+///
+/// 位址住在 `Endpoint` 上，外部系統實體與服務實體一樣。所以 `address:` 是
+/// 一層方便的說法——底下要落到某一個接點。
+///
+/// 一個外部系統通常只有一兩個接點（一個 API 而已），所以省略 `endpoint`
+/// 時就挑它唯一的那一個。有好幾個又不講的話**不猜**，把名字列出來——
+/// 猜錯的話位址會落到錯的接點上，而那條連線接不上時症狀是「明明填了位址
+/// 卻還是說缺位址」，非常難查。
+///
+/// # `def` 從對應的那個**系統**身上找
+///
+/// 服務實體看它對應的服務，外部系統實體看它對應的系統。這個不對稱是模型
+/// 定義的（見 `docs/domain-model.md`），也是這一段最容易寫錯的地方。
+fn set_system_address(
+    instance: &mut loom_core::environment::SoftwareSystemInstance,
+    project: &Project,
+    address: &str,
+    endpoint: Option<&str>,
+) -> Result<(), String> {
+    let system = project
+        .logical
+        .systems
+        .iter()
+        .find(|s| s.id == instance.system)
+        .ok_or("這個外部系統實體還沒有對應到任何系統，先填 system")?;
+
+    let def = match (endpoint, system.endpoints.as_slice()) {
+        (Some(want), _) => system
+            .endpoints
+            .iter()
+            .find(|d| d.slug == want)
+            .ok_or_else(|| {
+                format!(
+                    "系統 {} 身上沒有接點定義 {want}。有的是：{}",
+                    system.slug,
+                    slugs(system.endpoints.iter().map(|d| &d.slug))
+                )
+            })?,
+        (None, [only]) => only,
+        (None, []) => {
+            return Err(format!(
+                "系統 {} 還沒有定義任何接點，位址無處可放。\
+                 先用 create 建一個 endpoint_def（owner 填 {}）。",
+                system.slug, system.slug
+            ));
+        }
+        (None, many) => {
+            return Err(format!(
+                "系統 {} 有好幾個接點定義，請用 `endpoint` 指定要填哪一個：{}",
+                system.slug,
+                slugs(many.iter().map(|d| &d.slug))
+            ));
+        }
+    };
+
+    // 已經有對應到這個定義的接點就改它，沒有才新增——不然重跑一次
+    // update 會長出第二個位址一樣的接點。
+    match instance
+        .endpoints
+        .iter_mut()
+        .find(|e| e.def.as_ref() == Some(&def.id))
+    {
+        Some(existing) => existing.address = Some(address.into()),
+        None => instance.endpoints.push(loom_core::environment::Endpoint {
+            id: Id::generate(),
+            slug: def.slug.clone(),
+            def: Some(def.id.clone()),
+            protocol: def.protocol,
+            address: Some(address.into()),
+        }),
+    }
+    Ok(())
 }
 
 fn protocol(v: &str) -> Result<Protocol, String> {
