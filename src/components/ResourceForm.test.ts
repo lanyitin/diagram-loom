@@ -196,3 +196,79 @@ describe('選單的規矩', () => {
     expect(source.match(/<Picker/g) ?? []).toHaveLength(10)
   })
 })
+
+describe('挑了接點定義', () => {
+  let store: ReturnType<typeof useProject>
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    store.snapshot!.project.logical.systems[1]!.endpoints = [
+      { id: 'ed-jdbc', slug: 'sql', protocol: 'jdbc' },
+      { id: 'ed-https', slug: 'https', protocol: 'tcp' },
+    ] as never
+    store.editingResource = {
+      resource: {
+        systemInstance: {
+          environment: 'env-prod',
+          instance: { id: 'si-1', slug: 'sso-prod', system: 's-sso', endpoints: [] },
+        },
+      } as unknown as Resource,
+      isNew: true,
+      kind: '外部系統實體',
+    }
+  })
+
+  /** 新增一個接點，然後挑第 n 個定義。 */
+  async function pick(w: ReturnType<typeof mount>, n: number) {
+    await w.find('.sub .link').trigger('click')
+    const picker = w.findAllComponents({ name: 'Picker' }).at(-1)!
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[n]!.trigger('click')
+    return (w.vm as unknown as {
+      editingInstance: { holder: { endpoints: { slug: string; def: string; protocol: string }[] } }
+    }).editingInstance.holder.endpoints[0]!
+  }
+
+  it('協定要跟著換成那個定義的協定', async () => {
+    // 不同步的話，一個對應到 JDBC 定義的接點會一直記著 tcp——存下來的資料
+    // 跟它自己指的定義不一致。而且沒有畫面看得出來，只有匯入試算表的
+    // 差異比對會印出來，所以會安靜地錯很久。
+    const w = mount(ResourceForm)
+    // 第 0 項是 allowEmpty 的「（沒對應到契約）」，所以 sql 是第 1 項。
+    const endpoint = await pick(w, 1)
+
+    expect(endpoint.def).toBe('ed-jdbc')
+    expect(endpoint.protocol).toBe('jdbc')
+  })
+
+  it('名字空著就代填，打過的不動', async () => {
+    const w = mount(ResourceForm)
+    const endpoint = await pick(w, 1)
+    expect(endpoint.slug).toBe('sql')
+
+    // 改成自己的名字之後再挑別的定義，名字不該被蓋掉。
+    endpoint.slug = '我自己取的'
+    const picker = w.findAllComponents({ name: 'Picker' }).at(-1)!
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[2]!.trigger('click')
+
+    expect(endpoint.slug).toBe('我自己取的')
+    expect(endpoint.protocol).toBe('tcp')
+  })
+
+  it('清掉對應時不要動協定與名字', async () => {
+    // 「沒對應到契約」是合法狀態。清掉的時候把協定重設會是另一種安靜的改動。
+    const w = mount(ResourceForm)
+    const endpoint = await pick(w, 1)
+
+    const picker = w.findAllComponents({ name: 'Picker' }).at(-1)!
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[0]!.trigger('click')   // （沒對應到契約）
+
+    expect(endpoint.def).toBeNull()
+    expect(endpoint.protocol).toBe('jdbc')
+    expect(endpoint.slug).toBe('sql')
+  })
+})

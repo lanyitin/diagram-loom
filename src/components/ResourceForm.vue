@@ -120,6 +120,26 @@ function addEndpoint() {
   ]
 }
 
+/**
+ * 挑了對應的接點定義。
+ *
+ * **協定要跟著換。** `addEndpoint` 產生的接點一律先是 `tcp`，因為那時候還
+ * 不知道要對應到誰；挑好之後不同步的話，一個對應到 JDBC 定義的接點會一直
+ * 記著 `tcp`——存下來的資料跟它自己指的定義不一致。
+ *
+ * 這件事沒有畫面看得出來（協定沒有欄位可以編，也不進 lint），只有匯入
+ * 試算表時的差異比對會印出來——所以它會安靜地錯很久。
+ *
+ * 名字則只在**還空著**的時候才代填。使用者打過的東西不要動。
+ */
+function pickDef(endpoint: EndpointDraft, def: Id | null) {
+  endpoint.def = def
+  const chosen = defsOfOwner.value.find((d) => d.value === def)
+  if (!chosen) return
+  endpoint.protocol = chosen.hint ?? endpoint.protocol
+  if (!endpoint.slug.trim()) endpoint.slug = chosen.label
+}
+
 function removeEndpoint(id: Id) {
   const holder = editingInstance.value?.holder
   if (!holder) return
@@ -177,9 +197,12 @@ const endpointOwners = computed(() => [
 /**
  * 契約的一端：三種來源攤成一個選單，選了就換掉那一端的形狀。
  *
- * 「人」兩端都列得出來。`RelationshipEnd::Person` 的註解說它**只該出現在
- * 來源端**，但那是意圖不是規則——Rust 沒有擋，lint 也沒有對應的條目。
- * 在這裡自己擋掉等於前端多一套規則；該做的是去 `loom-core` 加一條 lint。
+ * 「人」兩端都列得出來，**這裡不自己擋**——擋掉等於前端多一套規則。
+ * 規則在 Rust，而且是兩層：`resource::write_into` 在建立與修改時直接拒絕
+ * （`EditError::PersonAsTarget`），L013 則負責既有資料與手改的 YAML。
+ *
+ * 所以使用者真的選了「人」當目標時，會拿到 Rust 給的那句話，
+ * 而不是一個安靜地不能按的選項。
  */
 const endChoices = computed(() => [
   ...people.value.map((p) => ({ value: `person:${p.id}`, label: p.slug, group: '人' })),
@@ -457,7 +480,7 @@ function write(path: string, v: unknown) {
               allow-empty
               empty-label="（沒對應到契約）"
               placeholder="對應哪個接點定義…"
-              @update:model-value="e.def = $event"
+              @update:model-value="pickDef(e, $event)"
             />
             <button type="button" class="icon del" title="拿掉這個接點" @click="removeEndpoint(e.id)">✕</button>
           </div>
