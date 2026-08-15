@@ -63,8 +63,27 @@ vi.mock('./lib/bindings', () => ({
     connectionChoices: vi.fn(),
     previewBatch: vi.fn(),
     resourceTables: vi.fn(),
-    diagramLinks: vi.fn(),
+    diagramLinks: vi.fn().mockResolvedValue({ status: 'ok', data: [] }),
     diagramContracts: vi.fn(),
+    // 畫布現在是真的會建起來的（以前那個 iframe 在測試裡永遠不會 ready），
+    // 所以「圖」那一頁一掛載就會去問這幾個。
+    // 給預設值：回 undefined 的話，元件讀 `res.status` 會炸在 Promise 裡，
+    // 而那種錯誤不會讓測試變紅，只會變成一行「unhandled rejection」。
+    diagramCatalog: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: { diagrams: [], model: '', details: 'diagram-loom-details' },
+    }),
+    diagramRead: vi.fn(),
+    diagramSave: vi.fn(),
+    diagramCreate: vi.fn(),
+    diagramFocus: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: { contracts: [], highlight: { shapes: [], connections: [] }, shapes: 0 },
+    }),
+    diagramTargets: vi.fn().mockResolvedValue({
+      status: 'ok',
+      data: { shapes: [], connections: [], guesses: [] },
+    }),
     blankResource: vi.fn(),
     createProject: vi.fn(),
     newWindow: vi.fn(),
@@ -403,13 +422,11 @@ describe('視窗組裝', () => {
   })
 
   it('快捷鍵不再自己聽 keydown', async () => {
-    // ⚠️ 這條守的是一個安靜的 bug：draw.io 跑在 `drawio://` 這個**不同
-    // origin 的 iframe** 裡，跨 origin 的 iframe 不會把 keydown 冒泡給
-    // 父文件。所以焦點在畫布裡的時候，掛在 window 上的 ⌘S **完全沒有
-    // 存到東西**，而畫面上沒有任何跡象。
+    // ⚠️ 這條當初守的是一個安靜的 bug：draw.io 跑在跨 origin 的 iframe 裡，
+    // keydown 不會冒泡給父文件，所以掛在 window 上的 ⌘S 完全沒有存到東西。
     //
-    // 原生選單的 accelerator 由系統派送，不管焦點在哪都會到。
-    // 兩份實作留著只會漂，所以那個監聽整個拿掉了。
+    // **那個 iframe 已經不在了**，但這條要留著，理由換成：畫布自己在
+    // document 上聽鍵盤，這裡再聽一份就是兩個人搶同一個組合鍵。
     store.snapshot = fakeSnapshot({ undoLabel: '修改用途' })
     const undo = vi.spyOn(store, 'undo').mockResolvedValue(undefined)
     const save = vi.spyOn(store, 'save').mockResolvedValue(undefined)

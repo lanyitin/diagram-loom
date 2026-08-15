@@ -13,10 +13,11 @@
 //! Tauri 的設定檔不接受任何未知欄位，所以那份設定沒辦法寫註解——備註只能放這裡。
 //!
 //! 值得記一筆：**`script-src` 不需要 `'unsafe-inline'` 也不需要 `'unsafe-eval'`**。
-//! draw.io 跑在自己的 origin（`drawio://`）上，不受主視窗這份 CSP 管轄——
-//! 那是自訂協定換來的好處，不是漏掉的設定。
 //!
-//! `frame-src drawio:` 是內嵌 draw.io 需要的；`img-src` 的 `blob:` 是匯出圖片用的。
+//! ⚠️ 以前這裡還有一條 `frame-src drawio:`，因為畫布是一個內嵌 draw.io 的
+//! iframe。**畫布換成自己跑 maxGraph 之後那條沒有意義了**，連帶那個
+//! `drawio://` 自訂協定與 152 MB 的 vendor 一起拿掉了。
+//! `img-src` 的 `blob:` 留著，匯出圖片會用到。
 //!
 //! # 型別同步
 //!
@@ -24,7 +25,6 @@
 //! 寫進 `src/lib/bindings.ts`。**不要手改那個檔**——`mise run bindings`
 //! 會重新產生，`mise run check` 會檢查它是不是最新的。
 
-pub mod drawio;
 pub mod mcp;
 pub mod menu;
 
@@ -910,60 +910,6 @@ fn mcp_config(app: tauri::AppHandle) -> Result<Option<String>, Failure> {
     mcp::config_snippet(&app).map_err(Into::into)
 }
 
-/// 供應一個 draw.io 的靜態檔。
-///
-/// 判斷（路徑安不安全、是什麼型別）在 [`drawio`]，可以用 `cargo test` 驗。
-/// 這裡只做轉接：找到根目錄、讀檔、包成回應。
-fn serve_drawio(
-    app: &tauri::AppHandle,
-    request: tauri::http::Request<Vec<u8>>,
-) -> tauri::http::Response<Vec<u8>> {
-    let not_found = || {
-        tauri::http::Response::builder()
-            .status(404)
-            .body(Vec::new())
-            .expect("404 一定組得起來")
-    };
-
-    let Some(root) = drawio_root(app) else {
-        return not_found();
-    };
-    let Some(path) = drawio::resolve(&root, request.uri().path()) else {
-        return not_found();
-    };
-    let Ok(bytes) = std::fs::read(&path) else {
-        return not_found();
-    };
-
-    tauri::http::Response::builder()
-        .header("Content-Type", drawio::mime_of(&path))
-        // 檔案在磁碟上不會變，而且每次開圖會抓上百個檔。
-        .header("Cache-Control", "public, max-age=31536000, immutable")
-        .body(bytes)
-        .unwrap_or_else(|_| not_found())
-}
-
-/// draw.io 那包在哪。
-///
-/// 打包之後在 app bundle 的資源區；開發時在 `source/vendor/drawio`。
-/// **兩個都試**，因為兩種情況都要能跑，而分不出來的時候症狀是
-/// 「編輯器一片空白」——那看不出是找不到檔案。
-fn drawio_root(app: &tauri::AppHandle) -> Option<PathBuf> {
-    use tauri::Manager;
-
-    let bundled = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|d| d.join("vendor/drawio"));
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vendor/drawio");
-
-    bundled
-        .into_iter()
-        .chain(std::iter::once(dev))
-        .find(|p| p.join("index.html").is_file())
-}
-
 /// 產生 TS 型別用的 builder。`main.rs` 與型別產生器共用同一份，
 /// 所以不可能出現「command 加了但型別沒更新」。
 pub fn builder() -> Builder<tauri::Wry> {
@@ -1057,9 +1003,6 @@ pub fn run() {
         // **回 Ok 但什麼也沒發生**——實測過，選單列還是 Tauri 的預設那份。
         .menu(menu::build)
         // draw.io 的靜態檔。152 MB，不能放 frontendDist（會嵌進執行檔）。
-        .register_uri_scheme_protocol("drawio", |ctx, request| {
-            serve_drawio(ctx.app_handle(), request)
-        })
         .invoke_handler(builder.invoke_handler())
         // 視窗關掉就把它持有的專案放掉。
         //

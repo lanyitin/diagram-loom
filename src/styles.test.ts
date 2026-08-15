@@ -74,15 +74,27 @@ describe('版面在縮放之後不會破', () => {
   })
 })
 
-describe('內嵌的 draw.io 不吃我們的縮放', () => {
-  it('iframe 把 zoom 抵銷掉', () => {
-    // 真的踩過：`#app` 的 zoom 一路蓋到 iframe，而 draw.io 用絕對像素算
-    // 自己的面板寬度——右邊的格式面板被擠成一條，只剩幾個核取方塊。
-    //
-    // 它有自己的縮放（右下角、⌘＋），所以不需要我們這一份。
-    const { css } = styleBlocks().find((b) => b.file === 'DiagramView.vue')!
-    expect(css, 'draw.io 的 iframe 要把介面縮放抵銷掉').toMatch(
-      /\.editor\s*\{[^}]*zoom:\s*var\(--unzoom\)/,
-    )
+describe('畫布不再是一個 iframe', () => {
+  /**
+   * 這一條以前守的是相反的東西：draw.io 的 iframe 必須用 `--unzoom` 把介面
+   * 縮放抵銷掉，否則它的格式面板會被擠成一條（真的踩過）。
+   *
+   * 換成自己跑 maxGraph 之後**那個問題整個消失了**——畫布跟我們在同一個
+   * 文件裡，`zoom` 對它跟對別的元件一樣。所以改成守反面：不要再有 iframe，
+   * 也不要再有為了它而存在的抵銷。
+   */
+  it('圖不再用 iframe 畫', () => {
+    const files = readdirSync(join(import.meta.dirname, 'components'))
+      .filter((f) => f.endsWith('.vue'))
+      .filter((f) => /<iframe/.test(readFileSync(join(import.meta.dirname, 'components', f), 'utf8')))
+    expect(files).toEqual([])
+  })
+
+  it('沒有人再需要 --unzoom', () => {
+    // 留著的話，下一個讀的人會以為還有東西在對抗介面縮放。
+    const 用了的 = styleBlocks()
+      .filter(({ css }) => /var\(--unzoom\)/.test(css))
+      .map(({ file }) => file)
+    expect(用了的).toEqual([])
   })
 })
