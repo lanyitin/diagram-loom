@@ -55,6 +55,13 @@ impl std::error::Error for StoreError {}
 pub trait FileStore {
     fn read(&self, path: &str) -> Result<String, StoreError>;
     fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError>;
+    /// 刪掉一個檔案。**檔案本來就不在也算成功**——呼叫端要的是
+    /// 「這個路徑之後不存在」，而不是「剛剛真的刪了一次」。
+    ///
+    /// 目前唯一的用途是改名（見 [`crate::diagrams::migrate`]）：
+    /// 寫到新路徑之後，舊的那份要消失，不然資料夾裡會留下一個
+    /// 看起來還有效、實際上沒有人管的 `.drawio`。
+    fn remove(&mut self, path: &str) -> Result<(), StoreError>;
 }
 
 /// 真正的磁碟。`root` 底下的相對路徑。
@@ -105,6 +112,18 @@ impl FileStore for FsStore {
             message: e.to_string(),
         })
     }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        match fs::remove_file(self.resolve(path)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(StoreError {
+                path: path.to_string(),
+                kind: StoreErrorKind::Other,
+                message: e.to_string(),
+            }),
+        }
+    }
 }
 
 /// 記憶體版本。測試用，也可以拿來「先算出會寫成什麼，再讓使用者確認」。
@@ -145,6 +164,11 @@ impl FileStore for MemoryStore {
 
     fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError> {
         self.files.insert(path.to_string(), contents.to_string());
+        Ok(())
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        self.files.remove(path);
         Ok(())
     }
 }

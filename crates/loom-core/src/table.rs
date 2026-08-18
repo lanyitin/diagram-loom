@@ -68,6 +68,18 @@ pub struct Row {
     /// 契約的顯示名。找不到對應契約時是 `None`（那本身就是 L003）。
     pub serves_slug: Option<String>,
     pub purpose: String,
+    /// 使用者的備註。跟 `purpose` 分開，理由見
+    /// [`Connection::memo`](crate::environment::Connection::memo)。
+    ///
+    /// # 為什麼表格一定要帶著它
+    ///
+    /// 備註是這個模型裡**唯一沒有規則會回報**的欄位：寫錯了 lint 不會叫。
+    /// 所以它的回報路徑只有表格。讀不回來的話，寫的人（包含 Agent）
+    /// 會以為沒寫成功，然後再寫一次。
+    ///
+    /// 資源那幾張表由 [`crate::inventory::tables`] 統一補上這一欄，
+    /// 連線表是自己一份，所以要在這裡帶。
+    pub memo: String,
     /// 正常路徑還是備援路徑。畫面上用來區分——備援跟正常長得一樣的話，
     /// 讀的人分不出平常的資料流是哪幾條。
     pub kind: ConnectionKind,
@@ -133,6 +145,7 @@ pub fn rows(project: &Project) -> Vec<Row> {
                     .find(|r| r.id == conn.serves)
                     .map(|r| r.slug.clone()),
                 purpose: conn.purpose.clone(),
+                memo: conn.memo.clone(),
                 kind: conn.kind,
                 from: resolve_side(&index, env, &project.logical, &conn.from),
                 to: resolve_side(&index, env, &project.logical, &conn.to),

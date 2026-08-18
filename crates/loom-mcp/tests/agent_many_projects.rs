@@ -147,7 +147,7 @@ fn a_wrong_name_lists_what_is_actually_open() {
 
 #[test]
 fn every_tool_accepts_a_project_argument() {
-    // 少一個工具沒補上 `project`，症狀是「那個工具沒辦法指定專案」——
+    // 少一個工具沒補上 `scope.project`，症狀是「那個工具沒辦法指定專案」——
     // Agent 只會覺得莫名其妙。schema 由 `tool()` 統一補，這裡守住它。
     let list = tools::list();
     for t in list.as_array().expect("工具清單是陣列") {
@@ -155,10 +155,35 @@ fn every_tool_accepts_a_project_argument() {
         if !tools::needs_project(name) {
             continue;
         }
-        let props = &t["inputSchema"]["properties"];
+        let scope = &t["inputSchema"]["properties"]["scope"]["properties"];
         assert!(
-            props.get("project").is_some(),
-            "工具 {name} 的 schema 少了 project",
+            scope.get("project").is_some(),
+            "工具 {name} 的 schema 少了 scope.project",
         );
     }
+}
+
+#[test]
+fn the_old_top_level_project_argument_still_picks_the_right_one() {
+    // 形狀換成 `scope.project` 之後，舊 Agent 手上那份設定寫的還是舊名字。
+    // 收它的理由跟收單數 items 一樣：那一趟看起來完全正常，
+    // 擋下來的話它只會拿到「你沒說要動哪一個」，然後開始亂猜。
+    let (mut desks, open) = two_desks();
+
+    let new_shape = call(
+        &mut desks,
+        &open,
+        "describe",
+        json!({"scope": {"project": "payments"}}),
+    )
+    .unwrap();
+    let old_shape = call(
+        &mut desks,
+        &open,
+        "describe",
+        json!({"project": "payments"}),
+    )
+    .unwrap();
+
+    assert_eq!(new_shape, old_shape);
 }

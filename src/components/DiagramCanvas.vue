@@ -22,7 +22,7 @@ import { type Cell, type FitPlugin, Graph, InternalEvent, type UndoManager } fro
 
 import type { Shape } from '../lib/diagram'
 import type { Link } from '../lib/model'
-import { connecting, foldIcons, panAndZoom, paintGrid, undoStack, useElementValues } from '../lib/graph/canvas'
+import { centerOn, connecting, foldIcons, panAndZoom, paintGrid, undoStack, useElementValues } from '../lib/graph/canvas'
 import { layout } from '../lib/graph/layout'
 import { readXml, writeXml } from '../lib/graph/mxml'
 import { render } from '../lib/graph/render'
@@ -53,6 +53,16 @@ const undo = shallowRef<UndoManager | null>(null)
 
 /** 我們自己灌進去的變更不算「使用者改的」，否則一開圖就標成未存檔。 */
 let quiet = 0
+
+/**
+ * 重畫了幾次。
+ *
+ * 兩條路的速度差很多：讀存過的圖是同步的，從模型排版要等 elkjs。所以
+ * **後要求的那次可能先畫完**，而先要求的那次晚一步落地就把它蓋掉。
+ * 使用者看到的是「我打開自己排過版的圖，出來的卻是自動排的版」，
+ * 沒有任何訊息說明發生了什麼。
+ */
+let draws = 0
 
 let repaintGrid = () => {}
 
@@ -104,6 +114,8 @@ async function draw() {
   const g = graph.value
   if (!g) return
 
+  const mine = (draws += 1)
+
   // 灌進去的每一筆都不算使用者改的。給大一點——讀檔會產生好幾筆變更。
   quiet = 3
 
@@ -111,6 +123,8 @@ async function draw() {
     g.batchUpdate(() => readXml(g.getDataModel(), props.xml!))
   } else {
     const laid = await layout(props.shapes, props.links)
+    // 排版跑的時候又有人要求重畫，就讓新的那次說了算。
+    if (mine !== draws) return
     g.batchUpdate(() => render(g.getDataModel(), props.shapes, props.links, laid))
     emit('laid', laid.ms)
   }
@@ -128,9 +142,12 @@ function fit() {
   repaintGrid()
 }
 
-// 模型或檔案換了就重畫。**存過的圖不會因為模型變動而自動重產**——
+// 模型、連線或檔案換了就重畫。**存過的圖不會因為模型變動而自動重產**——
 // 那會洗掉使用者排好的版面，要不要重畫由他決定（見 `drawio-integration.md`）。
-watch(() => [props.shapes, props.xml], () => void draw(), { deep: false })
+//
+// ⚠️ `links` 一定要在裡面。少了它，掛上去那次會用「還沒拿到連線」的狀態畫完
+// 就不再動——而零條邊的排版是一整條直的，看起來像排版引擎壞了。
+watch(() => [props.shapes, props.links, props.xml], () => void draw(), { deep: false })
 
 /** 灌一次不算使用者改的變更。面板改樣式時包在這裡面。 */
 function silently(fn: () => void) {
@@ -144,6 +161,13 @@ defineExpose({
   fit,
   draw,
   silently,
+  /** 把某個形狀移到畫面正中間。搜尋用。 */
+  center: (cellId: string) => {
+    const g = graph.value
+    const moved = g ? centerOn(g, cellId) : false
+    if (moved) repaintGrid()
+    return moved
+  },
   /** 存檔用的那一份。**螢光筆要先擦掉**，不然 opacity 會被存進檔案。 */
   toXml: (meta: { id: string; name: string }) => {
     const g = graph.value

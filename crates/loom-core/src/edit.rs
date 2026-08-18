@@ -84,6 +84,28 @@ pub enum Edit {
         connection: Id,
         kind: ConnectionKind,
     },
+    /// 改一條連線的備註。
+    ///
+    /// # 為什麼它要自己一支，不能塞進 `SetPurpose`
+    ///
+    /// 備註與用途**是刻意分開的兩個欄位**（見
+    /// [`Connection::memo`](crate::environment::Connection::memo)）：L007 在看
+    /// `purpose`，而備註是規則管不到的話。合成一支的話，「等年底汰換」這種
+    /// 話會被寫進 lint 正在檢查的那個欄位，於是 L007 從此不再叫——
+    /// 而那是使用者最不會發現的一種失效。
+    ///
+    /// # 為什麼其他資源不需要這一支
+    ///
+    /// 它們的備註走 [`Edit::UpdateResource`]，因為它們都是
+    /// [`Resource`]。連線不是——它住在環境的
+    /// `connections` 裡，沒有統一的編輯表單。所以每一種「改連線的某個欄位」
+    /// 都得自己一支，這條與 `SetPurpose` / `SetExpect` / `SetConnectionKind`
+    /// 是同一族。
+    SetConnectionMemo {
+        environment: Id,
+        connection: Id,
+        memo: String,
+    },
     /// L001／L002 的修法：新增一條環境層連線。
     ///
     /// `id` 由 [`crate::connect::propose`] 先發好，不是在這裡產生——
@@ -169,6 +191,7 @@ impl Edit {
             Edit::SetExpect { .. } => "修改期望數量",
             Edit::SetStandalone { .. } => "標記刻意獨立",
             Edit::SetConnectionKind { .. } => "修改連線種類",
+            Edit::SetConnectionMemo { .. } => "修改連線備註",
             Edit::AddConnection { .. } => "新增連線",
             Edit::AddInstances { .. } => "批次建立機器",
             Edit::DeleteConnection { .. } => "刪除連線",
@@ -399,6 +422,23 @@ pub fn apply(project: &mut Project, edit: &Edit) -> Result<(), EditError> {
                 .find(|c| &c.id == connection)
                 .ok_or_else(|| EditError::NoSuchConnection(connection.clone()))?;
             conn.kind = *kind;
+            Ok(())
+        }
+
+        Edit::SetConnectionMemo {
+            environment,
+            connection,
+            memo,
+        } => {
+            let env = find_env(project, environment)?;
+            let conn = env
+                .connections
+                .iter_mut()
+                .find(|c| &c.id == connection)
+                .ok_or_else(|| EditError::NoSuchConnection(connection.clone()))?;
+            // 空字串就是清掉。備註沒有規則在看，所以清掉不會有任何東西叫——
+            // 這也是為什麼它一定要能清：寫錯了沒有第二條路可以救。
+            conn.memo = memo.clone();
             Ok(())
         }
 

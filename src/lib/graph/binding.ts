@@ -69,11 +69,29 @@ export function boundShapes(model: GraphDataModel): { id: string; label: string 
 export function unboundShapes(model: GraphDataModel): UnboundShape[] {
   return allCells(model)
     .filter((cell) => !attribute(cell, 'loomId') && !attribute(cell, 'loomKind'))
-    .map((cell) => ({
-      cell: cell.id ?? '',
-      label: plain(labelOf(cell)),
-      edge: cell.isEdge(),
-    }))
+    .map(described)
+}
+
+/**
+ * 圖上**每一個**形狀的文字，照圖上的順序。
+ *
+ * [`unboundShapes`] 是它的一個子集。分開是因為問的是兩件事：那邊問「還有
+ * 什麼沒交代」，這裡問「圖上有什麼」——搜尋要找的是後者，包括已經指定過的。
+ *
+ * 順序照 [`allCells`]，也就是圖上的順序。搜尋要能「下一個、下一個」地走，
+ * 而那個順序必須每次都一樣，否則按兩次會跳回原地。
+ */
+export function shapeLabels(model: GraphDataModel): UnboundShape[] {
+  return allCells(model).map(described)
+}
+
+/** 一個 cell 在清單上長什麼樣。兩個出口共用，不然遲早只有一邊會被修到。 */
+function described(cell: Cell): UnboundShape {
+  return {
+    cell: cell.id ?? '',
+    label: plain(labelOf(cell)),
+    edge: cell.isEdge(),
+  }
 }
 
 /** 圖上的文字：值是元素就讀 `label`，是字串就用它自己。 */

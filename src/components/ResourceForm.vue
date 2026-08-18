@@ -18,7 +18,7 @@
 import { computed, ref, watch } from 'vue'
 import { useProject } from '../lib/store'
 import Picker from './Picker.vue'
-import type { Id, Resource } from '../lib/model'
+import type { Id, Kind, Resource } from '../lib/model'
 
 const store = useProject()
 
@@ -268,6 +268,42 @@ async function submit() {
   await store.applyEdit(pending.isNew ? { addResource: r } : { updateResource: r })
 }
 
+/**
+ * 每一種資源的備註住在哪。
+ *
+ * # 為什麼是一張表，不是十一個分支各放一個 `<label>`
+ *
+ * 抄十一份的話，下一個新增的資源種類一定會漏掉一份——而漏掉的症狀是
+ * 「表格上看得到、MCP 寫得進去，只有人在畫面上填不了」：沒有錯誤訊息、
+ * 沒有規則會叫，只有使用者自己發現。**那正是這一欄要補的東西本身。**
+ *
+ * 對照的是 Rust 的 `Resource::memo()`——那邊也是攤開一次就好。
+ *
+ * 型別寫成 `Record<Kind, string>`：`Kind` 是 bindings 從 Rust 的
+ * `resource::Kind` 產的，多一種資源時這裡少一個鍵就編不過。
+ */
+const MEMO_PATHS: Record<Kind, string> = {
+  person: 'person.memo',
+  system: 'system.memo',
+  container: 'container.memo',
+  endpointDef: 'endpointDef.def.memo',
+  relationship: 'relationship.memo',
+  environment: 'environment.memo',
+  node: 'node.node.memo',
+  infra: 'infra.node.memo',
+  infraEndpoint: 'infraEndpoint.endpoint.memo',
+  instance: 'instance.instance.memo',
+  systemInstance: 'systemInstance.instance.memo',
+}
+
+/** 手上這份 draft 的備註在哪。`Resource` 是單鍵的聯集，物件上只會有一把鑰匙。 */
+const memoPath = computed(() => {
+  const d = draft.value
+  if (!d) return undefined
+  const kind = (Object.keys(MEMO_PATHS) as Kind[]).find((k) => k in d)
+  return kind ? MEMO_PATHS[kind] : undefined
+})
+
 /** `v-model` 綁巢狀的 optional 欄位很吵，用兩個小工具收掉。 */
 function read(path: string): string {
   return path.split('.').reduce<never>((o, k) => (o as never)?.[k], draft.value as never) ?? ''
@@ -496,6 +532,24 @@ function write(path: string, v: unknown) {
         </label>
       </template>
 
+      <!--
+        備註：**十一種資源都有**，所以放在 if/else 鏈之後寫一次。
+
+        抄十一份的話遲早只有幾份會被修到，而漏掉的那一種症狀是「表格上看得到、
+        MCP 寫得進去、人填不了」——完全沒有錯誤訊息。理由同上面「接點與位址」那段。
+
+        放最後：它是自由文字、長度不受控，不該把有結構的欄位擠出畫面。
+        跟 `inventory::tables` 把備註放每張表的最後一欄是同一個決定。
+      -->
+      <label v-if="memoPath">備註
+        <textarea
+          :value="read(memoPath)"
+          rows="3"
+          placeholder="規則管不到的話寫在這裡"
+          @input="write(memoPath, ($event.target as HTMLTextAreaElement).value)"
+        />
+      </label>
+
       <footer>
         <span class="muted hint">按錯了可以按 ⌘Z 復原</span>
         <span class="grow" />
@@ -556,7 +610,36 @@ footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 }
 .subhead { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
 .subhead strong { flex: 1; }
-.ep { display: grid; grid-template-columns: 1fr 1.3fr 1.2fr auto; gap: 6px; align-items: center; }
+/*
+ * 接點的一列：名字、位址、對應的接點定義、拿掉。
+ *
+ * # `minmax(0, …)` 不能省
+ *
+ * `fr` 的自動最小值是 min-content，而 `<input>` 的 min-content 是它的
+ * `size`（預設 20 個字）。所以前兩欄會硬撐到各約 180px，把第三欄擠成
+ * **一條縫**——那個 Picker 會變成一個按不到的細長方塊，它的選單跟著只有
+ * 一個字寬，選項一個字一行往下排。
+ *
+ * 症狀看起來像 Picker 壞了，其實是這一行沒寫 `minmax(0, …)`。
+ */
+.ep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.2fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+/* 格線放行之後，格子裡的東西也要肯縮。 */
+.ep > * { min-width: 0; }
+/*
+ * 備註是這張表單裡唯一的多行輸入。
+ *
+ * `user-select: text` 不能省：`styles.css` 對 body 下了 `user-select: none`
+ * （這是桌面應用不是網頁），而它只替 `input[type=text]` 解開。少了這一行，
+ * 使用者**選不到自己剛打的字**——複製貼上、雙擊選字全部失效，
+ * 而畫面上看起來完全正常。
+ */
+textarea { font: inherit; user-select: text; resize: vertical; }
+
 .link { background: none; border: 0; padding: 0; color: var(--warp); cursor: pointer; font-size: 11.5px; }
 .check { display: flex; flex-direction: row; align-items: center; gap: 6px; }
 .check input { accent-color: var(--warp); flex: none; }

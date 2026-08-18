@@ -129,6 +129,63 @@ function zoomAt(graph: Graph, evt: WheelEvent, up: boolean): void {
 }
 
 /**
+ * 把某個形狀移到畫面正中間。
+ *
+ * # ⚠️ 不能用 maxGraph 的 `scrollCellToVisible`
+ *
+ * 那一支底下是 `scrollRectToVisible`，而它動的是**容器的捲軸**
+ * （`scrollLeft` / `scrollTop`）。這個畫布沒有捲軸——平移是改
+ * `view.translate`（見 [`panAndZoom`]）。所以呼叫它會**安靜地什麼都不做**：
+ * 沒有錯誤、沒有位移，看起來就是「搜尋壞了」。
+ *
+ * 所以自己算。除以 `scale` 的理由跟 [`panAndZoom`] 裡滾輪那一段一樣：
+ * `translate` 是**圖座標**，而我們要走的是一段**螢幕**距離。
+ *
+ * 找不到那個 cell，或它還沒被畫出來（`getState` 是 `null`）時什麼都不做——
+ * 那是合法的：圖剛換過、還沒 validate 完。
+ */
+export function centerOn(graph: Graph, cellId: string): boolean {
+  const cell = graph.getDataModel().getCell(cellId)
+  if (!cell) return false
+
+  const view = graph.getView()
+  const state = view.getState(cell)
+  if (!state) return false
+
+  const box = graph.container
+  const t = view.getTranslate()
+  const next = centered(
+    { x: t.x, y: t.y },
+    { x: state.getCenterX(), y: state.getCenterY() },
+    { width: box.clientWidth, height: box.clientHeight },
+    view.scale,
+  )
+  view.setTranslate(next.x, next.y)
+  return true
+}
+
+/**
+ * 要把畫面移到哪，才能讓 `on`（**螢幕座標**）落在容器正中間。
+ *
+ * 抽成純函式是因為這段算式錯了不會報錯——它只是移到一個奇怪的地方，
+ * 而「奇怪」在一張幾百個形狀的圖上看起來跟「沒動」差不多。
+ *
+ * ⚠️ **一定要除以 `scale`。** `translate` 是圖座標，而 `on` 與容器尺寸都是
+ * 螢幕像素。少了它，放大之後移動距離會等比例地過頭。
+ */
+export function centered(
+  translate: { x: number; y: number },
+  on: { x: number; y: number },
+  box: { width: number; height: number },
+  scale: number,
+): { x: number; y: number } {
+  return {
+    x: translate.x + (box.width / 2 - on.x) / scale,
+    y: translate.y + (box.height / 2 - on.y) / scale,
+  }
+}
+
+/**
  * 背景格線。
  *
  * maxGraph **沒有內建可見的格線**（`setGridEnabled` 只管吸附）。

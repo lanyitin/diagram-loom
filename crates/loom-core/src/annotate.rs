@@ -27,9 +27,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::diagrams::DiagramKind;
 use crate::environment::Environment;
 use crate::id::Id;
-use crate::reconcile::{ElementKind, model_elements};
+use crate::reconcile::{ElementKind, elements_for};
 use crate::slug::slugify;
 
 /// 圖上一個沒有 `loomId` 的形狀。由 JS 從 XML 挖出來。
@@ -95,14 +96,29 @@ pub struct Annotation {
 ///
 /// 線只能指給連線，框只能指給元素。混在一起的話，使用者可以把一個方框指成
 /// 一條連線——那在對帳時會變成一個永遠對不上的東西，而且看不出是怎麼來的。
-pub fn annotate(env: &Environment, bound: &[Id], shapes: &[UnboundShape]) -> Annotation {
+pub fn annotate(
+    logical: &crate::logical::Logical,
+    env: &Environment,
+    kind: DiagramKind,
+    bound: &[Id],
+    shapes: &[UnboundShape],
+) -> Annotation {
     let taken: BTreeSet<&Id> = bound.iter().collect();
 
     let mut boxes: Vec<Target> = Vec::new();
     let mut connections: Vec<Target> = Vec::new();
 
-    // 順序沿用 model_elements：站點 → 機器 → 服務實體。那是使用者讀圖的順序。
-    for element in model_elements(env) {
+    // 「這種圖的模型側是什麼」問 `elements_for`，不在這裡自己判斷一次——
+    // 弱檢查問的是同一件事，兩份會漂移成「指得到、卻被說模型裡沒有」。
+    //
+    // 簡圖多給邏輯層。詳圖不給，是因為詳圖的意思是「這個環境實際跑成什麼樣」，
+    // 一個形狀剛好一個環境層元素；讓它指到母版等於說「這個框代表那一整群」，
+    // 而 `reconcile` 的「一個 `loomId` ↔ 一個元素」就被繞過去了。
+    let elements = elements_for(logical, env, kind);
+
+    // 順序沿用來源：邏輯層由外往內，環境層是站點 → 機器 → 服務實體。
+    // 那是使用者讀圖的順序。
+    for element in elements {
         if taken.contains(&element.id) {
             continue;
         }
@@ -111,7 +127,13 @@ pub fn annotate(env: &Environment, bound: &[Id], shapes: &[UnboundShape]) -> Ann
             kind: element.kind,
             label: element.label,
         };
-        if target.kind == ElementKind::Connection {
+        // 線只能指給線、框只能指給框。混在一起的話，使用者可以把一個方框
+        // 指成一條連線——那在對帳時會變成一個永遠對不上的東西，而且看不出
+        // 是怎麼來的。**契約算線**：它是邏輯層的那一條。
+        if matches!(
+            target.kind,
+            ElementKind::Connection | ElementKind::Relationship
+        ) {
             connections.push(target);
         } else {
             boxes.push(target);
@@ -216,6 +238,23 @@ fn overlaps(label: &str, target: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logical::Logical;
+
+    /// 詳圖的情境。既有的測試全部是這一種——詳圖不給邏輯層，
+    /// 所以空的 `Logical` 不影響結果。
+    fn detail(env: &Environment, bound: &[Id], shapes: &[UnboundShape]) -> Annotation {
+        annotate(&Logical::default(), env, DiagramKind::Detail, bound, shapes)
+    }
+
+    /// 簡圖的情境：邏輯層也在選單裡。
+    fn simple(
+        logical: &Logical,
+        env: &Environment,
+        bound: &[Id],
+        shapes: &[UnboundShape],
+    ) -> Annotation {
+        annotate(logical, env, DiagramKind::Simple, bound, shapes)
+    }
     use crate::environment::{
         Connection, ContainerInstance, DeploymentNode, Endpointing, InstanceRef, NodeKind,
     };
@@ -287,21 +326,21 @@ mod tests {
 
     #[test]
     fn already_assigned_elements_leave_the_list() {
-        let a = annotate(&fixture(), &[Id::from("i-redis-01")], &[]);
+        let a = detail(&fixture(), &[Id::from("i-redis-01")], &[]);
         assert_eq!(ids(&a.shapes), vec!["n-vm", "i-apache-01"]);
     }
 
     #[test]
     fn edges_and_boxes_get_different_targets() {
         // 一個方框指得成一條連線的話，對帳會多出一個永遠對不上的東西。
-        let a = annotate(&fixture(), &[], &[]);
+        let a = detail(&fixture(), &[], &[]);
         assert_eq!(ids(&a.connections), vec!["conn-1"]);
         assert!(!ids(&a.shapes).contains(&"conn-1"));
     }
 
     #[test]
     fn an_identical_name_is_guessed() {
-        let a = annotate(&fixture(), &[], &[shape("c1", "redis-01")]);
+        let a = detail(&fixture(), &[], &[shape("c1", "redis-01")]);
         assert_eq!(
             a.guesses,
             vec![Guess {
@@ -314,14 +353,14 @@ mod tests {
     #[test]
     fn a_chinese_label_matches_the_slug_inside_it() {
         // 圖上寫中文說明、模型裡存 slug，是最常見的一種對法。
-        let a = annotate(&fixture(), &[], &[shape("c1", "Apache-01 叢集")]);
+        let a = detail(&fixture(), &[], &[shape("c1", "Apache-01 叢集")]);
         assert_eq!(a.guesses[0].target, Id::from("i-apache-01"));
     }
 
     #[test]
     fn two_shapes_wanting_the_same_element_get_no_guess() {
         // 正確答案是「不知道」。猜一個給人看，人會直接按下去。
-        let a = annotate(
+        let a = detail(
             &fixture(),
             &[],
             &[shape("c1", "redis-01"), shape("c2", "redis-01")],
@@ -338,7 +377,7 @@ mod tests {
             }],
             ..fixture()
         };
-        let a = annotate(&env, &[], &[shape("c1", "redis")]);
+        let a = detail(&env, &[], &[shape("c1", "redis")]);
         assert!(a.guesses.is_empty());
     }
 
@@ -346,7 +385,7 @@ mod tests {
     fn an_exact_match_wins_over_a_partial_one() {
         // 先跑局部相符的話，`vm-01` 會被 `vm-01 主機` 配走，
         // 而真正叫 `vm-01` 的那個框反而落空。
-        let a = annotate(
+        let a = detail(
             &fixture(),
             &[],
             &[shape("c1", "vm-01 主機"), shape("c2", "vm-01")],
@@ -363,30 +402,138 @@ mod tests {
     #[test]
     fn a_shape_with_no_text_is_never_guessed() {
         // 沒有文字的形狀通常是裝飾。它仍要列出來讓人看得到，但不能亂猜。
-        let a = annotate(&fixture(), &[], &[shape("c1", "  ")]);
+        let a = detail(&fixture(), &[], &[shape("c1", "  ")]);
         assert!(a.guesses.is_empty());
     }
 
     #[test]
     fn a_two_letter_name_is_too_short_to_match_partially() {
-        let a = annotate(&fixture(), &[], &[shape("c1", "a")]);
+        let a = detail(&fixture(), &[], &[shape("c1", "a")]);
         assert!(a.guesses.is_empty());
     }
 
     #[test]
     fn a_line_is_guessed_against_connections_only() {
         // 線上寫「查快取」對得上那條連線的用途；同一段文字不該配到任何方框。
-        let a = annotate(&fixture(), &[], &[edge("c1", "查快取")]);
+        let a = detail(&fixture(), &[], &[edge("c1", "查快取")]);
         assert_eq!(a.guesses[0].target, Id::from("conn-1"));
     }
 
     #[test]
     fn guesses_never_point_at_something_already_assigned() {
-        let a = annotate(
+        let a = detail(
             &fixture(),
             &[Id::from("i-redis-01")],
             &[shape("c1", "redis-01")],
         );
         assert!(a.guesses.is_empty());
+    }
+    // ── 簡圖：邏輯層也在選單裡 ────────────────────────────────
+
+    /// 一份最小的邏輯層：一個人、一個系統、一個服務、一條契約。
+    fn logical() -> Logical {
+        use crate::logical::{Container, Person, Relationship, RelationshipEnd, SoftwareSystem};
+        Logical {
+            people: vec![Person {
+                id: Id::from("p-customer"),
+                slug: "customer".into(),
+                name: "客戶".into(),
+                memo: String::new(),
+            }],
+            systems: vec![SoftwareSystem {
+                id: Id::from("s-sso"),
+                slug: "sso".into(),
+                name: "單一登入".into(),
+                external: true,
+                endpoints: vec![],
+                memo: String::new(),
+            }],
+            containers: vec![Container {
+                id: Id::from("c-redis"),
+                slug: "redis".into(),
+                name: "快取".into(),
+                system: Id::from("s-shop"),
+                endpoints: vec![],
+                memo: String::new(),
+            }],
+            relationships: vec![Relationship {
+                id: Id::from("r-cache"),
+                slug: "api-連-redis".into(),
+                purpose: "讀寫快取".into(),
+                from: RelationshipEnd::Container(Id::from("c-api")),
+                to: RelationshipEnd::Container(Id::from("c-redis")),
+                to_endpoint: Id::from("ed-client"),
+                memo: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn a_simple_diagram_can_point_at_a_person() {
+        // 這是整組的理由：Context 圖上那個小人，在這之前**沒有任何東西
+        // 可以指**——而畫面上沒有任何訊息說明為什麼，使用者只會覺得選單壞了。
+        let a = simple(&logical(), &fixture(), &[], &[]);
+        assert!(
+            a.shapes.iter().any(|t| t.kind == ElementKind::Person),
+            "簡圖的選單裡沒有人：{:?}",
+            a.shapes.iter().map(|t| t.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_simple_diagram_offers_the_whole_logical_layer() {
+        // 混著 Context 與 Container 的圖，四種都要指得到。
+        let a = simple(&logical(), &fixture(), &[], &[]);
+        let kinds: Vec<ElementKind> = a
+            .shapes
+            .iter()
+            .chain(a.connections.iter())
+            .map(|t| t.kind)
+            .collect();
+
+        for want in [
+            ElementKind::Person,
+            ElementKind::SoftwareSystem,
+            ElementKind::Container,
+            ElementKind::Relationship,
+        ] {
+            assert!(kinds.contains(&want), "簡圖的選單裡少了 {want:?}");
+        }
+    }
+
+    #[test]
+    fn a_detail_diagram_offers_no_logical_elements() {
+        // **反向的保證，而且它比上面幾條重要。** 詳圖的意思是「這個環境實際
+        // 跑成什麼樣」，一個形狀剛好一個環境層元素。讓它指到母版等於說
+        // 「這個框代表那一整群」——`reconcile` 的「一個 loomId ↔ 一個元素」
+        // 就被繞過去了，而簡化從那一刻起就有機會變成謊言。
+        let a = annotate(&logical(), &fixture(), DiagramKind::Detail, &[], &[]);
+        assert!(
+            !a.shapes
+                .iter()
+                .chain(a.connections.iter())
+                .any(|t| t.kind.is_logical()),
+            "詳圖竟然給了邏輯層的選項"
+        );
+    }
+
+    #[test]
+    fn a_contract_counts_as_a_line_not_a_box() {
+        // 契約是邏輯層的**線**。放進框的清單裡，使用者就能把一個方框指成
+        // 一條契約——那在對帳時會變成一個永遠對不上的東西。
+        let a = simple(&logical(), &fixture(), &[], &[]);
+        assert!(
+            a.connections
+                .iter()
+                .any(|t| t.kind == ElementKind::Relationship)
+        );
+        assert!(!a.shapes.iter().any(|t| t.kind == ElementKind::Relationship));
+    }
+
+    #[test]
+    fn a_logical_element_that_is_already_taken_drops_off_the_list() {
+        // 規矩跟環境層一樣：一個模型元素只能對應一個形狀。
+        let a = simple(&logical(), &fixture(), &[Id::from("p-customer")], &[]);
+        assert!(!a.shapes.iter().any(|t| t.id == Id::from("p-customer")));
     }
 }

@@ -71,7 +71,12 @@ vi.mock('./lib/bindings', () => ({
     // 而那種錯誤不會讓測試變紅，只會變成一行「unhandled rejection」。
     diagramCatalog: vi.fn().mockResolvedValue({
       status: 'ok',
-      data: { diagrams: [], model: '', details: 'diagram-loom-details' },
+      data: {
+        diagrams: [],
+        model: '',
+        deployment: 'diagram-loom-deployment',
+        context: 'diagram-loom-context',
+      },
     }),
     diagramRead: vi.fn(),
     diagramSave: vi.fn(),

@@ -272,3 +272,97 @@ describe('挑了接點定義', () => {
     expect(endpoint.slug).toBe('sql')
   })
 })
+
+/**
+ * 備註。
+ *
+ * # 這一組在守什麼
+ *
+ * 備註是**每一種資源都有**的欄位，Rust 存得下、表格看得到、MCP 也寫得進去
+ * ——但這張表單裡一度**一個字都沒有**，所以人填不了。那種缺口沒有任何錯誤
+ * 訊息，也沒有規則會叫（備註正是這個模型裡唯一沒有規則在看的欄位），
+ * 只有使用者自己發現。
+ *
+ * # 為什麼下面那張表要**再抄一份**
+ *
+ * 直覺會想從 `ResourceForm.vue` 把 `MEMO_PATHS` 挖出來，測試就不必維護第二份。
+ * 那樣是錯的：draft 也照著同一份路徑長出來的話，路徑抄錯時兩邊會**一起錯、
+ * 一起綠**——測試變成「我跟我自己一樣」。實測過，把 `node.node.memo` 改成
+ * `node.memo` 那條測試照樣是綠的。
+ *
+ * 所以這裡的 draft 照**真正的 `Resource` 形狀**寫（對照 `bindings.ts` 的
+ * `Resource_Serialize`），期望路徑也獨立寫一份。兩份互相對照才有意義。
+ */
+describe('備註', () => {
+  const source = () => readFileSync(join(import.meta.dirname, 'ResourceForm.vue'), 'utf8')
+
+  /** 備註住的那個物件。形狀照 `bindings.ts`，不是照 `MEMO_PATHS`。 */
+  const leaf = () => ({ id: 'x', slug: '', memo: '' })
+  const held = () => ({ ...leaf(), standalone: false, endpoints: [] })
+  const ENV = 'env-prod'
+
+  /** [這是哪一種, 備註該落在哪, 一份形狀正確的 draft] */
+  const CASES: [string, string, Resource][] = [
+    ['person', 'person.memo', { person: leaf() }],
+    ['system', 'system.memo', { system: { ...leaf(), external: true, endpoints: [] } }],
+    ['container', 'container.memo', { container: { ...leaf(), system: '', endpoints: [] } }],
+    ['endpointDef', 'endpointDef.def.memo', { endpointDef: { owner: '', def: leaf() } }],
+    ['relationship', 'relationship.memo', { relationship: { ...leaf(), purpose: '' } }],
+    ['environment', 'environment.memo', { environment: { ...leaf(), name: '' } }],
+    ['node', 'node.node.memo', { node: { environment: ENV, within: null, node: leaf() } }],
+    ['infra', 'infra.node.memo', { infra: { environment: ENV, node: leaf() } }],
+    ['infraEndpoint', 'infraEndpoint.endpoint.memo',
+      { infraEndpoint: { environment: ENV, node: '', endpoint: leaf() } }],
+    ['instance', 'instance.instance.memo',
+      { instance: { environment: ENV, node: '', instance: held() } }],
+    ['systemInstance', 'systemInstance.instance.memo',
+      { systemInstance: { environment: ENV, instance: held() } }],
+  ] as unknown as [string, string, Resource][]
+
+  /** 照著路徑從送出去的那份讀回來。 */
+  function at(o: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>((v, k) => (v as Record<string, unknown>)?.[k], o)
+  }
+
+  it.each(CASES)('%s 的備註要落在 %s', async (kind, path, resource) => {
+    // 路徑抄錯（`node.memo` vs `node.node.memo`）的話，字會寫到外層那個包裝
+    // 物件上——Rust 讀不到，而畫面上按了儲存什麼錯誤都沒有。
+    setActivePinia(createPinia())
+    const store = useProject()
+    store.snapshot = fakeSnapshot()
+    store.editingResource = { resource, isNew: false, kind }
+    const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+    const w = mount(ResourceForm)
+    const box = w.find('textarea')
+    expect(box.exists(), `${kind} 沒有備註欄`).toBe(true)
+    await box.setValue('等年底汰換')
+    await w.find('button.primary').trigger('click')
+
+    const sent = applyEdit.mock.calls[0]?.[0] as { updateResource?: unknown }
+    expect(at(sent?.updateResource, path), `${kind} 的備註沒落在 ${path}`).toBe('等年底汰換')
+  })
+
+  it('十一種資源一種都不能少', () => {
+    // 少一種的話，那一種就是「表格上看得到、MCP 寫得進去、人填不了」——
+    // 沒有錯誤訊息。這條是「新加一種資源忘了補備註」每天真的會擋下來的那一層：
+    // `Record<Kind, string>` 的型別檢查只在 `pnpm run build:web` 跑，
+    // 而 `mise run check` 沒有型別檢查。
+    const kinds = readFileSync(join(import.meta.dirname, '../lib/bindings.ts'), 'utf8')
+      .match(/export type Kind = ([^;]+);/)![1]!
+      .split('|')
+      .map((s) => s.trim().replaceAll('"', ''))
+
+    expect(CASES.map(([k]) => k).sort()).toEqual([...kinds].sort())
+    // 表單那一份也要一種不少，否則會有「測試涵蓋到、表單沒有」的種類。
+    const block = source().match(/const MEMO_PATHS[^{]*\{([\s\S]*?)\n\}/)
+    expect(block, '找不到 MEMO_PATHS，是不是改名了？').not.toBeNull()
+    const inForm = [...block![1]!.matchAll(/(\w+):\s*'/g)].map((m) => m[1]!)
+    expect(inForm.sort()).toEqual([...kinds].sort())
+  })
+
+  it('備註只寫一次，不是十一個分支各抄一份', () => {
+    // 抄開的那一天，漏掉的那一種不會壞掉，只是安靜地少一個欄位。
+    expect(source().match(/<textarea/g) ?? []).toHaveLength(1)
+  })
+})

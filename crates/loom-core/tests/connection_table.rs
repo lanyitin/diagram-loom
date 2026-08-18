@@ -262,3 +262,19 @@ mod clicking_a_finding_lands_on_its_row {
         }
     }
 }
+
+#[test]
+fn the_memo_comes_through_on_the_row() {
+    // 備註是這個模型裡唯一沒有規則會回報的欄位——寫錯了 lint 不會叫。
+    // 所以它的回報路徑只有這張表。讀不回來的話，寫的人會以為沒寫成功，
+    // 然後再寫一次。
+    let mut project = healthy_project();
+    project.environments[0].connections[0].memo = "等年底汰換".into();
+
+    let row = search(
+        &project,
+        "env-prod",
+        &project.environments[0].connections[0].id.to_string(),
+    );
+    assert_eq!(row.memo, "等年底汰換");
+}

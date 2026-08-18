@@ -88,6 +88,21 @@ describe('畫進資料模型', () => {
     expect(edges.filter((e) => attr(e, 'loomId') === 'c1')).toHaveLength(2)
   })
 
+  it('收攏過的線刻意沒有 loomId，也還是畫得出來', async () => {
+    // context 圖把 A 對 B 的三條契約收成一條線。硬指其中一條等於說謊，
+    // 而對帳會把綁定當事實。所以那條線的 `connection` 是空的。
+    const rolled = [
+      { connection: '', from: 'svc', to: 'f5', fromPerson: false, kind: 'primary', purpose: '3 條契約' },
+    ] as Link[]
+    const { model } = await built(rolled)
+    const edges = model.getRoot()!.children![0]!.children!.filter((c) => c.isEdge())
+    expect(edges).toHaveLength(1)
+    expect(attr(edges[0], 'loomId')).toBeNull()
+    expect(attr(edges[0], 'loomKind')).toBe('connection')
+    // id 不能長成 `:svc:f5`——那個開頭的冒號是「這裡本來該有東西」的樣子。
+    expect(edges[0]!.getId()).toBe('svc:f5')
+  })
+
   it('備援線看得出來跟平常的不一樣', async () => {
     const { model } = await built()
     const edges = model.getRoot()!.children![0]!.children!.filter((c) => c.isEdge())
@@ -99,6 +114,29 @@ describe('畫進資料模型', () => {
     const bad = [{ ...links[0]!, to: '不存在' }] as Link[]
     const { model } = await built(bad)
     expect(model.getRoot()!.children![0]!.children!.filter((c) => c.isEdge())).toHaveLength(0)
+  })
+
+  it('前面有線畫不出來時，後面的線照樣拿得到轉彎點', async () => {
+    // 這條守的是「排版算出來的東西有沒有真的用上」。
+    //
+    // 曾經是這樣壞的：排版把畫不出來的線丟掉**之後**才編號，這裡卻拿丟掉
+    // **之前**的位置去查。一條線被丟掉，後面全部錯開一格；查不到轉彎點就
+    // 等於沒排版，maxGraph 會自己重繞，而它不知道容器在哪。
+    //
+    // 拿真實專案跑過：第 0 條就是起點為人的線（畫布上沒有人），
+    // 於是 **145 條線全部**掉了轉彎點，整張圖變成穿過所有容器的蜘蛛網。
+    const bendsOf = (model: GraphDataModel) =>
+      model.getRoot()!.children![0]!.children!
+        .filter((c) => c.isEdge())
+        .map((e) => (e.getGeometry()?.points ?? []).length)
+
+    const dropped = { ...links[0]!, from: '沒有這個形狀' } as Link
+    const clean = await built()
+    const shifted = await built([dropped, ...links] as Link[])
+
+    // 被丟掉的那條本來就不該畫，剩下的每一條都要跟沒被干擾時一模一樣。
+    expect(bendsOf(shifted.model)).toEqual(bendsOf(clean.model))
+    expect(bendsOf(clean.model).some((n) => n > 0), '測資本身就沒有轉彎點').toBe(true)
   })
 
   it('有轉彎點的線不再給 edgeStyle', async () => {

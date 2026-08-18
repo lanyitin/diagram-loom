@@ -413,7 +413,7 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
             </td>
             <td
               v-for="(c, i) in columns" :key="c"
-              :class="{ mono: i === 0, muted: i > 0 }"
+              :class="{ mono: i === 0, muted: i > 0, wrap: c === '備註' }"
               :style="i === 0 && row.depth ? { paddingLeft: `${12 + row.depth * 18}px` } : undefined"
             >{{ cellOf(row, c) }}</td>
             <td class="act">
@@ -559,6 +559,15 @@ th, td {
   white-space: nowrap;
 }
 tbody tr:hover td { background: var(--surface-2); }
+
+/*
+ * 備註折行，而且要有上限。它是自由文字，長度不受控——維持 `nowrap` 的話
+ * 欄寬會被最長的那一則撐開（欄寬照 auto 佈局量一次再凍結，見 `TableHead`），
+ * 於是後面的欄全被推出視窗，而這張表的用途正是「一眼掃過幾百列」。
+ *
+ * `height: var(--row)` 在表格裡是**最小高度**，所以折行的那幾列會自己長高。
+ */
+td.wrap { white-space: normal; max-width: 36ch; line-height: 1.45; padding-top: 5px; padding-bottom: 5px; }
 
 .sev { width: 26px; padding-right: 0; }
 thead .sev { background: var(--surface-2); border-bottom: 1px solid var(--rule); }

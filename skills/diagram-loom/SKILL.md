@@ -10,21 +10,42 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 它不是畫圖工具，是**防漏工具**。使用者的痛點是「接下來要處理的系統有數百條
 連線，怕漏」。所以你的目標不是「建得快」，是**建得完整，而且漏掉的地方會被指出來**。
 
-`lint` 是你的自我檢查。**每建完一批就叫一次。**
+`lint` 是你的自我檢查。**每建完一批就叫一次**，而且先用
+`detail: "count"`——它只回一行「幾個錯誤、幾個警告」。不是零再展開看細節。
+
+同一個道理，`describe` 也收 `select` 與 `detail`。整份專案可能有數百條連線，
+每次都全部倒出來，你會在讀資料上把使用者的額度耗掉一半。
 
 「數百條」不是形容詞，是規模。所以有一件事要先講：**一次送一批**，
 見下面那一節。一個一個送每次都會成功，不會有任何錯誤訊息提醒你，
 但你會建到一半就把使用者的時間耗光。
 
+## 八支工具只有兩種形狀
+
+記住這兩種，就不必每碰一支沒用過的工具都重讀一次說明：
+
+| | 形狀 |
+| --- | --- |
+| **讀**（describe / lint） | `{scope, select, detail}` |
+| **寫**（create / create_nodes / add_connection / update） | `{scope, items, dry_run}` |
+| **刪**（delete） | `{scope, targets, cascade, confirm}` |
+
+`scope` 說「動哪一個專案、哪一個環境」。**環境只寫在這裡**，
+不要寫進每一項的 `fields` 裡。
+
 ## 使用者可能同時開著好幾個專案
 
-先叫 `projects` 看有哪些。每個工具都收一個選填的 `project`（名字或路徑片段）：
+先叫 `projects` 看有哪些。每個工具都收 `scope.project`（名字或路徑片段）：
 
 - 只開著一個 → 可以省略
 - 開著好幾個 → **一定要指定**。沒指定會被擋下來並附上清單
 
 被擋下來不是壞事，那是設計的一部分：挑錯專案的後果是**安靜地改到別份**，
-使用者要切去另一扇視窗才會發現。看到那份清單就照著補 `project` 再送一次。
+使用者要切去另一扇視窗才會發現。看到那份清單就照著補 `scope` 再送一次。
+
+**同一個名字在好幾個環境都有的時候也一樣。** `redis-01` 在 prod 與 uat
+各有一台是常態，`update` 與 `delete` 遇到這種情況會列出候選要你指定
+`scope.environment`——一樣不會替你挑。
 
 一趟只動一個專案。要改三個就跑三輪，每一輪都完整走一次
 「describe → 建一批 → lint → 補」。
@@ -46,8 +67,8 @@ description: 把一段描述系統架構的資料（會議記錄、交接文件�
 
 ## 一次送一批，不要一個一個送
 
-**這是這份 skill 最重要的一句話。** `create` 與 `add_connection` 都收
-`items` 陣列，你這一輪想建的東西全部放進去。
+**這是這份 skill 最重要的一句話。** 四支寫入工具**全部**都收 `items` 陣列，
+你這一輪要做的事全部放進去。連 `update` 也是——補三十個位址是一趟，不是三十趟。
 
 一趟一百個跟一趟一個花的時間差不多，而一個一個送要走一百趟。一個大型
 系統有數百條連線，一條一趟的話你會建到一半就把使用者的時間耗光。
@@ -81,7 +102,7 @@ create  items: [
 5. relationship      契約：誰連誰
 6. environment       環境
    ── 以上通常一次 create 就送完 ──
-7. create_nodes      機器與服務實體（一個服務一次，它會照樣板配 IP）
+7. create_nodes      機器與服務實體（一批可以放好幾個服務，它會照樣板配 IP）
    create/instance   同一台機器上的第二個服務（見下面）
 8. add_connection    在環境裡實現契約（整個環境的連線一次送完）
 9. lint              收工前確認
@@ -99,9 +120,10 @@ log-agent 跑在同一台 VM 上」用它是做不到的——它會建出兩台
 再一個一個 `kind: instance` 掛上去，`node` 填那台機器的名字：
 
 ```json
-{"kind": "instance", "fields": {
-  "environment": "prod", "node": "vm-01", "slug": "agent-01",
-  "container": "log-agent", "address": "10.0.1.11:9100"}}
+{"scope": {"environment": "prod"},
+ "items": [{"kind": "instance", "fields": {
+   "node": "vm-01", "slug": "agent-01",
+   "container": "log-agent", "address": "10.0.1.11:9100"}}]}
 ```
 
 搬家用 `update` 給 `node`。**換環境做不到**——那不是改一個欄位，
@@ -128,7 +150,7 @@ log-agent 跑在同一台 VM 上」用它是做不到的——它會建出兩台
 兩段放在同一批裡：
 
 ```
-add_connection  environment: prod
+add_connection  scope: {environment: prod}
                 items: [
                   {relationship: apache-to-gateway,
                    from: apache-*, to: "f5-01 : vip-gateway"},
@@ -167,9 +189,12 @@ gateway-* @ dc-dr   → channel-* @ dc-main     fallback: true
 `delete` 是兩步：
 
 ```
-第一步   delete  ids: [...], cascade: true            ← 只給你看，不動任何東西
-第二步   delete  ids: [...], cascade: true, confirm: true
+第一步   delete  targets: [...], cascade: true            ← 只給你看，不動任何東西
+第二步   delete  targets: [...], cascade: true, confirm: true
 ```
+
+`targets` 吃的是**名字**，不是 id：`redis-01`、`apache-* -> f5-01`（一條連線）、
+`conn:apache-to-redis`（服務那條契約的連線）。`update` 的 `target` 同一套寫法。
 
 `cascade: true` 會把「刪了這個之後會變成廢的東西」一路掃出來——指著空氣的
 契約、連線、服務實體。刪一個系統可能連帶三十個元素，一次清乾淨，

@@ -36,11 +36,38 @@ pub const SYNC_STATE_PATH: &str = "diagrams/.sync-state.yaml";
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum ElementKind {
+    // ── 環境層（分身）。詳圖畫的就是這些。 ──
     DeploymentNode,
     ContainerInstance,
     InfrastructureNode,
     SoftwareSystemInstance,
     Connection,
+
+    // ── 邏輯層（母版）。**只有簡圖會用到。** ──
+    //
+    // Context 圖畫的是人與系統，Container 圖畫的是服務與契約——那些都是
+    // 邏輯層的東西，一個也不在環境層。它們不在這裡的時候，一張混著
+    // Context 與 Container 的圖上，那些框**沒有任何東西可以指**。
+    //
+    // 詳圖不給這些：詳圖的意思是「這個環境實際跑成什麼樣」，
+    // 指到母版等於說「這個框代表那一整群」——那正是簡圖才允許的事。
+    Person,
+    SoftwareSystem,
+    Container,
+    Relationship,
+}
+
+impl ElementKind {
+    /// 這一種是邏輯層的嗎。
+    pub fn is_logical(self) -> bool {
+        matches!(
+            self,
+            ElementKind::Person
+                | ElementKind::SoftwareSystem
+                | ElementKind::Container
+                | ElementKind::Relationship
+        )
+    }
 }
 
 /// 模型這一側的一個元素。
@@ -192,7 +219,62 @@ pub enum Resolution {
     UseDiagramLabel,
 }
 
-/// 三方比對。
+/// 這種圖的「模型側」是什麼。
+///
+/// **唯一的一份**——標註選單問的是它，弱檢查問的也是它。分成兩份的話，
+/// 一張簡圖上指得到的東西，弱檢查會說「模型裡沒有」，而那是一個工具
+/// 自己造出來的假缺漏。
+pub fn elements_for(
+    logical: &crate::logical::Logical,
+    env: &Environment,
+    kind: crate::diagrams::DiagramKind,
+) -> Vec<ModelElement> {
+    match kind {
+        crate::diagrams::DiagramKind::Detail => model_elements(env),
+        crate::diagrams::DiagramKind::Simple => {
+            let mut all = logical_elements(logical);
+            all.extend(model_elements(env));
+            all
+        }
+    }
+}
+
+/// 簡圖的**弱檢查**：圖上引用的東西，模型裡還在不在。
+///
+/// # 為什麼簡圖不做完整的三方比對
+///
+/// 簡圖刻意簡化：一個框可能代表一整群，而且它本來就不會把每台機器都畫上去。
+/// 拿完整比對去問它，會得到一整頁「模型有、圖上沒有」——**那些全部不是缺漏，
+/// 是簡化本身**。而一份全是雜訊的報告，實際效果等於沒有報告。
+///
+/// # 但也不能完全不檢查
+///
+/// 「不對帳」如果只是安靜地跳過，那就是這個專案最怕的那種失敗：有人把簡圖
+/// 貼進文件，同事看到它從這個工具長出來，**理所當然以為它被檢查過了**。
+///
+/// 所以留一條擋得住最丟臉那種錯的：**有人把整個服務刪了，投影片上那個框就該叫。**
+/// 擋不了漏連線，但擋得掉「圖上畫著一個已經不存在的東西」。
+///
+/// `model` 要用 [`elements_for`] 算，不然簡圖上指到的邏輯層元素會被誤判成懸空。
+pub fn dangling(model: &[ModelElement], diagram: &[DiagramElement]) -> Vec<Difference> {
+    let known: BTreeSet<&Id> = model.iter().map(|e| &e.id).collect();
+    let mut out: Vec<Difference> = diagram
+        .iter()
+        .filter(|d| !known.contains(&d.id))
+        .map(|d| Difference {
+            id: d.id.clone(),
+            label: d.label.clone(),
+            kind: DifferenceKind::AddedToDiagram,
+        })
+        .collect();
+    // 依 id 排序，理由同 `reconcile`：輸出要穩定、可整份比對。
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// 三方比對。**只給詳圖用。**
+///
+/// 簡圖請用 [`dangling`]——理由寫在那裡。
 ///
 /// 回傳結果依 id 排序，讓輸出穩定、可整份比對。
 pub fn reconcile(
@@ -364,6 +446,53 @@ pub fn model_elements(env: &Environment) -> Vec<ModelElement> {
             id: connection.id.clone(),
             kind: ElementKind::Connection,
             label: connection.purpose.clone(),
+        });
+    }
+
+    found
+}
+
+/// 邏輯層有哪些元素。**只有簡圖用得到。**
+///
+/// # 為什麼要有這一支
+///
+/// [`model_elements`] 只走環境層——它是為了詳圖寫的，而詳圖畫的就是
+/// 「這個環境實際跑成什麼樣」。
+///
+/// 但使用者自己畫的圖不一定是部署圖，也可能是 Context 或 Container，
+/// 甚至兩種混在一起。那些圖上的框是**人、系統、服務、契約**，
+/// 一個都不在環境層——於是它們在標註選單裡找不到任何可以指的東西。
+///
+/// 順序是使用者讀圖的順序：人 → 系統 → 服務 → 契約，也就是 C4 由外往內。
+pub fn logical_elements(logical: &crate::logical::Logical) -> Vec<ModelElement> {
+    let mut found = Vec::new();
+
+    for person in &logical.people {
+        found.push(ModelElement {
+            id: person.id.clone(),
+            kind: ElementKind::Person,
+            label: person.slug.clone(),
+        });
+    }
+    for system in &logical.systems {
+        found.push(ModelElement {
+            id: system.id.clone(),
+            kind: ElementKind::SoftwareSystem,
+            label: system.slug.clone(),
+        });
+    }
+    for container in &logical.containers {
+        found.push(ModelElement {
+            id: container.id.clone(),
+            kind: ElementKind::Container,
+            label: container.slug.clone(),
+        });
+    }
+    for relationship in &logical.relationships {
+        found.push(ModelElement {
+            id: relationship.id.clone(),
+            kind: ElementKind::Relationship,
+            label: relationship.slug.clone(),
         });
     }
 
@@ -591,5 +720,63 @@ mod tests {
                 "{kind:?} 只給一個選項，等於沒得選"
             );
         }
+    }
+    // ── 簡圖的弱檢查 ──────────────────────────────────────────
+
+    #[test]
+    fn a_simple_diagram_only_reports_things_the_model_no_longer_has() {
+        // 完整比對會對簡圖噴出一整頁「模型有、圖上沒有」——那些全部不是缺漏，
+        // 是簡化本身。一份全是雜訊的報告，實際效果等於沒有報告。
+        let m = model(&[("a", "甲"), ("b", "乙"), ("c", "丙")]);
+        let d = diagram_of(&[("a", "甲")]);
+
+        assert_eq!(dangling(&m, &d), vec![]);
+    }
+
+    #[test]
+    fn a_simple_diagram_still_reports_a_shape_pointing_at_nothing() {
+        // 這是留下來的那一條：有人把整個服務刪了，投影片上那個框就該叫。
+        let m = model(&[("a", "甲")]);
+        let d = diagram_of(&[("a", "甲"), ("沒了", "被刪掉的服務")]);
+
+        let found = dangling(&m, &d);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, Id::from("沒了"));
+        assert_eq!(found[0].kind, DifferenceKind::AddedToDiagram);
+    }
+
+    #[test]
+    fn a_simple_diagram_can_point_at_the_logical_layer_without_looking_dangling() {
+        // `elements_for` 是唯一的一份：標註選單給得出人，弱檢查就不能說
+        // 「模型裡沒有這個人」。分成兩份的話，工具會自己造出假缺漏。
+        let logical = crate::logical::Logical {
+            people: vec![crate::logical::Person {
+                id: Id::from("p-customer"),
+                slug: "customer".into(),
+                name: "客戶".into(),
+                memo: String::new(),
+            }],
+            systems: vec![],
+            containers: vec![],
+            relationships: vec![],
+        };
+        let env = Environment {
+            id: Id::from("env-prod"),
+            slug: "prod".into(),
+            name: "正式".into(),
+            nodes: vec![],
+            infra: vec![],
+            systems: vec![],
+            connections: vec![],
+            memo: String::new(),
+        };
+
+        let m = elements_for(&logical, &env, crate::diagrams::DiagramKind::Simple);
+        let d = diagram_of(&[("p-customer", "客戶")]);
+        assert_eq!(dangling(&m, &d), vec![]);
+
+        // 詳圖那一側就會說它懸空——那是對的，詳圖本來就不該指到母版。
+        let detail = elements_for(&logical, &env, crate::diagrams::DiagramKind::Detail);
+        assert_eq!(dangling(&detail, &d).len(), 1);
     }
 }

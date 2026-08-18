@@ -27,6 +27,7 @@ function rows(id: string, extra: Partial<Row> = {}): Row {
     serves: 'r-cache',
     servesSlug: 'api-連-redis',
     purpose: '讀寫快取',
+    memo: '',
     from: side('app-01'),
     to: side('redis-*', { endpoint: 'client-port', addresses: ['10.0.1.11:6379', '10.0.1.12:6379', '10.0.1.13:6379'], matched: 3, expect: 3 }),
     kind: 'primary',
@@ -73,7 +74,7 @@ describe('連線表', () => {
     w.find('thead .cols').trigger('click')
     return w.vm.$nextTick().then(() => {
       expect(w.findAll('.pop button').map((b) => b.text().replace('固定', '').trim()))
-        .toEqual(['契約', '來源', '目標', '目標位址', '實際／期望', '用途'])
+        .toEqual(['契約', '來源', '目標', '目標位址', '實際／期望', '用途', '備註'])
     })
   })
 
@@ -84,7 +85,7 @@ describe('連線表', () => {
     await w.findAll('.pop button')[3]!.trigger('click')   // 關掉「目標位址」
 
     expect(w.findAll('thead th[data-column]').map((t) => t.text()))
-      .toEqual(['契約', '來源', '目標', '實際／期望', '用途'])
+      .toEqual(['契約', '來源', '目標', '實際／期望', '用途', '備註'])
     expect(columnCell(w, '目標').text()).toBe('redis-* : client-port')
     expect(columnCell(w, '用途').text()).toBe('讀寫快取')
   })
@@ -145,6 +146,208 @@ describe('連線表', () => {
 
     store.search = '10.9.9.9'
     expect(mount(ConnectionTable).find('.empty').exists()).toBe(true)
+  })
+
+  /**
+   * 就地編輯。
+   *
+   * # 為什麼共用行為要用 `describe.each` 跑，不是每一欄抄一份
+   *
+   * 這一套機制的設計目的就是「服務任何一個可編欄位」。抄兩份的測試證明不了
+   * 那件事——它只證明兩份都被寫對了一次。跑同一組才會在有人只修其中一欄時紅。
+   */
+  describe('就地編輯', () => {
+    /** 依欄名點開那一格的編輯器。全域 `find` 在多欄可編之後會抓到別格。 */
+    async function openEditor(w: ReturnType<typeof mount>, column: string) {
+      await columnCell(w, column).find('button').trigger('click')
+      return columnCell(w, column).find('input')
+    }
+
+    /** 這一欄現在存的值。 */
+    const CURRENT: Record<string, Partial<Row>> = {
+      用途: { purpose: '原本就有' },
+      備註: { memo: '原本就有' },
+    }
+
+    describe.each(['用途', '備註'])('%s', (column) => {
+      it('沒填過的那一列也點得開', async () => {
+        // 只在有值時才顯示的話，空的那幾條永遠填不了第一次——
+        // 而最需要填的正是空的那幾條（L007 叫的就是空用途）。
+        store.snapshot = fakeSnapshot([rows('c1', { purpose: '', memo: '' })])
+        const w = mount(ConnectionTable)
+        expect(columnCell(w, column).find('button').exists()).toBe(true)
+
+        const box = await openEditor(w, column)
+        expect(box.exists()).toBe(true)
+      })
+
+      it('沒改就不留下一步復原', async () => {
+        // 點開又關掉多一步 ⌘Z，而那一步什麼都沒做——使用者按下去會以為
+        // 自己退掉了真的東西。
+        store.snapshot = fakeSnapshot([rows('c1', CURRENT[column]!)])
+        const w = mount(ConnectionTable)
+        const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+        const box = await openEditor(w, column)
+        await box.trigger('blur')
+
+        expect(applyEdit).not.toHaveBeenCalled()
+      })
+
+      it('按 Esc 就整個不算', async () => {
+        store.snapshot = fakeSnapshot([rows('c1', CURRENT[column]!)])
+        const w = mount(ConnectionTable)
+        const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+        const box = await openEditor(w, column)
+        await box.setValue('改到一半反悔')
+        await box.trigger('keydown.esc')
+
+        expect(applyEdit).not.toHaveBeenCalled()
+        expect(columnCell(w, column).text()).toBe('原本就有')
+      })
+
+      it('送出前削掉前後空白', async () => {
+        // Rust 只有 `SetPurpose` 會削，`SetConnectionMemo` 是原樣存的。
+        // 前端不削的話，「還沒決定　」跟「還沒決定」是兩份不同的資料，
+        // 而畫面上長得一模一樣。
+        store.snapshot = fakeSnapshot([rows('c1', { purpose: '', memo: '' })])
+        const w = mount(ConnectionTable)
+        const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+        const box = await openEditor(w, column)
+        await box.setValue('  還沒決定  ')
+        await box.trigger('blur')
+
+        const sent = JSON.stringify(applyEdit.mock.calls[0]?.[0])
+        expect(sent).toContain('還沒決定')
+        expect(sent).not.toContain(' 還沒決定')
+      })
+
+      it('編這一格的時候，同一列的另一格不會跟著變成輸入框', async () => {
+        // 只認「哪一列」的話兩格會一起打開、綁同一個 draft，於是 blur 哪一個
+        // 都照那一格的 Edit 送出——**用途的字會被寫進備註**。沒有錯誤訊息，
+        // 而備註沒有規則在看，永遠不會被發現。
+        const other = column === '用途' ? '備註' : '用途'
+        const w = mount(ConnectionTable)
+        await openEditor(w, column)
+
+        expect(columnCell(w, other).find('input').exists()).toBe(false)
+      })
+    })
+
+    it('改用途送出的是 setPurpose，而且帶著環境', async () => {
+      // `environment` 給 null 的話 Rust 會去邏輯層找同 id 的**契約**，
+      // 而連線 id 在那裡不存在 → 整次失敗，畫面上只有「按了沒反應」。
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      const box = await openEditor(w, '用途')
+      await box.setValue('讀寫工作階段快取')
+      await box.trigger('blur')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setPurpose: { environment: 'env-prod', subject: 'c1', purpose: '讀寫工作階段快取' },
+      })
+    })
+
+    it('改備註送出的是 setConnectionMemo，不是改用途', async () => {
+      // 兩個欄位是刻意分開的：L007 在看 `purpose`。寫進同一格的話，
+      // 「等年底汰換」會讓 L007 從此不再叫。
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      const box = await openEditor(w, '備註')
+      await box.setValue('等年底汰換')
+      await box.trigger('blur')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setConnectionMemo: { environment: 'env-prod', connection: 'c1', memo: '等年底汰換' },
+      })
+    })
+
+    it('用途清空是合法的', async () => {
+      // 清空讓 L007 重新叫，那正是「我還不知道」該有的狀態。
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      const box = await openEditor(w, '用途')
+      await box.setValue('')
+      await box.trigger('blur')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setPurpose: { environment: 'env-prod', subject: 'c1', purpose: '' },
+      })
+    })
+
+    it('備註清空是合法的', async () => {
+      // 備註沒有規則在看，寫錯了沒有第二條路可以救。
+      store.snapshot = fakeSnapshot([rows('c1', { memo: '寫錯了' })])
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      const box = await openEditor(w, '備註')
+      await box.setValue('')
+      await box.trigger('blur')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setConnectionMemo: { environment: 'env-prod', connection: 'c1', memo: '' },
+      })
+    })
+  })
+
+  /**
+   * 正常 ⇄ 備援。
+   *
+   * 這件事以前**只有 Agent（MCP）做得到**：`kind` 只在新增連線時勾得到，
+   * 建完就再也改不了。人做不到而 Agent 做得到，是最糟的分工。
+   */
+  describe('切換正常／備援', () => {
+    const toggle = (w: ReturnType<typeof mount>) => w.find('.kindtoggle')
+
+    it('切成備援送出的是 setConnectionKind', async () => {
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      await toggle(w).trigger('click')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setConnectionKind: { environment: 'env-prod', connection: 'c1', kind: 'fallback' },
+      })
+    })
+
+    it('再切一次切得回正常', async () => {
+      // 防的是寫死 `kind: 'fallback'` 的單向切換——症狀是「切錯了退不回來，
+      // 只能刪掉重建」，而重建會換一個新的 id，圖上綁著它的標註會斷。
+      store.snapshot = fakeSnapshot([rows('c1', { kind: 'fallback' })])
+      const w = mount(ConnectionTable)
+      const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+      await toggle(w).trigger('click')
+
+      expect(applyEdit).toHaveBeenCalledWith({
+        setConnectionKind: { environment: 'env-prod', connection: 'c1', kind: 'primary' },
+      })
+    })
+
+    it('正常的那一列也點得到', async () => {
+      // 只在 fallback 才給按鈕的話，就沒有任何路徑把一條連線標成備援——
+      // 那正是這次要補的洞。
+      const w = mount(ConnectionTable)
+      expect(toggle(w).exists()).toBe(true)
+    })
+
+    it('切換鈕說得出現在是哪一種', () => {
+      // 「正常」那一格平常是留白的，看不見就不能只靠看。
+      const w = mount(ConnectionTable)
+      expect(toggle(w).attributes('aria-pressed')).toBe('false')
+      expect(toggle(w).attributes('title')).toContain('正常路徑')
+
+      store.snapshot = fakeSnapshot([rows('c1', { kind: 'fallback' })])
+      const f = mount(ConnectionTable)
+      expect(toggle(f).attributes('aria-pressed')).toBe('true')
+      expect(toggle(f).attributes('title')).toContain('備援路徑')
+    })
   })
 
   it('備援路徑會標出來', () => {

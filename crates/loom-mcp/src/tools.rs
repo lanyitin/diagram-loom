@@ -23,262 +23,22 @@ use serde_json::{Value, json};
 use loom_core::batch::{BatchSpec, EndpointPlan};
 use loom_core::cascade;
 use loom_core::edit::Edit;
-use loom_core::environment::{ConnectionKind, NodeKind};
+use loom_core::environment::{ConnectionEnd, ConnectionKind, NodeKind};
 use loom_core::id::Id;
-use loom_core::lint::{Rule, Severity, lint};
+use loom_core::lint::lint;
 use loom_core::logical::{Protocol, RelationshipEnd};
 use loom_core::resource::{Kind, Resource, blank};
-use loom_core::{Project, connect, inventory};
+use loom_core::{Project, connect};
 
 use crate::Workspace;
+use crate::query::{self, Detail, Scope, Select};
 use crate::refs;
+use crate::target::{self, Target};
 
-/// 工具清單。內容是靜態的，所以描述文字就是 Agent 唯一的說明書——
-/// 寫不清楚它就會用錯，而用錯的成本是使用者的專案被弄髒。
+/// 工具清單。說明書在 [`crate::manual`]——它是 Agent 唯一讀得到的東西，
+/// 所以獨立成一個模組，改描述不必捲過幾百行 `match`。
 pub fn list() -> Value {
-    json!([
-        tool("projects", "\
-使用者現在開著哪幾個專案，各自有沒有未儲存、lint 還剩幾項。
-
-**同時開著多個的時候先叫這個。** 其他工具都收一個選填的 `project`，
-只開一個時可以省略，開著多個又沒給的話會被擋下來——不會替你猜一個。",
-            json!({"type": "object", "properties": {}})),
-
-        tool("describe", "\
-看目前這份專案裡已經有什麼：系統、服務、接點定義、契約、環境、機器、設備。
-**動手之前先叫這個。** 不然你會重複建立已經存在的東西，而那會撞名失敗。",
-            json!({"type": "object", "properties": {}})),
-
-        tool("lint", "\
-看這份專案現在還缺什麼。
-
-**這是你自我檢查的方式。** 從一段文字建模型一定會漏東西——漏接點、
-漏某個環境、漏一段路徑。每建完一批就叫一次，照著它說的補。
-回應會告訴你每一項該怎麼修。",
-            json!({"type": "object", "properties": {}})),
-
-        tool("create", "\
-建立模型元素。**一次送一批，不要一個一個送。**
-
-`items` 是一個陣列，你這一輪想建的東西全部放進去，包括不同 kind 的。
-一趟一百個跟一趟一個花的時間差不多，而一個一個送要走一百趟。
-
-同一批裡**後面的可以指名前面的**，所以照下面的順序排就好，
-不必為了先後關係拆成很多趟：
-  1. system        系統。服務要掛在它底下
-  2. container     服務（Redis、Consul 這種會接收請求的程序）
-  3. endpoint_def  接點定義。契約要指定連到哪一個
-  4. relationship  契約：誰連誰。這是母版，每個環境都必須實現
-  5. environment   環境（prod / uat / dev…）
-  6. node / infra / system_instance   環境裡的機器、F5、外部系統實體
-
-**有一項失敗就整批不建**，並且告訴你是第幾項、為什麼。
-改掉那一項再整批送一次即可——沒有「建了一半」這種狀態。
-整批也算**一步**，使用者按一次 ⌘Z 就能全部退掉。
-
-各種 kind 要填的欄位：
-  system            slug, name, external(bool)
-  container         slug, name, system(系統的 slug)
-  endpoint_def      owner(服務或系統的 slug), slug, protocol(tcp/udp/unix-socket/jdbc/file)
-  relationship      slug, purpose, from, to, to_endpoint
-                    from/to 寫 `container:名字`、`system:名字` 或 `person:名字`
-                    to_endpoint 寫目標身上那個接點定義的 slug
-  person            slug, name
-  environment       slug, name
-  node              environment, slug, kind(site/physical/virtual-machine/linux-container), within(選填)
-  infra             environment, slug
-  infra_endpoint    environment, owner(設備的 slug), slug, address
-  instance          environment, node(機器的 slug), slug, container(服務的 slug),
-                    address, endpoint(選填), standalone(選填 bool)
-                    **一台機器上要跑第二個服務就用這個**（例如 app 跟 log-agent
-                    同機）。node 填那台已經存在的機器。
-  system_instance   environment, slug, system(系統的 slug), address, endpoint(選填)
-                    address 是「這個外部系統在這個環境打哪裡」，例如 sso.corp.local:443。
-                    那個系統有好幾個接點定義時才需要 endpoint 指名要填哪一個。
-
-上面每一種都另外收 **memo**：給人看的備註，例如「等年底汰換」。
-沒有任何 lint 規則會讀它，所以拿它記規則管不到的事，
-不要把這種話塞進 purpose——那個欄位 L007 在看。
-
-要一次建很多台**同一個服務**的機器請改用 create_nodes，它會照樣板配 IP，
-但**每個服務實體都會配一台新機器**。要共用機器就用上面的 instance。",
-            json!({
-                "type": "object",
-                "required": ["items"],
-                "properties": {
-                    "items": {
-                        "type": "array",
-                        "minItems": 1,
-                        "description": "這一批要建的東西。不同 kind 可以混在同一批。",
-                        "items": {
-                            "type": "object",
-                            "required": ["kind", "fields"],
-                            "properties": {
-                                "kind": {"type": "string", "enum": [
-                                    "system", "container", "endpoint_def", "relationship", "person",
-                                    "environment", "node", "infra", "infra_endpoint",
-                                    "instance", "system_instance"]},
-                                "fields": {"type": "object", "description": "見上面各 kind 的欄位"}
-                            }
-                        }
-                    }
-                }
-            })),
-
-        tool("create_nodes", "\
-一次建立多台機器，每台上面跑一個指定的服務。
-
-六台 Redis 手打六次會打錯，而**打錯的通常是 IP，錯了不會有人發現**。
-所以用樣板：`{n}` 是序號、`{ip}` 是位址序號，兩個分開數
-（現實中 redis-01…redis-06 常常對到 10.0.1.11…10.0.1.16）。
-
-撞名會整批擋下來，不會建一半。",
-            json!({
-                "type": "object",
-                "required": ["environment", "container", "count", "address_template"],
-                "properties": {
-                    "environment": {"type": "string", "description": "環境的 slug"},
-                    "container": {"type": "string", "description": "服務的 slug"},
-                    "count": {"type": "integer", "minimum": 1},
-                    "name_template": {"type": "string", "description": "服務實體名稱，預設 `<服務>-{n}`"},
-                    "node_template": {"type": "string", "description": "機器名稱，預設 `vm-<服務>-{n}`"},
-                    "address_template": {"type": "string", "description": "例如 `10.0.1.{ip}:6379`"},
-                    "endpoint": {"type": "string", "description": "用服務身上的哪個接點定義。只有一個時可省略"},
-                    "start": {"type": "integer", "description": "`{n}` 從幾號開始，預設 1"},
-                    "pad": {"type": "integer", "description": "`{n}` 補零幾位，預設 2"},
-                    "ip_start": {"type": "integer", "description": "`{ip}` 從幾號開始，預設 1"},
-                    "node_kind": {"type": "string", "enum": ["physical", "virtual-machine", "linux-container"]},
-                    "within": {"type": "string", "description": "放在哪個節點（通常是站點）底下"}
-                }
-            })),
-
-        tool("propose_connection", "\
-照契約擬一條「這個環境應該要有」的連線，但**不建立**。
-
-先看它擬成什麼再決定。它只擬直達的一段——中間要不要經過 F5 是人的決定，
-母版上沒有那個資訊。",
-            json!({
-                "type": "object",
-                "required": ["environment", "relationship"],
-                "properties": {
-                    "environment": {"type": "string"},
-                    "relationship": {"type": "string", "description": "契約的 slug"}
-                }
-            })),
-
-        tool("add_connection", "\
-在某個環境實現契約。**一次送一批**，`items` 裡放這個環境要建的所有連線。
-
-連線通常是整份專案裡數量最多的東西（數百條），一條一趟會慢到不能用。
-
-`from` / `to` 用名字寫，不要用 id：
-  redis-01              那一台
-  redis-*               一整群（會自動幫你算 expect）
-  redis-* @ dc-main     限定在某個站點底下的那一群
-  f5-01 : vip-redis     設備上的某個 VIP
-  person:customer       人（只能當來源）
-  system:payment        外部系統的實體
-
-一項裡兩個都省略的話就照提案建（直達的一段）。
-
-**經過 F5 的流量要拆成兩段**，兩段都填同一個 relationship，
-放在同一批裡就好：
-  第一段  from: apache-*   to: f5-01 : vip-gateway
-  第二段  from: f5-01      to: gateway-*
-少了第二段的話 lint 會說走不通（L002）——那正是它該抓的東西。
-
-有一項失敗就整批不建，並且告訴你是第幾項。",
-            json!({
-                "type": "object",
-                "required": ["environment", "items"],
-                "properties": {
-                    "environment": {"type": "string", "description": "這一批都建在這個環境。跨環境請分開送。"},
-                    "items": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "required": ["relationship"],
-                            "properties": {
-                                "relationship": {"type": "string", "description": "契約的 slug"},
-                                "from": {"type": "string"},
-                                "to": {"type": "string"},
-                                "purpose": {"type": "string", "description": "省略時沿用契約的用途"},
-                                "fallback": {"type": "boolean", "description": "只在故障時才走的備援路徑"}
-                            }
-                        }
-                    }
-                }
-            })),
-
-        tool("update", "\
-改一個既有元素的欄位。`id` 從 describe 或 lint 的輸出拿。
-只填要改的欄位，沒填的不動。
-
-服務實體給 `node` 就是**搬到另一台機器上**（舊的那台不會留下一份）。
-
-換環境、換擁有者做不到——那不是改一個欄位，是換一個東西。
-帶了會被擋下來並且告訴你怎麼做，不會假裝改好了。",
-            json!({
-                "type": "object",
-                "required": ["id", "fields"],
-                "properties": {"id": {"type": "string"}, "fields": {"type": "object"}}
-            })),
-
-        tool("delete", "\
-刪掉元素或連線。**兩步走：先看，再確認。**
-
-第一次呼叫**不填 confirm**，它只會告訴你「會刪掉哪些、之後會壞掉什麼」，
-不動任何東西。看過覺得對，再帶 `confirm: true` 送同一組參數。
-
-要大改結構就開 `cascade: true`。它會把「刪了這個之後會變成廢的」
-一路掃出來（指著空氣的契約、連線、服務實體…），一次清乾淨。
-沒有它的話，刪一個系統要來回幾十趟，每趟都得先跑 lint 才知道下一個刪誰。
-
-`cascade: false`（預設）就是原本的行為：只刪你指名的，
-懸空的東西留給 lint（L012）叫。人在畫面上一個一個處理時這樣是對的。
-
-⚠ cascade 一次可能消失幾十個東西。**預覽不是形式**，看清楚再確認。
-刪完仍然是未儲存狀態，使用者可以按 ⌘Z 一次退回整批。",
-            json!({
-                "type": "object",
-                "required": ["ids"],
-                "properties": {
-                    "ids": {
-                        "type": "array",
-                        "minItems": 1,
-                        "description": "要刪的 id，從 describe 或 lint 的輸出拿。連線的 id 也可以。",
-                        "items": {"type": "string"}
-                    },
-                    "cascade": {
-                        "type": "boolean",
-                        "description": "連帶刪掉會因此變成廢的東西。預設 false。"
-                    },
-                    "confirm": {
-                        "type": "boolean",
-                        "description": "true 才真的刪。省略＝只看預覽。"
-                    }
-                }
-            })),
-    ])
-}
-
-/// 每個工具都自動長出一個選填的 `project`。
-///
-/// 在這裡補而不是在十個 schema 裡各抄一次：抄的話遲早有一個會漏掉，
-/// 而症狀是「那個工具沒辦法指定專案」——Agent 只會覺得莫名其妙。
-fn tool(name: &str, description: &str, mut schema: Value) -> Value {
-    if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-        props.insert(
-            "project".into(),
-            json!({
-                "type": "string",
-                "description": "要動哪一個專案（名字或路徑片段）。\
-                    只開著一個的時候可以省略；開著多個又沒給，會回一份清單要你指定。"
-            }),
-        );
-    }
-    json!({ "name": name, "description": description, "inputSchema": schema })
+    crate::manual::list()
 }
 
 /// Agent 說要動哪一個專案。呼叫端要先拿它去 [`crate::pick::resolve`]。
@@ -286,7 +46,7 @@ fn tool(name: &str, description: &str, mut schema: Value) -> Value {
 /// 挑選的規則不放在這裡，因為挑選要看**全部**開著的專案，而 `ws` 只代表
 /// 已經挑好的那一個。分開之後，呼叫端才有辦法先解析、再只鎖那一個專案。
 pub fn wanted(args: &Value) -> Option<&str> {
-    args.get("project").and_then(Value::as_str)
+    query::wanted_project(args)
 }
 
 /// 這個工具需不需要先挑一個專案。
@@ -302,6 +62,12 @@ pub fn needs_project(name: &str) -> bool {
 ///
 /// `ws` 是**已經挑好的那一個專案**；`open` 是全部開著的，只給 `projects`
 /// 與錯誤訊息用——工具本身不該有辦法碰到別的專案。
+///
+/// # 為什麼參數在這裡就解析完
+///
+/// `scope` / `select` / `detail` 每一支的意思都一樣，所以在分派之前解析完，
+/// 八支工具就不可能對同一個欄位有八種理解。認不得的值也在這裡一次擋掉，
+/// 錯誤訊息因此只有一份。
 pub fn call(
     ws: &mut dyn Workspace,
     open: &[crate::pick::Open],
@@ -314,126 +80,41 @@ pub fn call(
     if ws.project().is_none() {
         return Err(crate::pick::NOTHING_OPEN.into());
     }
+
+    let scope = Scope::of(args);
     match name {
-        "describe" => Ok(describe(ws.project().unwrap())),
-        "lint" => Ok(report(ws.project().unwrap())),
-        "create" => create(ws, args),
-        "create_nodes" => create_nodes(ws, args),
-        "propose_connection" => propose_connection(ws, args),
-        "add_connection" => add_connection(ws, args),
-        "update" => update(ws, args),
-        "delete" => delete(ws, args),
-        _ => Err(format!("沒有這個工具：{name}")),
-    }
-}
-
-// ── 讀 ──────────────────────────────────────────────────────────
-
-fn describe(project: &Project) -> String {
-    let mut out = format!("專案：{}（{}）\n", project.name, project.slug);
-
-    for env in &project.environments {
-        out.push_str(&format!("環境 {} ({})\n", env.slug, env.name));
-    }
-    if project.environments.is_empty() {
-        out.push_str("環境：一個都還沒有。沒有環境的話 lint 不會有話說——邏輯層自己不會缺什麼。\n");
-    }
-
-    // 每種資源一段。用 inventory 那份，跟畫面上看到的完全一樣——
-    // Agent 與使用者看到的不一致的話，兩邊會講不到同一件事。
-    for table in inventory::tables(project, project.environments.first().map(|e| &e.id)) {
-        out.push_str(&format!("\n## {}（{}）\n", table.title, table.rows.len()));
-        if table.rows.is_empty() {
-            out.push_str(&format!("（還沒有）{}\n", table.empty_hint));
-            continue;
+        "describe" => {
+            let project = ws.project().unwrap();
+            Ok(query::describe(
+                project,
+                &scope,
+                &Select::of(args)?,
+                Detail::of(args)?,
+            ))
         }
-        out.push_str(&format!("| id | {} |\n", table.columns.join(" | ")));
-        for row in &table.rows {
-            out.push_str(&format!("| {} | {} |\n", row.id, row.cells.join(" | ")));
+        "lint" => {
+            let project = ws.project().unwrap();
+            Ok(query::report(
+                project,
+                &scope,
+                &Select::of(args)?,
+                Detail::of(args)?,
+            ))
         }
-    }
-    out
-}
-
-fn report(project: &Project) -> String {
-    let findings = lint(project);
-    if findings.is_empty() {
-        return "沒有發現任何缺漏。".into();
-    }
-
-    let errors = findings
-        .iter()
-        .filter(|f| f.severity() == Severity::Error)
-        .count();
-    let mut out = format!("{} 個錯誤、{} 個警告：\n", errors, findings.len() - errors);
-    for f in &findings {
-        let env = f
-            .environment
-            .as_ref()
-            .and_then(|id| project.environment(id))
-            .map(|e| e.slug.as_str())
-            .unwrap_or("邏輯層");
-        out.push_str(&format!(
-            "- {} [{env}] {}（subject: {}）{}\n",
-            f.rule.code(),
-            f.detail,
-            f.subject,
-            how_to_fix(project, f)
-        ));
-    }
-    out
-}
-
-/// 每一項都附上「這種問題怎麼修」。
-///
-/// 少了這一句，Agent 看到 L002 只會知道「有東西壞了」，
-/// 然後開始亂試——最常見的亂試是把契約刪掉，那完全是反效果。
-///
-/// # L001 要看 subject 才知道怎麼修
-///
-/// 同一條規則會報在三種東西上，而三種的修法完全不同：契約要補連線、
-/// 服務要建機器、外部系統要建實體。原本三種給同一句「用 create_nodes
-/// 建機器，或用 add_connection 補連線」——兩句話裡至少有一句是錯的，
-/// 而外部系統那種**兩句都是錯的**。
-///
-/// 分辨的邏輯**不在這裡重寫**：`edit::fix_for` 已經為了畫面上的按鈕
-/// 做過同一件事。抄一份的話，兩邊遲早會對同一項發現給出不同的建議。
-fn how_to_fix(project: &Project, finding: &loom_core::lint::Finding) -> &'static str {
-    use loom_core::edit::Fix;
-
-    if finding.rule == Rule::L001 {
-        return match loom_core::edit::fix_for(project, finding) {
-            Some(Fix::AddConnection { .. }) => {
-                " → 這條契約在這個環境還沒有任何連線。用 add_connection 補"
-            }
-            Some(Fix::AddInstances { .. }) => {
-                " → 這個服務在這個環境一台都還沒建。用 create_nodes 建機器"
-            }
-            Some(Fix::AddResource { .. }) => {
-                " → 這個外部系統在這個環境還沒有實體。用 create 建一個 \
-                 system_instance，記得填 address"
-            }
-            _ => " → 這個邏輯層元素在這個環境還沒有實現",
-        };
-    }
-
-    match finding.rule {
-        // 上面已經處理掉了，這裡是為了讓 match 保持窮舉。
-        Rule::L001 => unreachable!(),
-        Rule::L002 => " → 路徑斷了。用 add_connection 補上缺的那一段（經過 F5 要拆兩段）",
-        Rule::L003 => " → 指到了不存在的東西。用 update 改掉那個參照",
-        Rule::L004 => " → 用 update 改 expect，或補上少的那幾台機器",
-        Rule::L005 => " → 萬用字元要填 expect",
-        Rule::L006 => " → 用 update 補上位址",
-        Rule::L007 => " → 用 update 補上用途",
-        Rule::L008 => " → 沒有連線碰到它。補一條連線，或它真的是冷備機就 update standalone=true",
-        Rule::L012 => " → 參照壞了。用 update 改掉，或把懸空的那個元素 delete",
-        // 兩條路都要講。只說「人不能當目標」的話，Agent 最常見的亂試是
-        // 把整條契約刪掉——而那條關係是真的存在的，只是方向寫反了。
-        Rule::L013 => " → 人只能當來源。用 update 把兩端對調，或把目標改成對方的服務",
-        // 你是用**名字**在指涉東西的，所以撞名對你的影響比對人大得多：
-        // 「連到 pay-01」會安靜地接到先找到的那一個。
-        Rule::L014 => " → 兩個東西同名。用 update 改掉其中一個的 slug",
+        "create" => create(ws, &scope, args),
+        "create_nodes" => create_nodes(ws, &scope, args),
+        "add_connection" => add_connection(ws, &scope, args),
+        "update" => update(ws, &scope, args),
+        "delete" => delete(ws, &scope, args),
+        // 併掉的那一支。回一句指路，不是「沒有這個工具」——舊的設定檔與
+        // 舊的對話裡還留著這個名字，而它想做的事現在有更好的做法。
+        "propose_connection" => Err("propose_connection 已經併進 add_connection 了：\
+             送同一批 items 並加上 `dry_run: true`，它會擬給你看而且一個都不建。"
+            .into()),
+        _ => Err(format!(
+            "沒有這個工具：{name}。有的是：projects、describe、lint、create、\
+             create_nodes、add_connection、update、delete"
+        )),
     }
 }
 
@@ -443,7 +124,45 @@ fn how_to_fix(project: &Project, finding: &loom_core::lint::Finding) -> &'static
 ///
 /// 「建好了」對 Agent 沒有資訊量；「建好了，但多出兩個錯誤」它才知道
 /// 要不要繼續往下走。這跟刪除確認框問「會弄壞什麼」是同一個道理。
-fn with_lint_delta(ws: &mut dyn Workspace, edit: &Edit, done: &str) -> Result<String, String> {
+///
+/// # `dry_run` 為什麼每一支寫入工具都收
+///
+/// 「我想先看看」以前只有 `delete` 答得出來，而 `propose_connection` 是
+/// 專門為了回答這件事而存在的**第九支工具**——只服務一種操作。
+///
+/// 現在它是每一支的同一個欄位，所以 Agent 學一次用四處，
+/// 也就不會為了看一眼而真的建下去。算的是同一份 [`loom_core::edit::preview`]，
+/// 跟畫面上的刪除確認框看到的是同一個「會弄壞什麼」。
+fn with_lint_delta(
+    ws: &mut dyn Workspace,
+    edit: &Edit,
+    done: &str,
+    dry_run: bool,
+) -> Result<String, String> {
+    if dry_run {
+        let project = ws.project().unwrap();
+        let impact = loom_core::edit::preview(project, edit).map_err(|e| e.to_string())?;
+        let mut out = format!("**預覽，什麼都還沒有動。**\n{done}");
+        if impact.introduced.is_empty() {
+            out.push_str("\n這樣做不會多出任何問題。");
+        } else {
+            out.push_str(&format!(
+                "\n這樣做會多出 {} 項問題：",
+                impact.introduced.len()
+            ));
+            for f in &impact.introduced {
+                out.push_str(&format!(
+                    "\n- {} {}{}",
+                    f.rule.code(),
+                    f.detail,
+                    query::how_to_fix(project, f)
+                ));
+            }
+        }
+        out.push_str("\n\n確定的話，把 `dry_run` 拿掉再送一次同一組參數。");
+        return Ok(out);
+    }
+
     let before = lint(ws.project().unwrap());
     ws.edit(edit)?;
     let after = lint(ws.project().unwrap());
@@ -466,7 +185,7 @@ fn with_lint_delta(ws: &mut dyn Workspace, edit: &Edit, done: &str) -> Result<St
                 "\n- {} {}{}",
                 f.rule.code(),
                 f.detail,
-                how_to_fix(now, f)
+                query::how_to_fix(now, f)
             ));
         }
     }
@@ -474,8 +193,14 @@ fn with_lint_delta(ws: &mut dyn Workspace, edit: &Edit, done: &str) -> Result<St
     Ok(out)
 }
 
-fn create(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
-    let items = items_of(args, "kind")?;
+/// 這一趟要不要真的動手。
+fn dry_run(args: &Value) -> bool {
+    args.get("dry_run").and_then(Value::as_bool) == Some(true)
+}
+
+fn create(ws: &mut dyn Workspace, scope: &Scope, args: &Value) -> Result<String, String> {
+    let items = items_of(args, &["kind"])?;
+    let env = scope.environment.as_deref();
 
     // 邊建邊套用在一份複本上，理由是**同一批裡後面的要指名前面的**：
     // 先建系統再建掛在它底下的服務，若整批都對著「還沒動過的專案」解名字，
@@ -486,7 +211,7 @@ fn create(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
 
     for (i, item) in items.iter().enumerate() {
         let at = |e: String| in_batch(i, items.len(), &e);
-        let resource = build_resource(&scratch, item).map_err(at)?;
+        let resource = build_resource(&scratch, item, env).map_err(at)?;
         made.push((
             str_field(item, "kind").map_err(at)?.to_string(),
             resource.slug().to_string(),
@@ -501,7 +226,7 @@ fn create(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
         edits.push(edit);
     }
 
-    with_lint_delta(ws, &Edit::Batch(edits), &made_summary(&made))
+    with_lint_delta(ws, &Edit::Batch(edits), &made_summary(&made), dry_run(args))
 }
 
 /// 建好之後回報什麼。
@@ -542,60 +267,78 @@ fn made_summary(made: &[(String, String, Id)]) -> String {
 }
 
 /// 把一項 `{kind, fields}` 變成一個 [`Resource`]，名字全部對著 `project` 解。
-fn build_resource(project: &Project, item: &Value) -> Result<Resource, String> {
+///
+/// `env_default` 是 `scope.environment`。每一項的 `fields.environment` 是舊寫法，
+/// 收但不教——理由見 [`crate::manual`]。
+fn build_resource(
+    project: &Project,
+    item: &Value,
+    env_default: Option<&str>,
+) -> Result<Resource, String> {
     let kind_name = str_field(item, "kind")?;
     let fields = item.get("fields").cloned().unwrap_or_else(|| json!({}));
 
-    let (kind, environment, owner) = match kind_name {
-        "system" => (Kind::System, None, None),
-        "person" => (Kind::Person, None, None),
-        "environment" => (Kind::Environment, None, None),
-        "relationship" => (Kind::Relationship, None, None),
-        "container" => (
+    // 環境層的那幾種都要它，所以只解析一次。
+    let env_slug = || -> Result<&str, String> {
+        opt_str(&fields, "environment")
+            .or(env_default)
+            .ok_or_else(|| {
+                format!(
+                    "{kind_name} 是環境層的東西，要說清楚是哪一個環境。\
+                 加上 `scope`: {{\"environment\": \"…\"}}。有的是：{}",
+                    slugs(project.environments.iter().map(|e| &e.slug))
+                )
+            })
+    };
+
+    let (kind, environment, owner) = match query::kind_of(kind_name)? {
+        Kind::System => (Kind::System, None, None),
+        Kind::Person => (Kind::Person, None, None),
+        Kind::Environment => (Kind::Environment, None, None),
+        Kind::Relationship => (Kind::Relationship, None, None),
+        Kind::Container => (
             Kind::Container,
             None,
             Some(system_id(project, str_field(&fields, "system")?)?),
         ),
-        "endpoint_def" => (
+        Kind::EndpointDef => (
             Kind::EndpointDef,
             None,
             Some(owner_id(project, str_field(&fields, "owner")?)?),
         ),
-        "node" => (
-            Kind::Node,
-            Some(env_id(project, str_field(&fields, "environment")?)?),
-            opt_str(&fields, "within")
-                .map(|s| node_id(project, str_field(&fields, "environment")?, s))
-                .transpose()?,
-        ),
-        "infra" => (
-            Kind::Infra,
-            Some(env_id(project, str_field(&fields, "environment")?)?),
-            None,
-        ),
-        "infra_endpoint" => {
-            let env = str_field(&fields, "environment")?;
+        Kind::Node => {
+            let env = env_slug()?;
+            (
+                Kind::Node,
+                Some(env_id(project, env)?),
+                opt_str(&fields, "within")
+                    .map(|s| node_id(project, env, s))
+                    .transpose()?,
+            )
+        }
+        Kind::Infra => (Kind::Infra, Some(env_id(project, env_slug()?)?), None),
+        Kind::InfraEndpoint => {
+            let env = env_slug()?;
             (
                 Kind::InfraEndpoint,
                 Some(env_id(project, env)?),
                 Some(infra_id(project, env, str_field(&fields, "owner")?)?),
             )
         }
-        "system_instance" => (
+        Kind::SystemInstance => (
             Kind::SystemInstance,
-            Some(env_id(project, str_field(&fields, "environment")?)?),
+            Some(env_id(project, env_slug()?)?),
             Some(system_id(project, str_field(&fields, "system")?)?),
         ),
         // 服務實體。`node` 不在這裡解，交給 `fill`——那樣「放到哪台機器上」
         // 建立與修改走的是同一行程式碼，也就不會有一邊做得到、一邊做不到。
         // 這裡只把「少了 node」講清楚，不然錯誤會晚到 `write_into` 才發生，
         // 而那時它只說得出「找不到 」。
-        "instance" => {
-            let env = str_field(&fields, "environment")?;
+        Kind::Instance => {
+            let env = env_slug()?;
             str_field(&fields, "node")?;
             (Kind::Instance, Some(env_id(project, env)?), None)
         }
-        other => return Err(format!("認不得的 kind：{other}")),
     };
 
     let mut resource = blank(kind, environment, owner);
@@ -603,19 +346,157 @@ fn build_resource(project: &Project, item: &Value) -> Result<Resource, String> {
     Ok(resource)
 }
 
-fn update(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
-    let id = Id::new(str_field(args, "id")?);
-    let fields = args.get("fields").cloned().unwrap_or_else(|| json!({}));
-    let project = ws.project().unwrap();
+/// 改一批既有的東西。
+///
+/// # 為什麼它以前是單數
+///
+/// 沒有理由，只是先寫了。而代價是：Agent 要補三十個位址就得走三十趟，
+/// 每一趟都回一份完整的 lint 變化——那是三十份幾乎一樣的報告。
+///
+/// 現在跟 `create` 同一個形狀：一批一步，⌘Z 一次退掉。
+///
+/// # 為什麼要在複本上邊改邊解名字
+///
+/// 同 `create`。改了 slug 之後，同一批裡後面那一項指名的可能就是**新名字**
+/// ——不在複本上跑的話，那一項會說找不到。
+fn update(ws: &mut dyn Workspace, scope: &Scope, args: &Value) -> Result<String, String> {
+    let items = items_of(args, &["target", "id"])?;
+    let mut scratch = ws.project().unwrap().clone();
+    let envs = target::environments(&scratch, scope)?;
 
-    let mut resource = find_resource(project, &id)?;
-    fill(&mut resource, &fields, project, false)?;
-    let slug = resource.slug().to_string();
-    with_lint_delta(
-        ws,
-        &Edit::UpdateResource(resource),
-        &format!("改好了：{slug}"),
-    )
+    let mut edits = Vec::with_capacity(items.len());
+    let mut changed = Vec::with_capacity(items.len());
+
+    for (i, item) in items.iter().enumerate() {
+        let at = |e: String| in_batch(i, items.len(), &e);
+        // `id` 是舊寫法，照樣收。
+        let text = opt_str(item, "target")
+            .or_else(|| opt_str(item, "id"))
+            .ok_or_else(|| at("少了必填欄位 target".into()))?;
+        let fields = item.get("fields").cloned().unwrap_or_else(|| json!({}));
+
+        let found = target::resolve(&scratch, &envs, text).map_err(at)?;
+        changed.push(found.what(&scratch));
+
+        let edit = match found {
+            Target::Resource(resource) => {
+                let mut resource = *resource;
+                fill(&mut resource, &fields, &scratch, false).map_err(at)?;
+                Edit::UpdateResource(resource)
+            }
+            Target::Connection(row) => connection_edits(&row, &fields).map_err(at)?,
+        };
+
+        loom_core::edit::apply(&mut scratch, &edit)
+            .map_err(|e| in_batch(i, items.len(), &e.to_string()))?;
+        edits.push(edit);
+    }
+
+    let done = format!("改好了 {} 個：\n  {}", changed.len(), changed.join("\n  "));
+    with_lint_delta(ws, &Edit::Batch(edits), &done, dry_run(args))
+}
+
+/// 連線收得到的欄位。**唯一的一份**——[`connection_edits`] 照著擋，
+/// 錯誤訊息照著列，說明書也照著印。
+///
+/// `memo` 放最後，跟每一張表把備註放最後一欄是同一個理由：
+/// 它是自由文字，長度不受控，不該把有結構的欄位擠掉。
+pub(crate) const CONNECTION_FIELDS: &[&str] =
+    &["purpose", "kind", "from_expect", "to_expect", "memo"];
+
+/// 改一條連線。
+///
+/// # 為什麼它不是 `UpdateResource`
+///
+/// 連線不是 [`Resource`]——它住在環境的 `connections` 裡，兩端是已經解析過的
+/// [`Endpointing`](loom_core::environment::Endpointing)，沒有 slug 也沒有
+/// 統一的編輯表單。所以核心給的是四支各自負責一件事的 `Edit`。
+///
+/// 這四支**本來就都在**（畫面上的 lint 面板按鈕用的就是它們），
+/// 只是 MCP 沒接出來。於是 Agent 想把 `expect` 從 3 改成 6，唯一的做法是
+/// 把整條連線刪掉重建——而重建會換一個新的 id，圖上綁著它的標註就斷了。
+///
+/// 一項可以同時改好幾個欄位，所以回的是一個 [`Edit::Batch`]。
+fn connection_edits(row: &loom_core::table::Row, fields: &Value) -> Result<Edit, String> {
+    let map = fields.as_object().ok_or("fields 要是一個物件")?;
+    let unknown: Vec<&str> = map
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !CONNECTION_FIELDS.contains(k))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "連線認不得這些欄位：{}。它收的是：{}",
+            unknown.join("、"),
+            CONNECTION_FIELDS.join("、"),
+        ));
+    }
+
+    let mut edits = Vec::new();
+
+    // 備註每一種東西都收，所以在攤開連線自己那幾個欄位**之前**就先處理掉。
+    // 理由同 `fill`：漏掉的那一種就是「寫得進、寫不進去」，而備註沒有規則
+    // 會回報，所以那種缺口只會以「我明明寫了」的形式冒出來。
+    if let Some(memo) = map.get("memo").and_then(Value::as_str) {
+        edits.push(Edit::SetConnectionMemo {
+            environment: row.environment.clone(),
+            connection: row.id.clone(),
+            memo: memo.to_string(),
+        });
+    }
+
+    if let Some(purpose) = map.get("purpose").and_then(Value::as_str) {
+        edits.push(Edit::SetPurpose {
+            environment: Some(row.environment.clone()),
+            subject: row.id.clone(),
+            purpose: purpose.to_string(),
+        });
+    }
+
+    if let Some(kind) = map.get("kind").and_then(Value::as_str) {
+        edits.push(Edit::SetConnectionKind {
+            environment: row.environment.clone(),
+            connection: row.id.clone(),
+            kind: match kind {
+                "primary" => ConnectionKind::Primary,
+                "fallback" => ConnectionKind::Fallback,
+                other => {
+                    return Err(format!(
+                        "認不得的連線種類 {other}。可以用：primary（平常走的）、\
+                         fallback（只在故障時走的）"
+                    ));
+                }
+            },
+        });
+    }
+
+    // 兩端分開講。一個 `expect` 猜不出是哪一端，而猜錯會安靜地改到另一端——
+    // 那正是 `Finding::end` 存在的理由（一條連線的兩端都可能是萬用字元）。
+    for (key, side) in [
+        ("from_expect", ConnectionEnd::From),
+        ("to_expect", ConnectionEnd::To),
+    ] {
+        let Some(v) = map.get(key) else { continue };
+        let expect = match v {
+            Value::Null => None,
+            Value::Number(n) => Some(n.as_u64().ok_or_else(|| format!("{key} 要是正整數"))? as u32),
+            _ => return Err(format!("{key} 要是數字，或 null（清掉）")),
+        };
+        edits.push(Edit::SetExpect {
+            environment: row.environment.clone(),
+            connection: row.id.clone(),
+            side,
+            expect,
+        });
+    }
+
+    if edits.is_empty() {
+        return Err(format!(
+            "沒有指定要改什麼。連線收的是：{}",
+            CONNECTION_FIELDS.join("、")
+        ));
+    }
+    Ok(Edit::Batch(edits))
 }
 
 /// 刪除。**預設只給預覽，帶了 `confirm` 才真的動手。**
@@ -626,31 +507,37 @@ fn update(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
 /// 而 `cascade` 更是這個專案裡唯一一個「按一下消失幾十個元素」的操作。
 ///
 /// 對一個賣點是「怕漏」的工具，讓 Agent 一句話掃掉半個模型是說不過去的。
-fn delete(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
+fn delete(ws: &mut dyn Workspace, scope: &Scope, args: &Value) -> Result<String, String> {
     let project = ws.project().unwrap();
+    let envs = target::environments(project, scope)?;
 
-    let ids: Vec<Id> = match args.get("ids").and_then(Value::as_array) {
-        Some(list) if !list.is_empty() => list
+    // `targets` 是現在的寫法；`ids` 與單數的 `id` 是舊的，照樣收。
+    let texts: Vec<String> = match args.get("targets").or_else(|| args.get("ids")) {
+        Some(Value::Array(list)) if !list.is_empty() => list
             .iter()
             .map(|v| {
                 v.as_str()
-                    .map(Id::new)
-                    .ok_or_else(|| "ids 裡面要放字串".to_string())
+                    .map(str::to_string)
+                    .ok_or_else(|| "targets 裡面要放字串".to_string())
             })
             .collect::<Result<_, _>>()?,
-        // 舊的單數寫法照樣收。Agent 的設定不會因為我們改了形狀就跟著改。
-        _ => {
-            vec![Id::new(str_field(args, "id").map_err(|_| {
-                "少了必填欄位 ids（要是一個陣列）".to_string()
-            })?)]
-        }
+        _ => vec![
+            opt_str(args, "target")
+                .or_else(|| opt_str(args, "id"))
+                .ok_or("少了必填欄位 targets（要是一個陣列）")?
+                .to_string(),
+        ],
     };
 
-    let mut seeds = Vec::with_capacity(ids.len());
-    let mut named = Vec::with_capacity(ids.len());
-    for id in &ids {
-        let r = cascade::removal(project, id)
-            .ok_or_else(|| format!("找不到 id 為 {id} 的元素或連線。用 describe 看目前有什麼。"))?;
+    let mut seeds = Vec::with_capacity(texts.len());
+    let mut named = Vec::with_capacity(texts.len());
+    for text in &texts {
+        // 解析與「怎麼刪」分開：前者知道名字怎麼對到東西，後者知道刪一個
+        // 東西要下什麼 Edit。`cascade::removal` 已經兩種都認得，所以這裡
+        // 只負責把名字換成 id。
+        let found = target::resolve(project, &envs, text)?;
+        let r = cascade::removal(project, found.id())
+            .ok_or_else(|| format!("{text} 對到的東西刪不掉。用 describe 看目前有什麼。"))?;
         named.push(r.what);
         seeds.push(r.edit);
     }
@@ -669,6 +556,9 @@ fn delete(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
         .collect();
     let batch = Edit::Batch(all);
 
+    // 刪除的預覽不叫 `dry_run`，因為它的**預設方向相反**：其他工具預設動手，
+    // 這一支預設只看。兩邊用同一個字的話，Agent 會以為預設也一樣，
+    // 然後在其中一邊猜錯——而猜錯的那一邊是刪除。
     if args.get("confirm").and_then(Value::as_bool) != Some(true) {
         return Ok(delete_preview(
             project,
@@ -691,7 +581,7 @@ fn delete(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
                 .join("\n  ")
         ));
     }
-    with_lint_delta(ws, &batch, &done)
+    with_lint_delta(ws, &batch, &done, false)
 }
 
 /// 「按下去會發生什麼」。什麼都不改。
@@ -748,7 +638,7 @@ fn delete_preview(
                     f.detail,
                     // 只有刪之前那份專案可用。分不出來時 fix_for 回 None，
                     // 退回一句通用的話——不會亂講。
-                    how_to_fix(project, f)
+                    query::how_to_fix(project, f)
                 ));
             }
             if !wants_cascade {
@@ -764,15 +654,52 @@ fn delete_preview(
     out
 }
 
-fn create_nodes(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
-    let project = ws.project().unwrap();
-    let env_slug = str_field(args, "environment")?;
+/// 一次開好幾群機器。
+///
+/// # 為什麼它也要收 `items`
+///
+/// 六個服務各要六台，以前是六趟——每一趟都回一份完整的 lint 變化，
+/// 而前五份講的都是「還有五個服務一台都沒建」。那是 Agent 已經知道的事。
+///
+/// 現在一批算完再回報一次，⌘Z 也是一次退掉整批。
+fn create_nodes(ws: &mut dyn Workspace, scope: &Scope, args: &Value) -> Result<String, String> {
+    let items = items_of(args, &["container"])?;
+    let env_slug = env_from(ws.project().unwrap(), scope)?;
+
+    let mut scratch = ws.project().unwrap().clone();
+    let mut edits = Vec::with_capacity(items.len());
+    let mut listing: Vec<String> = Vec::new();
+
+    for (i, item) in items.iter().enumerate() {
+        let at = |e: String| in_batch(i, items.len(), &e);
+        // 每一項都對著複本解名字：第二群機器可能要放在第一群剛建好的站點底下。
+        let edit = build_nodes(&scratch, &env_slug, item, &mut listing).map_err(at)?;
+        loom_core::edit::apply(&mut scratch, &edit)
+            .map_err(|e| in_batch(i, items.len(), &e.to_string()))?;
+        edits.push(edit);
+    }
+
+    let done = format!(
+        "在 {env_slug} 建好 {} 台：\n  {}",
+        listing.len(),
+        listing.join("\n  ")
+    );
+    with_lint_delta(ws, &Edit::Batch(edits), &done, dry_run(args))
+}
+
+/// 把一項機器規格變成一個 [`Edit::AddInstances`]。
+fn build_nodes(
+    project: &Project,
+    env_slug: &str,
+    item: &Value,
+    listing: &mut Vec<String>,
+) -> Result<Edit, String> {
     let env = project
         .environment(&env_id(project, env_slug)?)
         .ok_or("找不到環境")?
         .clone();
 
-    let container_slug = str_field(args, "container")?;
+    let container_slug = str_field(item, "container")?;
     let container = project
         .logical
         .containers
@@ -786,7 +713,7 @@ fn create_nodes(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> 
         })?;
 
     // 接點只有一個時不必指定——那是最常見的情況，多問一次只是噪音。
-    let endpoint = match opt_str(args, "endpoint") {
+    let endpoint = match opt_str(item, "endpoint") {
         Some(want) => container
             .endpoints
             .iter()
@@ -815,18 +742,18 @@ fn create_nodes(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> 
     };
 
     let spec = BatchSpec {
-        count: u32_field(args, "count")?,
-        name_template: opt_str(args, "name_template")
+        count: u32_field(item, "count")?,
+        name_template: opt_str(item, "name_template")
             .unwrap_or(&format!("{container_slug}-{{n}}"))
             .to_string(),
-        node_template: opt_str(args, "node_template")
+        node_template: opt_str(item, "node_template")
             .unwrap_or(&format!("vm-{container_slug}-{{n}}"))
             .to_string(),
-        start: u32_or(args, "start", 1),
-        pad: u32_or(args, "pad", 2),
-        address_template: str_field(args, "address_template")?.to_string(),
-        ip_start: u32_or(args, "ip_start", 1),
-        node_kind: match opt_str(args, "node_kind") {
+        start: u32_or(item, "start", 1),
+        pad: u32_or(item, "pad", 2),
+        address_template: str_field(item, "address_template")?.to_string(),
+        ip_start: u32_or(item, "ip_start", 1),
+        node_kind: match opt_str(item, "node_kind") {
             Some("physical") => NodeKind::Physical,
             Some("linux-container") => NodeKind::LinuxContainer,
             _ => NodeKind::VirtualMachine,
@@ -839,55 +766,30 @@ fn create_nodes(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> 
         },
     };
 
-    let within = opt_str(args, "within")
+    let within = opt_str(item, "within")
         .map(|s| node_id(project, env_slug, s))
         .transpose()?;
     let plan = loom_core::batch::plan(project, &env, &spec).map_err(|e| e.to_string())?;
-    let listing = plan.preview.join("\n  ");
+    listing.extend(plan.preview.iter().cloned());
 
-    with_lint_delta(
-        ws,
-        &Edit::AddInstances {
-            environment: env.id.clone(),
-            within,
-            nodes: plan.nodes,
-        },
-        &format!("建好了 {} 台：\n  {listing}", spec.count),
-    )
+    Ok(Edit::AddInstances {
+        environment: env.id.clone(),
+        within,
+        nodes: plan.nodes,
+    })
 }
 
-fn propose_connection(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
-    let project = ws.project().unwrap();
-    let (env, rel) = env_and_relationship(project, args)?;
-    let p = connect::propose(project, &env, &rel).ok_or("找不到契約")?;
-
-    let mut out = format!(
-        "契約 {} 在 {} 的提案：\n",
-        str_field(args, "relationship")?,
-        env.slug
-    );
-    out.push_str(&format!("  用途：{}\n", p.purpose));
-    out.push_str(&format!(
-        "  完整：{}\n",
-        if p.is_complete() { "是" } else { "否" }
-    ));
-    for n in &p.notes {
-        out.push_str(&format!("  ⚠ {n}\n"));
-    }
-    out.push_str("直接呼叫 add_connection（不填 from/to）就會照這份建。");
-    Ok(out)
-}
-
-fn add_connection(ws: &mut dyn Workspace, args: &Value) -> Result<String, String> {
-    let items = items_of(args, "relationship")?;
-    let env_slug = str_field(args, "environment")?.to_string();
+fn add_connection(ws: &mut dyn Workspace, scope: &Scope, args: &Value) -> Result<String, String> {
+    let items = items_of(args, &["relationship"])?;
+    let env_slug = env_from(ws.project().unwrap(), scope)?;
 
     let mut scratch = ws.project().unwrap().clone();
     let mut edits = Vec::with_capacity(items.len());
+    let mut notes: Vec<String> = Vec::new();
 
     for (i, item) in items.iter().enumerate() {
         let at = |e: String| in_batch(i, items.len(), &e);
-        let edit = build_connection(&scratch, &env_slug, item).map_err(at)?;
+        let edit = build_connection(&scratch, &env_slug, item, &mut notes).map_err(at)?;
         // 同上：邊建邊套用，這樣「這一段的目標是剛剛那一段建出來的東西」也成立，
         // 而且失敗時知道是第幾項。
         loom_core::edit::apply(&mut scratch, &edit)
@@ -895,12 +797,45 @@ fn add_connection(ws: &mut dyn Workspace, args: &Value) -> Result<String, String
         edits.push(edit);
     }
 
-    let done = format!("在 {env_slug} 建好 {} 段連線。", edits.len());
-    with_lint_delta(ws, &Edit::Batch(edits), &done)
+    // 擬出來的東西要講清楚是**擬**的。`dry_run` 時這幾行就是以前
+    // `propose_connection` 唯一的產出，只是現在一次給整批。
+    let mut done = format!("在 {env_slug} 建好 {} 段連線。", edits.len());
+    if !notes.is_empty() {
+        done.push_str(&format!("\n擬的時候有幾句話：\n  {}", notes.join("\n  ")));
+    }
+    with_lint_delta(ws, &Edit::Batch(edits), &done, dry_run(args))
+}
+
+/// 環境層的寫入工具都要知道是哪個環境。
+///
+/// 只開著一個環境時可以省略——那是最常見的情況（大部分專案先只有 prod），
+/// 多問一次只是噪音。有好幾個又不講就**不猜**：猜錯是把一整批連線建到
+/// 別的環境去，而 lint 之後只會說「這個環境什麼都沒有」，
+/// 完全指不回是哪一步錯了。
+fn env_from(project: &Project, scope: &Scope) -> Result<String, String> {
+    if let Some(slug) = &scope.environment {
+        // 存不存在在這裡就確認掉，不然錯誤會晚到每一項各報一次。
+        env_id(project, slug)?;
+        return Ok(slug.clone());
+    }
+    match project.environments.as_slice() {
+        [only] => Ok(only.slug.clone()),
+        [] => Err("這個專案還沒有任何環境。先 create 一個 kind: \"environment\"。".into()),
+        many => Err(format!(
+            "有 {} 個環境，要說清楚是哪一個：加上 `scope`: {{\"environment\": \"…\"}}。有的是：{}",
+            many.len(),
+            slugs(many.iter().map(|e| &e.slug))
+        )),
+    }
 }
 
 /// 把一項連線規格變成一個 [`Edit::AddConnection`]。
-fn build_connection(project: &Project, env_slug: &str, item: &Value) -> Result<Edit, String> {
+fn build_connection(
+    project: &Project,
+    env_slug: &str,
+    item: &Value,
+    notes: &mut Vec<String>,
+) -> Result<Edit, String> {
     let env = project
         .environment(&env_id(project, env_slug)?)
         .ok_or("找不到環境")?
@@ -915,6 +850,18 @@ fn build_connection(project: &Project, env_slug: &str, item: &Value) -> Result<E
     let to_endpoint = relationship.to_endpoint.clone();
 
     let proposal = connect::propose(project, &env, &rel_id).ok_or("找不到契約")?;
+
+    // 提案自己講的那幾句話（「目標有好幾台，用萬用字元」之類）。以前只有
+    // `propose_connection` 說得出來，而那一支的存在理由就只是這幾行。
+    // 現在跟著建出來的東西一起回報，`dry_run` 時它就是完整的提案。
+    if opt_str(item, "from").is_none() || opt_str(item, "to").is_none() {
+        notes.extend(
+            proposal
+                .notes
+                .iter()
+                .map(|n| format!("[{}] {n}", relationship.slug)),
+        );
+    }
 
     let from = match opt_str(item, "from") {
         Some(text) => refs::resolve(project, &env, text, None)?,
@@ -954,7 +901,7 @@ fn build_connection(project: &Project, env_slug: &str, item: &Value) -> Result<E
 /// 每種資源收哪些欄位。**唯一的一份**——`fill` 照著擋，錯誤訊息照著列。
 ///
 /// 順序跟 `list()` 裡的說明一致，這樣 Agent 看到的兩份是同一份。
-fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
+pub(crate) fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
     match resource {
         Resource::Person(_) => &["slug", "name", "memo"],
         Resource::System(_) => &["slug", "name", "external", "memo"],
@@ -1019,7 +966,7 @@ fn accepted_fields(resource: &Resource) -> &'static [&'static str] {
 ///
 /// 搬家目前真的做不到（換環境要連帶處理連線、換擁有者等於換一個東西），
 /// 所以這裡的答案是**講清楚**，不是假裝做得到。
-fn create_only_fields(resource: &Resource) -> &'static [&'static str] {
+pub(crate) fn create_only_fields(resource: &Resource) -> &'static [&'static str] {
     match resource {
         Resource::EndpointDef { .. } => &["owner"],
         Resource::Node { .. } => &["environment", "within"],
@@ -1412,50 +1359,6 @@ fn protocol(v: &str) -> Result<Protocol, String> {
 
 // ── 查 id ───────────────────────────────────────────────────────
 
-fn find_resource(project: &Project, id: &Id) -> Result<Resource, String> {
-    // 走 inventory 而不是自己再寫一次搜尋：那份是畫面在用的同一批資料，
-    // 所以 Agent 拿到的 id 一定查得到，兩邊不會有一邊看得到一邊看不到。
-    for env in project
-        .environments
-        .iter()
-        .map(|e| Some(&e.id))
-        .chain(std::iter::once(None))
-    {
-        for table in inventory::tables(project, env) {
-            if let Some(row) = table.rows.iter().find(|r| &r.id == id) {
-                return Ok(row.resource.clone());
-            }
-        }
-    }
-    Err(format!(
-        "找不到 id 為 {id} 的元素。用 describe 看目前有什麼。"
-    ))
-}
-
-fn env_and_relationship(
-    project: &Project,
-    args: &Value,
-) -> Result<(loom_core::environment::Environment, Id), String> {
-    let env = project
-        .environment(&env_id(project, str_field(args, "environment")?)?)
-        .ok_or("找不到環境")?
-        .clone();
-    let want = str_field(args, "relationship")?;
-    let rel = project
-        .logical
-        .relationships
-        .iter()
-        .find(|r| r.slug == want)
-        .map(|r| r.id.clone())
-        .ok_or_else(|| {
-            format!(
-                "找不到契約 {want}。有的是：{}",
-                slugs(project.logical.relationships.iter().map(|r| &r.slug))
-            )
-        })?;
-    Ok((env, rel))
-}
-
 fn env_id(project: &Project, slug: &str) -> Result<Id, String> {
     project
         .environments
@@ -1567,16 +1470,22 @@ fn infra_id(project: &Project, env_slug: &str, slug: &str) -> Result<Id, String>
 ///
 /// 工具描述只教 `items`——兩種寫法都寫上去只會讓 Agent 猶豫。
 /// 但**收**還是兩種都收：模型有時會憑印象送出舊形狀，那時候與其
-/// 回一個它得重試才懂的錯誤，不如照做。`marker` 是判斷的依據：
-/// 頂層有那個欄位就當成「只有一項」。
-fn items_of(args: &Value, marker: &str) -> Result<Vec<Value>, String> {
+/// 回一個它得重試才懂的錯誤，不如照做。`markers` 是判斷的依據：
+/// 頂層有其中任何一個欄位就當成「只有一項」。
+///
+/// 收好幾個 marker 是因為欄位自己也改過名（`update` 的 `id` → `target`）。
+/// 舊 Agent 手上那份設定寫的是舊名字，而它送出來的那一趟**看起來完全正常**
+/// ——少了這個的話它會拿到「少了 items」，然後把整個請求重寫一次。
+/// 第一個 marker 是現在教的那個，錯誤訊息只提它。
+pub(crate) fn items_of(args: &Value, markers: &[&str]) -> Result<Vec<Value>, String> {
     match args.get("items") {
         Some(Value::Array(list)) if !list.is_empty() => Ok(list.clone()),
-        Some(Value::Array(_)) => Err("items 是空的，沒有東西可以建".into()),
+        Some(Value::Array(_)) => Err("items 是空的，沒有東西可以做".into()),
         Some(_) => Err("items 要是一個陣列".into()),
-        None if args.get(marker).is_some() => Ok(vec![args.clone()]),
+        None if markers.iter().any(|m| args.get(m).is_some()) => Ok(vec![args.clone()]),
         None => Err(format!(
-            "少了必填欄位 items（要是一個陣列，每一項至少要有 {marker}）"
+            "少了必填欄位 items（要是一個陣列，每一項至少要有 {}）",
+            markers[0]
         )),
     }
 }

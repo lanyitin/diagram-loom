@@ -13,10 +13,12 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  contextDrawing,
   bind,
   blankXml,
   boundShapes,
   dim,
+  canvasShapes,
   peopleOf,
   shapesOf,
   spotlight,
@@ -77,7 +79,14 @@ function environment(): Environment {
     infra: [
       { id: 'n-f5', slug: 'f5-01', endpoints: [{ id: 'vip', slug: 'vip', protocol: 'tcp', address: '10.0.0.100:6379' }] },
     ],
-    systems: [{ id: 'si-pay', slug: 'payment-gw', system: 's-pay', endpoints: [] }],
+    systems: [
+      {
+        id: 'si-pay',
+        slug: 'payment-gw',
+        system: 's-pay',
+        endpoints: [{ id: 'pay-ep', slug: 'api', protocol: 'tcp', address: '10.100.7.38:443' }],
+      },
+    ],
     connections: [],
   } as unknown as Environment
 }
@@ -149,10 +158,52 @@ describe('模型畫成圖', () => {
     expect(shapes.find((s) => s.loomId === 'i-redis')!.detail).toBe('10.0.1.11:6379')
   })
 
+  it('外部系統實體上也畫出位址', () => {
+    // 外部系統的位址是最常被拿去核對防火牆的東西。曾經這裡印的是
+    // 系統名字，圖上只剩「金流系統」四個字，等於把 IP 藏起來。
+    const shapes = shapesOf(project(), environment())
+    expect(shapes.find((s) => s.loomId === 'si-pay')!.detail).toBe('10.100.7.38:443')
+  })
+
+  it('外部系統沒填位址時退回系統名字', () => {
+    const env = environment()
+    env.systems![0]!.endpoints = []
+    const shapes = shapesOf(project(), env)
+    expect(shapes.find((s) => s.loomId === 'si-pay')!.detail).toBe('金流系統')
+  })
+
   it('外部系統畫成虛線，跟自家的分得出來', () => {
     const shapes = shapesOf(project(), environment())
     expect(shapes.find((s) => s.loomId === 'si-pay')!.style).toContain('dashed=1')
     expect(shapes.find((s) => s.loomId === 'i-redis')!.style).not.toContain('dashed=1')
+  })
+})
+
+describe('畫布上該有的形狀', () => {
+  const fromPerson = () => [link({ from: 'per-1', fromPerson: true, to: 'i-redis' })]
+
+  it('起點是人的線，兩端在畫布上都找得到', () => {
+    // 這條才是重點。人漏掉的症狀**不是**「圖上少一個人」——那還看得出來。
+    // 症狀是那條線兩端對不上、被安靜地丟掉，而丟掉一條線會讓後面每一條
+    // 線的轉彎點整批錯開（見 `graph/layout.ts` 的 `edgeId`），
+    // 整張圖變成穿過所有容器的蜘蛛網。看起來像排版引擎爛。
+    const ids = new Set(canvasShapes(project(), environment(), fromPerson()).map((s) => s.id))
+    for (const l of fromPerson()) {
+      expect(ids.has(l.from) && ids.has(l.to), `${l.from} → ${l.to} 有一端畫不出來`).toBe(true)
+    }
+  })
+
+  it('沒有連線用到的人就不畫', () => {
+    // 部署圖上冒出一堆跟這個環境無關的角色，比少畫更難讀。
+    const shapes = canvasShapes(project(), environment(), [link({})])
+    expect(shapes.some((s) => s.kind === 'person')).toBe(false)
+  })
+
+  it('人畫上去了，但仍然刻意沒有 loomId', () => {
+    // 人不在 `reconcile::model_elements` 裡。給了 loomId，
+    // 對帳就會說「圖上有這個、模型沒有」——一個假的缺漏。
+    const person = canvasShapes(project(), environment(), fromPerson()).find((s) => s.kind === 'person')
+    expect(person?.loomId).toBeUndefined()
   })
 })
 
@@ -507,5 +558,136 @@ describe('空白的新圖', () => {
 
   it('名字裡的特殊字元會跳脫', () => {
     expect(blankXml('e', 'A & B')).toContain('A &amp; B')
+  })
+})
+
+
+describe('Context 圖', () => {
+  /**
+   * 一份剛好踩到每一種情況的模型：自家系統、外部系統、沒部署到這個環境的
+   * 系統、同一個系統內部的契約，以及同一對系統之間的兩條契約。
+   */
+  function shop(): Project {
+    return {
+      id: 'p',
+      slug: 'shop',
+      name: '網路商店',
+      logical: {
+        people: [
+          { id: 'per-1', slug: '客戶', name: '客戶' },
+          { id: 'per-2', slug: '客服', name: '客服' },
+        ],
+        systems: [
+          { id: 's-shop', slug: 'shop', name: '商店', external: false, endpoints: [] },
+          { id: 's-pay', slug: 'payment', name: '金流系統', external: true, endpoints: [] },
+          { id: 's-old', slug: 'legacy', name: '舊主機', external: false, endpoints: [] },
+        ],
+        containers: [
+          { id: 'c-api', slug: 'api', name: '訂單 API', system: 's-shop', endpoints: [] },
+          { id: 'c-redis', slug: 'redis', name: 'Redis 快取', system: 's-shop', endpoints: [] },
+          { id: 'c-old', slug: 'old-api', name: '舊 API', system: 's-old', endpoints: [] },
+        ],
+        relationships: [
+          { id: 'r-order', slug: 'order', purpose: '下單', from: { person: 'per-1' }, to: { container: 'c-api' }, to_endpoint: 'e' },
+          { id: 'r-pay', slug: 'pay', purpose: '刷卡', from: { container: 'c-api' }, to: { system: 's-pay' }, to_endpoint: 'e' },
+          { id: 'r-refund', slug: 'refund', purpose: '退款', from: { container: 'c-api' }, to: { system: 's-pay' }, to_endpoint: 'e' },
+          { id: 'r-cache', slug: 'cache', purpose: '查快取', from: { container: 'c-api' }, to: { container: 'c-redis' }, to_endpoint: 'e' },
+          { id: 'r-old', slug: 'old', purpose: '查舊資料', from: { container: 'c-api' }, to: { container: 'c-old' }, to_endpoint: 'e' },
+        ],
+      },
+      environments: [],
+    } as unknown as Project
+  }
+
+  function env(): Environment {
+    return {
+      id: 'env-prod',
+      slug: 'prod',
+      name: '正式環境',
+      nodes: [
+        {
+          id: 'n-vm',
+          slug: 'vm-01',
+          kind: 'virtual-machine',
+          children: [],
+          instances: [
+            { id: 'i-api', slug: 'api-01', container: 'c-api', endpoints: [] },
+            { id: 'i-redis', slug: 'redis-01', container: 'c-redis', endpoints: [] },
+          ],
+        },
+      ],
+      infra: [],
+      systems: [{ id: 'si-pay', slug: 'payment-gw', system: 's-pay', endpoints: [] }],
+      connections: [],
+    } as unknown as Environment
+  }
+
+  it('一個系統一個框，沒有機器也沒有服務', () => {
+    const { shapes } = contextDrawing(shop(), env())
+    expect(shapes.map((s) => s.kind).sort()).toEqual(['person', 'softwareSystem', 'softwareSystem'])
+  })
+
+  it('沒有部署到這個環境的系統不畫', () => {
+    // 三個環境的 context 圖長得不一樣本身就是資訊。
+    const { shapes } = contextDrawing(shop(), env())
+    expect(shapes.map((s) => s.label)).not.toContain('legacy')
+  })
+
+  it('外部系統畫成虛線，跟自家的分得出來', () => {
+    const { shapes } = contextDrawing(shop(), env())
+    expect(shapes.find((s) => s.loomId === 's-pay')!.style).toContain('dashed=1')
+    expect(shapes.find((s) => s.loomId === 's-shop')!.style).not.toContain('dashed=1')
+  })
+
+  it('每一個框都帶 loomId', () => {
+    // 這張圖是簡圖，比對的模型側含邏輯層（reconcile::elements_for）。
+    // 不給 loomId 的話，「有人把這個系統刪了」就變成沒有人會發現的事。
+    for (const s of contextDrawing(shop(), env()).shapes) {
+      expect(s.loomId, `${s.label} 沒有 loomId`).toBeTruthy()
+    }
+  })
+
+  it('同一對系統之間的契約收成一條線', () => {
+    const { links } = contextDrawing(shop(), env())
+    const pay = links.filter((l) => l.from === 's-shop' && l.to === 's-pay')
+    expect(pay).toHaveLength(1)
+    expect(pay[0]!.purpose).toBe('2 條契約')
+  })
+
+  it('收攏過的線刻意沒有 loomId', () => {
+    // 一條線代表一群契約。硬指其中一條等於說謊，而對帳會把綁定當事實。
+    const { links } = contextDrawing(shop(), env())
+    expect(links.find((l) => l.to === 's-pay')!.connection).toBe('')
+  })
+
+  it('剛好一條契約的線綁得回那一條，字也是它的用途', () => {
+    const { links } = contextDrawing(shop(), env())
+    const order = links.find((l) => l.from === 'per-1')!
+    expect(order.connection).toBe('r-order')
+    expect(order.purpose).toBe('下單')
+    expect(order.fromPerson).toBe(true)
+  })
+
+  it('同一個系統裡的契約不畫', () => {
+    // c-api 連 c-redis 兩邊都屬於 shop，畫出來是一個讀不出東西的圈。
+    const { links } = contextDrawing(shop(), env())
+    expect(links.some((l) => l.from === l.to)).toBe(false)
+  })
+
+  it('一端沒部署到這個環境的契約不畫', () => {
+    const { links } = contextDrawing(shop(), env())
+    expect(links.some((l) => l.to === 's-old')).toBe(false)
+  })
+
+  it('沒有線的人不畫', () => {
+    // 客服在這個環境一條契約都沒有，畫上去只是一個沒有人解釋得了的框。
+    const { shapes } = contextDrawing(shop(), env())
+    expect(shapes.some((s) => s.loomId === 'per-2')).toBe(false)
+  })
+
+  it('副標是系統的全名，不是位址', () => {
+    // 這張圖是給不熟這套系統的人看的，`payment` 對他沒有意義。
+    const { shapes } = contextDrawing(shop(), env())
+    expect(shapes.find((s) => s.loomId === 's-pay')!.detail).toBe('金流系統')
   })
 })

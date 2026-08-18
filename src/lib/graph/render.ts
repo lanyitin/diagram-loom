@@ -26,7 +26,7 @@ import { Cell, Geometry, type GraphDataModel, Point } from '@maxgraph/core'
 import type { Shape } from '../diagram'
 import type { Link } from '../model'
 import { EDGE } from '../diagram'
-import type { Laid, Placed } from './layout'
+import { edgeId, type Laid, type Placed } from './layout'
 import { parseStyle } from './mxml'
 
 /**
@@ -82,7 +82,9 @@ export function render(
 
     // ⚠️ ELK 算好的轉彎點一定要寫回來。不寫的話 maxGraph 會自己再繞一次，
     // 而它不知道容器在哪——實測線會直接穿過三層容器。
-    const bends = routes.get(`${link.connection}#${i}`)?.bends ?? []
+    // 鍵由 `edgeId` 產生，`i` 是**原始陣列**的位置——排版那邊也是。
+    // 兩邊各自編號的話，只要有一條線被丟掉就會整批錯開（見 `edgeId`）。
+    const bends = routes.get(edgeId(link, i))?.bends ?? []
     if (bends.length) geometry.points = bends.map((p) => new Point(p.x, p.y))
 
     const cell = new Cell(
@@ -95,7 +97,9 @@ export function render(
     )
     // 一條萬用字元連線長出多條線，所以 cell 的 id 要帶上是哪一對，
     // 而 `loomId` 仍然是那一條連線——對帳認的是後者。
-    cell.setId(`${link.connection}:${link.from}:${link.to}`)
+    cell.setId(
+      link.connection ? `${link.connection}:${link.from}:${link.to}` : `${link.from}:${link.to}`,
+    )
     cell.setEdge(true)
     cell.setTerminal(source, true)
     cell.setTerminal(target, false)
@@ -114,8 +118,19 @@ function valueOf(shape: Shape): Element {
   return element({ label, loomId: shape.loomId, loomKind: shape.kind })
 }
 
+/**
+ * 線的值。
+ *
+ * `connection` 是空的表示這條線**不代表單一模型元素**——context 圖把 A 對 B
+ * 的三條契約收成一條線就是這種。這時候刻意不給 `loomId`：硬指其中一條
+ * 等於說謊，而對帳會把綁定當事實。
+ */
 function edgeValue(link: Link): Element {
-  return element({ label: link.purpose, loomId: link.connection, loomKind: 'connection' })
+  return element({
+    label: link.purpose,
+    loomId: link.connection || undefined,
+    loomKind: 'connection',
+  })
 }
 
 function element(attrs: Record<string, string | undefined>): Element {

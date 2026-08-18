@@ -658,10 +658,19 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             )?;
             // 環境是整份換掉的，而它裡面裝著機器與連線。修改時只動名字那幾欄，
             // 否則使用者改個名字就會把整個環境的內容清空。
+            //
+            // ⚠️ 但略過的**必須只是巢狀的子結構**，不能連純量欄位一起略過。
+            // 備註就是這樣被漏掉過的：改得成功、回傳 `Ok`、值沒進去。而備註是
+            // 這個模型裡唯一**沒有任何規則在看**的欄位，lint 不會叫，所以沒有
+            // 第二個機制會發現——症狀只會以「我明明填了」的形式出現在使用者身上。
+            //
+            // 由 `tests/from_scratch.rs::a_memo_survives_an_update_on_every_resource_kind`
+            // 守著，它跑遍十一種。
             match project.environments.iter_mut().find(|x| x.id == e.id) {
                 Some(existing) => {
                     existing.slug = e.slug.clone();
                     existing.name = e.name.clone();
+                    existing.memo = e.memo.clone();
                 }
                 None => project.environments.push(e.clone()),
             }
@@ -674,9 +683,11 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             let env = find_env(project, environment)?;
             check_slug_unique(all_nodes(&env.nodes), r)?;
             // 改的時候只動這個節點自己的欄位，不要連子節點與服務實體一起換掉。
+            // 純量欄位（含備註）要抄，理由見上面 `Environment` 那段。
             if let Some(existing) = find_node(&mut env.nodes, &node.id) {
                 existing.slug = node.slug.clone();
                 existing.kind = node.kind;
+                existing.memo = node.memo.clone();
                 return Ok(());
             }
             let parent_children = match within {
@@ -720,8 +731,11 @@ fn write_into(project: &mut Project, r: &Resource, is_new: bool) -> Result<(), E
             let env = find_env(project, environment)?;
             check_slug_unique(env.infra.iter().map(|n| (n.id.clone(), n.slug.clone())), r)?;
             match env.infra.iter_mut().find(|n| n.id == node.id) {
-                // 同理：改名不該把它身上的 VIP 清掉。
-                Some(existing) => existing.slug = node.slug.clone(),
+                // 同理：改名不該把它身上的 VIP 清掉，但純量欄位要抄。
+                Some(existing) => {
+                    existing.slug = node.slug.clone();
+                    existing.memo = node.memo.clone();
+                }
                 None => env.infra.push(node.clone()),
             }
         }

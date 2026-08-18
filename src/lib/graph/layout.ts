@@ -46,6 +46,23 @@ export interface Placed {
   children: Placed[]
 }
 
+/**
+ * 一條線在排版結果裡的鍵。
+ *
+ * ⚠️ **`index` 一律是 `links` 原始陣列裡的位置**，不是過濾之後的位置。
+ *
+ * 這裡錯過一次，而且很難看出來：排版是「先把畫不出來的線丟掉、再編號」，
+ * 取回轉彎點的 [`render`](./render.ts) 卻是拿丟掉**之前**的位置去查。
+ * 只要有一條線被丟掉，後面每一條都錯開一格——查不到就等於沒有轉彎點，
+ * maxGraph 會自己重繞一次，而它不知道容器在哪。
+ *
+ * 症狀是「線亂繞、直接穿過容器」，看起來像排版引擎爛，
+ * 其實是我們把算好的結果丟掉了。所以這個鍵**只有一個地方寫得出來**。
+ */
+export function edgeId(link: Link, index: number): string {
+  return `${link.connection}#${index}`
+}
+
 /** 一條邊排完之後的轉彎點，座標是絕對的（相對於整張圖）。 */
 export interface Routed {
   id: string
@@ -99,9 +116,17 @@ export async function layout(shapes: Shape[], links: Link[] = []): Promise<Laid>
     layoutOptions: OPTIONS,
     children: (children.get(undefined) ?? []).map(build),
     // 兩端都畫得出來的線才送進去。指向不存在的節點會讓 ELK 整個排不出來。
+    //
+    // 編號要在**過濾之前**取——見 `edgeId`。所以先配對再過濾，
+    // 不能直接對過濾完的陣列 `.map((l, i) => …)`。
     edges: links
-      .filter((l) => drawable.has(l.from) && drawable.has(l.to))
-      .map((l, i) => ({ id: `${l.connection}#${i}`, sources: [l.from], targets: [l.to] })),
+      .map((link, index) => ({ link, index }))
+      .filter(({ link }) => drawable.has(link.from) && drawable.has(link.to))
+      .map(({ link, index }) => ({
+        id: edgeId(link, index),
+        sources: [link.from],
+        targets: [link.to],
+      })),
   }
 
   const started = performance.now()

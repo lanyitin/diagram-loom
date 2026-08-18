@@ -335,6 +335,12 @@ fn open_project(
     }
 
     let history = History::opened(repository::load_from_dir(&root)?);
+    // 圖改名前存下來的檔案接過來。**開專案的時候做，不是畫圖的時候**——
+    // 使用者第一眼看到的清單就該是對的，不然他會以為手排的版面不見了。
+    // 失敗不擋開檔：他要的是打開這個專案，改名只是順手。
+    if let Err(e) = diagrams::migrate(&mut FsStore::new(&root)) {
+        eprintln!("圖的改名沒做成：{e}");
+    }
     let out = snapshot(&root, &history);
     retitle(&window, &history);
     desk.bind(
@@ -732,12 +738,49 @@ fn diagram_targets(
     desk: State<'_>,
     window: tauri::WebviewWindow,
     environment: loom_core::id::Id,
+    diagram: String,
     bound: Vec<loom_core::id::Id>,
     shapes: Vec<UnboundShape>,
 ) -> Result<Annotation, Failure> {
-    with_opened(&desk, &window, |_, o| {
+    with_opened(&desk, &window, |root, o| {
+        let project = o.history.project();
+        let env = environment_of(project, &environment)?;
+        // 哪一張圖決定了選單裡有沒有邏輯層——簡圖才給。
+        // 查不到就當簡圖（那是新建圖的預設），不要因為目錄檔還沒寫進去
+        // 就把選單縮成只剩環境層：使用者會以為那些框永遠指不到東西。
+        let kind = diagrams::list(&FsStore::new(root), project, env)?
+            .iter()
+            .find(|d| d.name == diagram)
+            .map(|d| d.kind)
+            .unwrap_or_default();
+        Ok(annotate::annotate(
+            &project.logical,
+            env,
+            kind,
+            &bound,
+            &shapes,
+        ))
+    })
+}
+
+/// 把一張圖標成詳圖或簡圖。
+///
+/// 這是使用者的判斷，不是程式猜得出來的：同一張手繪圖，他可能忠實畫了每一台，
+/// 也可能把 12 台收成一個框。猜錯的兩個方向都很糟——當成詳圖會噴出一整頁
+/// 他沒有畫錯的差異，當成簡圖則會**安靜地不檢查**。
+#[tauri::command]
+#[specta::specta]
+fn diagram_set_kind(
+    desk: State<'_>,
+    window: tauri::WebviewWindow,
+    environment: loom_core::id::Id,
+    name: String,
+    kind: diagrams::DiagramKind,
+) -> Result<(), Failure> {
+    with_opened(&desk, &window, |root, o| {
         let env = environment_of(o.history.project(), &environment)?;
-        Ok(annotate::annotate(env, &bound, &shapes))
+        diagrams::set_kind(&mut FsStore::new(root), env, &name, kind)?;
+        Ok(())
     })
 }
 
@@ -751,11 +794,14 @@ pub struct DiagramsView {
     pub diagrams: Vec<DiagramInfo>,
     /// 模型現在長什麼樣。畫面重畫之後拿它當新的 `drawnFrom`。
     pub model: String,
-    /// App 自動產生的那張圖叫什麼。
+    /// App 自動產生的**部署圖**叫什麼。
     ///
     /// 從這裡給，前端就不必自己抄一份名字——抄了就會有兩個「保留字」，
-    /// 而改名的那天只會有一邊跟著改。
-    pub details: String,
+    /// 而改名的那天只會有一邊跟著改。（這件事真的發生過：
+    /// `diagram-loom-details` 改名的時候。）
+    pub deployment: String,
+    /// App 自動產生的 **context 圖**叫什麼。理由同 `deployment`。
+    pub context: String,
 }
 
 #[tauri::command]
@@ -771,7 +817,8 @@ fn diagram_catalog(
         Ok(DiagramsView {
             diagrams: diagrams::list(&FsStore::new(root), project, env)?,
             model: diagrams::fingerprint(project, env),
-            details: diagrams::DETAILS.into(),
+            deployment: diagrams::DEPLOYMENT.into(),
+            context: diagrams::CONTEXT.into(),
         })
     })
 }
@@ -929,6 +976,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         diagram_links,
         diagram_focus,
         diagram_targets,
+        diagram_set_kind,
         diagram_catalog,
         diagram_read,
         diagram_create,

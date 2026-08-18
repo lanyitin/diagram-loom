@@ -19,7 +19,7 @@
  */
 import { computed } from 'vue'
 import Picker from './Picker.vue'
-import type { Annotation, Target, UnboundShape } from '../lib/model'
+import type { Annotation, ElementKind, Target, UnboundShape } from '../lib/model'
 
 const props = defineProps<{
   /** 圖上還沒指定的形狀。 */
@@ -39,12 +39,27 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const KIND: Record<string, string> = {
+/**
+ * 分組的標題。
+ *
+ * 型別是 `Record<ElementKind, string>`，不是 `Record<string, string>`：
+ * 少一種就編不過。鬆的那種寫法會讓新加的種類**安靜地**以 kebab-case 原文
+ * 當標題（`software-system`），而那看起來像資料髒掉，不像少寫了一行。
+ */
+const KIND: Record<ElementKind, string> = {
+  // 環境層（分身）。詳圖畫的就是這些。
   'deployment-node': '機器',
   'container-instance': '服務實體',
   'infrastructure-node': '設備',
-  'software-system-instance': '外部系統',
+  'software-system-instance': '外部系統實體',
   connection: '連線',
+  // 邏輯層（母版）。**只有簡圖才會出現。**
+  // Context 圖畫人與系統、Container 圖畫服務與契約，而使用者自己畫的圖
+  // 常常兩種混在一起。
+  person: '人',
+  'software-system': '系統',
+  container: '服務',
+  relationship: '契約',
 }
 
 /** 沒有文字的形狀多半是裝飾，但照樣要列——自己決定「這個不用管」就是漏。 */
@@ -54,7 +69,7 @@ function options(shape: UnboundShape) {
   // 線只能指給連線、框只能指給元素。混在一起的話，一個方框可以被指成一條
   // 連線，而那在對帳時是個永遠對不上、又看不出怎麼來的東西。
   const targets = shape.edge ? props.annotation.connections : props.annotation.shapes
-  return targets.map((t) => ({ value: t.id, label: t.label, group: KIND[t.kind] ?? t.kind }))
+  return targets.map((t) => ({ value: t.id, label: t.label, group: KIND[t.kind] }))
 }
 
 const byId = computed(() => {

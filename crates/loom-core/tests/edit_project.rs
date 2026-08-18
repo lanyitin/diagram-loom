@@ -438,6 +438,50 @@ fn marking_a_path_fallback_changes_presentation_not_lint() {
 }
 
 #[test]
+fn a_connection_memo_is_saved_without_silencing_l007() {
+    // 備註與用途是刻意分開的兩個欄位：L007 在看 `purpose`，而備註是規則
+    // 管不到的話。寫進同一個欄位的話，「等年底汰換」會讓 L007 從此不再叫——
+    // 那是使用者最不會發現的一種失效。
+    let mut project = healthy_project();
+    let connection = project.environments[2].connections[0].id.clone();
+    project.environments[2].connections[0].purpose = String::new();
+
+    edit::apply(
+        &mut project,
+        &Edit::SetConnectionMemo {
+            environment: Id::new(DEV),
+            connection,
+            memo: "等年底汰換".into(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(project.environments[2].connections[0].memo, "等年底汰換");
+    assert!(project.environments[2].connections[0].purpose.is_empty());
+    assert!(rules(&project).contains(&Rule::L007), "備註把 L007 蓋掉了");
+}
+
+#[test]
+fn a_connection_memo_can_be_cleared() {
+    // 備註沒有規則在看，所以寫錯了沒有第二條路可以救。清得掉是必要的。
+    let mut project = healthy_project();
+    let connection = project.environments[2].connections[0].id.clone();
+    project.environments[2].connections[0].memo = "寫錯了".into();
+
+    edit::apply(
+        &mut project,
+        &Edit::SetConnectionMemo {
+            environment: Id::new(DEV),
+            connection,
+            memo: String::new(),
+        },
+    )
+    .unwrap();
+
+    assert!(project.environments[2].connections[0].memo.is_empty());
+}
+
+#[test]
 fn a_deletion_can_be_undone() {
     // 刪除是唯一會讓資料消失的操作，所以它跟復原必須是同一個故事。
     let mut h = History::opened(healthy_project());

@@ -8,6 +8,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import Picker from './Picker.vue'
 
 const OPTIONS = [
@@ -180,5 +182,90 @@ describe('停用', () => {
     const w = picker(null, { disabled: true })
     await w.find('input').trigger('focus')
     expect(w.find('.menu').exists()).toBe(false)
+  })
+})
+
+describe('選單釘在哪', () => {
+  /**
+   * 假裝視窗多大、輸入框在哪。happy-dom 不做版面，所以兩件事都要自己講——
+   * 不講的話幾個案例會走進同一個分支，然後全部都綠。
+   */
+  function place(
+    w: ReturnType<typeof picker>,
+    box: { top: number; left?: number; width?: number; height?: number },
+    viewport: { w?: number; h: number },
+  ) {
+    Object.defineProperty(window, 'innerHeight', { value: viewport.h, configurable: true })
+    Object.defineProperty(window, 'innerWidth', { value: viewport.w ?? 1024, configurable: true })
+    const { top, left = 100, width = 160, height = 24 } = box
+    w.find('input').element.getBoundingClientRect = () =>
+      ({ top, bottom: top + height, left, right: left + width, width, height }) as DOMRect
+  }
+
+  async function openAt(
+    box: { top: number; left?: number; width?: number },
+    viewport: { w?: number; h: number },
+  ) {
+    const w = picker()
+    place(w, box, viewport)
+    await w.find('input').trigger('focus')
+    await w.vm.$nextTick()
+    return w.find('.menu').attributes('style') ?? ''
+  }
+
+  it('是 fixed，不是 absolute', () => {
+    // **這是整組最重要的一條。** 絕對定位的選單會被祖先的 `overflow` 切掉：
+    // `ResourceForm` 的對話框與 `DiagramBinder` 的清單都是 `overflow: auto`，
+    // 而在標註面板裡它看得見的高度實測是 0——使用者看到的是一個打了字
+    // 卻沒有任何選項的框，他會以為「沒有符合的」然後放棄。
+    //
+    // 讀原始碼而不是 `getComputedStyle`：happy-dom 不套 scoped style。
+    // 同一個作法見 `ResourceForm.test.ts` 守 `<select>` 那幾條。
+    const source = readFileSync(join(import.meta.dirname, 'Picker.vue'), 'utf8')
+    const rule = source.match(/\.menu \{([^}]*)\}/)
+    expect(rule, '找不到 .menu 那條規則').not.toBeNull()
+    expect(rule![1]).toContain('position: fixed')
+    expect(rule![1]).not.toContain('absolute')
+  })
+
+  it('下面放得下就開在輸入框下面', async () => {
+    const style = await openAt({ top: 40 }, { h: 700 })
+    expect(style).toContain('top: 66px')   // 40 + 24 + 2
+    expect(style).not.toContain('bottom:')
+  })
+
+  it('下面塞不下、上面塞得下就往上開', async () => {
+    // 不然使用者只看得到半個項目，而且捲不到——選單不佔位置。
+    const style = await openAt({ top: 640 }, { h: 700 })
+    expect(style).toContain('bottom: 62px')   // 700 - 640 + 2
+    expect(style).not.toContain('top:')
+  })
+
+  it('兩邊都不夠就還是往下——那時候至少捲得到', async () => {
+    // 上面 130、下面 146，都不到 260。往上開只會把問題換一邊。
+    const style = await openAt({ top: 130 }, { h: 300 })
+    expect(style).toContain('top: 156px')
+  })
+
+  it('窄格子裡也要有最小寬度', async () => {
+    // 跟著格子一樣窄的話，選項會一個字一行往下排——看起來像元件壞了。
+    const style = await openAt({ top: 40, width: 80 }, { h: 700 })
+    expect(style).toContain('min-width: 220px')
+  })
+
+  it('欄位比下限寬時就用欄位的寬度', async () => {
+    const style = await openAt({ top: 40, width: 400 }, { h: 700 })
+    expect(style).toContain('min-width: 400px')
+  })
+
+  it('靠右邊的格子往左推，不會被推出畫面', async () => {
+    // 視窗 1024、選單至少 220，所以最右只能到 1024 - 220 - 8 = 796。
+    const style = await openAt({ top: 40, left: 950, width: 60 }, { w: 1024, h: 700 })
+    expect(style).toContain('left: 796px')
+  })
+
+  it('靠左邊也不會貼到邊緣', async () => {
+    const style = await openAt({ top: 40, left: 0, width: 60 }, { w: 1024, h: 700 })
+    expect(style).toContain('left: 8px')
   })
 })

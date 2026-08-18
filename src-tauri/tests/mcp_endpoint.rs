@@ -190,8 +190,8 @@ fn a_real_client_can_initialise_and_list_tools() {
         &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
     );
     assert_eq!(status, 200, "{body}");
-    // 十個工具的名字至少要看得到幾個關鍵的。
-    for name in ["describe", "lint", "create", "add_connection"] {
+    // 八支工具的名字至少要看得到幾個關鍵的。
+    for name in ["describe", "lint", "create", "add_connection", "update"] {
         assert!(body.contains(name), "工具清單少了 {name}：{body}");
     }
 }

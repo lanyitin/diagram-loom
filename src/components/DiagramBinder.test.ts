@@ -125,3 +125,59 @@ describe('標示與收回', () => {
     expect(w.emitted('unassign')).toEqual([['a']])
   })
 })
+
+/**
+ * 簡圖的標註對象。
+ *
+ * 使用者自己畫的圖不一定是部署圖——Context 圖畫人與系統、Container 圖畫
+ * 服務與契約，兩種還可能混在同一張。在這之前那些框**沒有任何東西可以指**，
+ * 而畫面上沒有任何訊息說明為什麼，使用者只會覺得選單壞了。
+ */
+describe('邏輯層的選項', () => {
+  const LOGICAL: Annotation = {
+    shapes: [
+      { id: 'p-customer', kind: 'person', label: 'customer' },
+      { id: 's-sso', kind: 'software-system', label: 'sso' },
+      { id: 'c-redis', kind: 'container', label: 'redis' },
+      { id: 'i-apache', kind: 'container-instance', label: 'apache-01' },
+    ],
+    connections: [
+      { id: 'r-cache', kind: 'relationship', label: 'api-連-redis' },
+      { id: 'conn-1', kind: 'connection', label: '查快取' },
+    ],
+    guesses: [],
+  }
+
+  /** 展開第 n 列的選單，讀出分組的標題。 */
+  async function groupsOf(w: ReturnType<typeof binder>, row: number) {
+    await w.findAll('.picker input')[row]!.trigger('focus')
+    return w.findAll('.group').map((e) => e.text())
+  }
+
+  it('人指得到', async () => {
+    // 這是整組的理由：Context 圖上那個小人以前指不到任何東西。
+    const w = binder({ annotation: LOGICAL })
+    expect(await optionsOf(w, 0)).toContain('customer')
+  })
+
+  it('分組的標題是中文，不是 kebab-case 原文', async () => {
+    // 漏掉一種的話標題會變成 `software-system`——那看起來像資料髒掉，
+    // 不像少寫了一行。型別上由 `Record<ElementKind, string>` 擋，這裡守畫面。
+    const w = binder({ annotation: LOGICAL })
+    const groups = await groupsOf(w, 0)
+    expect(groups).toContain('人')
+    expect(groups).toContain('系統')
+    expect(groups).toContain('服務')
+    expect(groups.some((g) => g.includes('-'))).toBe(false)
+  })
+
+  it('契約只出現在線那一列，不出現在框那一列', async () => {
+    // 契約是邏輯層的**線**。放進框的選單裡，使用者就能把一個方框指成
+    // 一條契約——那在對帳時會變成一個永遠對不上的東西。
+    const w = binder({ annotation: LOGICAL })
+    expect(await optionsOf(w, 0)).not.toContain('api-連-redis')
+
+    const line = binder({ annotation: LOGICAL })
+    expect(await optionsOf(line, 2)).toContain('api-連-redis')
+  })
+})

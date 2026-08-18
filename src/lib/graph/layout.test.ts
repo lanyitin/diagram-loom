@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { layout, walk } from './layout'
+import { edgeId, layout, walk } from './layout'
 import type { Shape } from '../diagram'
 import type { Link } from '../model'
 
@@ -103,6 +103,15 @@ describe('巢狀排版', () => {
     const laid = await layout(shapes(), bad)
     expect(laid.edges).toEqual([])
     expect(laid.nodes.length).toBeGreaterThan(0)
+  })
+
+  it('被丟掉的線不會讓後面的編號跟著位移', async () => {
+    // 編號是拿轉彎點的鑰匙，而 `render` 用的是**原始陣列**的位置。
+    // 這裡改成過濾後再編號的話，鑰匙就對不上——症狀不是報錯，
+    // 是「線自己亂繞、穿過容器」，看起來像排版引擎爛。
+    const undrawable = { ...links[0]!, from: '不存在' } as Link
+    const laid = await layout(shapes(), [undrawable, ...links])
+    expect(laid.edges.map((e) => e.id)).toEqual([edgeId(links[0]!, 1), edgeId(links[1]!, 2)])
   })
 
   it('沒有連線也排得出來', async () => {

@@ -32,7 +32,14 @@
 
 // `UnboundShape` 用 Rust 產的那份，不自己再定義一個：它是要送過去給
 // `annotate` 的東西，兩邊各寫一份的話，改了欄位不會有人叫。
-import type { DeploymentNode, Environment, Link, Project, UnboundShape } from './model'
+import type {
+  DeploymentNode,
+  Environment,
+  Link,
+  Project,
+  RelationshipEnd,
+  UnboundShape,
+} from './model'
 
 /** 一個要畫出來的形狀。 */
 export interface Shape {
@@ -62,6 +69,10 @@ export const STYLE = {
   infra: 'shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;',
   system: 'rounded=1;whiteSpace=wrap;html=1;dashed=1;',
   person: 'shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;',
+  /** Context 圖的自家系統。字粗一點——這張圖上框就是主角，沒有機器搶戲。 */
+  ownedSystem: 'rounded=1;whiteSpace=wrap;html=1;fontStyle=1;',
+  /** Context 圖的外部系統。虛線，一眼看得出「這不是我們的」。 */
+  externalSystem: 'rounded=1;whiteSpace=wrap;html=1;dashed=1;',
 } as const
 
 /** 線的 style。備援線要看得出來，不然圖上四條線一樣重，讀不出主路徑。 */
@@ -95,7 +106,32 @@ export function peopleOf(project: Project, links: Link[]): Shape[] {
     .map((p) => ({ id: p.id, kind: 'person', label: p.slug, style: STYLE.person }))
 }
 
-/** 收集一個環境裡所有該畫的形狀。 */
+/**
+ * **畫布上該有的形狀**：環境層的東西，加上被這個環境的連線用到的人。
+ *
+ * # 為什麼要有這一支，而不是各自 `[...shapesOf(), ...peopleOf()]`
+ *
+ * 因為「人也要畫」是一件會被忘記的事，而且**忘記不會報錯**：
+ *
+ * 1. 畫布上沒有人 → 起點是人的那條線兩端對不上 → 被安靜地丟掉
+ * 2. 丟掉一條線，後面每一條線的轉彎點就整批錯開（見 `graph/layout.ts` 的 `edgeId`）
+ * 3. 拿不到轉彎點，maxGraph 自己重繞，而它不知道容器在哪 → 線穿過所有框
+ *
+ * 這串真的發生過：換成 maxGraph 之後畫布走 `shapesOf`，而畫人的
+ * [`peopleOf`] 只留在 [`toXml`] 那條已經沒人走的路上。拿真實專案跑，
+ * **145 條線的轉彎點全部掉光**，整張圖變成蜘蛛網。
+ *
+ * 所以「畫布上該有什麼」只有這一個答案。
+ */
+export function canvasShapes(
+  project: Project,
+  environment: Environment,
+  links: Link[],
+): Shape[] {
+  return [...shapesOf(project, environment), ...peopleOf(project, links)]
+}
+
+/** 收集一個環境裡所有該畫的形狀。**人不在裡面**，見 [`canvasShapes`]。 */
 export function shapesOf(project: Project, environment: Environment): Shape[] {
   const shapes: Shape[] = []
 
@@ -151,12 +187,147 @@ export function shapesOf(project: Project, environment: Environment): Shape[] {
       kind: 'softwareSystemInstance',
       // 外部系統畫成虛線框——讀圖的人要一眼分得出「這不是我們的」。
       label: s.slug,
-      detail: system?.name,
+      // 跟服務實體同一條規矩：有位址就印位址。外部系統的位址是最常被
+      // 拿去核對防火牆的東西，印系統名字等於把它藏起來。
+      detail: (s.endpoints ?? []).map((e) => e.address).filter(Boolean).join('、')
+        || system?.name,
       style: STYLE.system,
     })
   }
 
   return shapes
+}
+
+/** 一張圖要畫的東西：形狀加線。 */
+export interface Drawing {
+  shapes: Shape[]
+  links: Link[]
+}
+
+/**
+ * **Context 圖**：人與系統，一個系統一個框。沒有機器、沒有服務、沒有位址。
+ *
+ * # 跟部署圖的三個差別
+ *
+ * 1. **框是邏輯層的**。部署圖畫「redis-01 跑在 vm-03 上」，這張畫「商店系統」。
+ * 2. **線是收攏過的**。A 系統對 B 系統有三條契約，這裡只畫一條。
+ * 3. **它不對帳**（`diagrams::kind_of` 標成簡圖）。第 2 點就是原因：
+ *    一條線代表一群契約，撐不住「一個 `loomId` ↔ 一個元素」那條規矩。
+ *
+ * # 為什麼「人」在這裡有 `loomId`，在部署圖上卻沒有
+ *
+ * 不是不一致，是兩張圖的模型側不一樣（見 `reconcile::elements_for`）：
+ * 詳圖比對的是**環境層**，人不在裡面，給了 `loomId` 會變成一個假的缺漏；
+ * 簡圖比對的是環境層**加上邏輯層**，人就在裡面，不給反而讓「有人把這個
+ * 角色刪了」變成沒有人會發現的事。
+ *
+ * # 為什麼只畫這個環境部署到的系統
+ *
+ * 三個環境的 context 圖長得不一樣本身就是資訊：test 沒接的那個外部金流
+ * 不該出現在 test 的圖上。判斷依據是**這個環境有沒有它的實體**，
+ * 而不是「有沒有連線」——契約在但連線還沒建是 L001 要罵的事，
+ * 藏起來等於幫忙把缺漏蓋掉。
+ */
+export function contextDrawing(project: Project, environment: Environment): Drawing {
+  const logical = project.logical
+  const systemOf = new Map((logical.containers ?? []).map((c) => [c.id, c.system]))
+
+  // ── 這個環境部署了哪些系統 ──────────────────────────────
+  const present = new Set<string>()
+  const walk = (nodes: DeploymentNode[]) => {
+    for (const n of nodes) {
+      for (const i of n.instances ?? []) {
+        const system = systemOf.get(i.container)
+        if (system) present.add(system)
+      }
+      walk(n.children ?? [])
+    }
+  }
+  walk(environment.nodes ?? [])
+  for (const s of environment.systems ?? []) present.add(s.system)
+
+  // ── 一條契約的一端，在這張圖上是哪個框 ──────────────────
+  // 設備（F5）不會出現：契約的兩端只會是人、系統或服務，VIP 是環境層
+  // 怎麼接的細節。這也正是線要從**契約**推、不是從連線推的理由——
+  // 從連線推的話，prod 走 F5 的那一段會變成「A 連 F5」「F5 連 B」兩條。
+  const boxOf = (end: RelationshipEnd): string | null => {
+    if (end.person) return end.person
+    if (end.system) return present.has(end.system) ? end.system : null
+    if (end.container) {
+      const system = systemOf.get(end.container)
+      return system && present.has(system) ? system : null
+    }
+    return null
+  }
+
+  // ── 線：一對系統收成一條 ────────────────────────────────
+  const pairs = new Map<string, { from: string; to: string; of: string[] }>()
+  for (const r of logical.relationships ?? []) {
+    const from = boxOf(r.from)
+    const to = boxOf(r.to)
+    // 自己連自己在 context 圖上是一個圈，讀不出任何東西——那是 container
+    // 圖的層次（同一個系統裡兩個服務互打）。
+    if (!from || !to || from === to) continue
+    const key = `${from}\u0000${to}`
+    const pair = pairs.get(key) ?? { from, to, of: [] }
+    pair.of.push(r.id)
+    if (!pairs.has(key)) pairs.set(key, pair)
+  }
+
+  const people = new Set((logical.people ?? []).map((p) => p.id))
+  const links: Link[] = [...pairs.values()].map((pair) => ({
+    // 剛好一條契約時才綁得上——這條線就是那一條契約，弱檢查認得出來。
+    // 收攏過的線沒有對應的模型元素，硬指一條等於說謊。
+    connection: pair.of.length === 1 ? pair.of[0]! : '',
+    from: pair.from,
+    to: pair.to,
+    fromPerson: people.has(pair.from),
+    kind: 'primary',
+    purpose: purposeOf(project, pair.of),
+  }))
+
+  // ── 框：畫得到線的人，加上這個環境有的系統 ──────────────
+  const used = new Set(links.filter((l) => l.fromPerson).map((l) => l.from))
+  const shapes: Shape[] = [
+    ...(logical.people ?? [])
+      .filter((p) => used.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        loomId: p.id,
+        kind: 'person',
+        label: p.slug,
+        style: STYLE.person,
+      })),
+    ...(logical.systems ?? [])
+      .filter((x) => present.has(x.id))
+      .map((x) => ({
+        id: x.id,
+        loomId: x.id,
+        kind: 'softwareSystem',
+        label: x.slug,
+        // 副標放全名而不是位址：這張圖是給不熟這套系統的人看的，
+        // `bmy` 四個字對他沒有意義。位址是部署圖的事。
+        detail: x.name === x.slug ? undefined : x.name,
+        style: x.external ? STYLE.externalSystem : STYLE.ownedSystem,
+      })),
+  ]
+
+  return { shapes, links }
+}
+
+/**
+ * 收攏過的那條線上該寫什麼。
+ *
+ * 剛好一條就寫它的用途。多條的話**寫數量，不是把用途串起來**——
+ * 串起來的字會長到擋住半張圖，而且讀的人會以為那是一條連線的完整說明。
+ * 想看是哪幾條，部署圖上一條一條都在。
+ */
+function purposeOf(project: Project, relationships: string[]): string {
+  if (relationships.length === 1) {
+    const one = (project.logical.relationships ?? []).find((r) => r.id === relationships[0])
+    return one?.purpose ?? ''
+  }
+  return `${relationships.length} 條契約`
 }
 
 function kindLabel(kind: string): string {
@@ -175,7 +346,7 @@ function kindLabel(kind: string): string {
  * （見 `docs/nested-layout.md`）。
  */
 export function toXml(project: Project, environment: Environment, links: Link[] = []): string {
-  const shapes = [...shapesOf(project, environment), ...peopleOf(project, links)]
+  const shapes = canvasShapes(project, environment, links)
 
   const cells = shapes
     .map((s) => {
@@ -201,10 +372,12 @@ export function toXml(project: Project, environment: Environment, links: Link[] 
     .map((l) => {
       // 一條萬用字元連線長出多條線，所以 XML 的 id 要帶上是哪一對，
       // 而 `loomId` 仍然是那一條連線——對帳認的是後者。
-      const id = `${l.connection}:${l.from}:${l.to}`
+      const id = l.connection ? `${l.connection}:${l.from}:${l.to}` : `${l.from}:${l.to}`
       const style = l.kind === 'fallback' ? EDGE.fallback : EDGE.primary
       return [
-        `        <object label="${esc(l.purpose)}" loomId="${esc(l.connection)}" loomKind="connection" id="${esc(id)}">`,
+        // `connection` 是空的＝這條線不代表單一模型元素（context 圖收攏過的
+        // 那種）。硬指其中一條契約等於說謊，所以乾脆不給 `loomId`。
+        `        <object label="${esc(l.purpose)}"${l.connection ? ` loomId="${esc(l.connection)}"` : ''} loomKind="connection" id="${esc(id)}">`,
         `          <mxCell style="${style}" edge="1" parent="1" source="${esc(l.from)}" target="${esc(l.to)}">`,
         `            <mxGeometry relative="1" as="geometry"/>`,
         `          </mxCell>`,

@@ -504,6 +504,80 @@ fn every_resource_kind_can_be_created_and_deleted() {
     }
 }
 
+/// 備註在**每一種**資源上都要存得住，改過之後也一樣。
+///
+/// # 為什麼這條要單獨寫，而且要跑遍十一種
+///
+/// `write_into` 對「裡面裝著別的東西」的那幾種是**逐欄複製**，不是整份換掉——
+/// 環境裡有機器與連線、機器裡有子節點與服務實體、設備身上有 VIP，整份換掉會
+/// 把它們洗光。那是刻意的。
+///
+/// 但逐欄複製略過的**必須只是巢狀的子結構**，不能連純量欄位一起略過。
+/// 備註曾經就是這樣被漏掉的：改得成功、回傳 `Ok`、值沒進去。
+///
+/// 而備註是這個模型裡**唯一沒有任何規則在看**的欄位——lint 不會叫，
+/// 所以沒有第二個機制會發現。症狀只會以「我明明填了」的形式出現在使用者身上。
+///
+/// # 一定要走 `find` 讀回來
+///
+/// 讀送進去的那一份一定相等，什麼都證明不了。要問專案「你現在存的是什麼」。
+#[test]
+fn a_memo_survives_an_update_on_every_resource_kind() {
+    let mut h = History::opened(empty_project());
+
+    // 先把互相依賴的那幾個建起來，它們自己也在受測名單裡。
+    let system = create(&mut h, blank(Kind::System, None, None), |r| {
+        set_slug(r, "shop")
+    });
+    let container = create(
+        &mut h,
+        blank(Kind::Container, None, Some(system.clone())),
+        |r| set_slug(r, "redis"),
+    );
+    let prod = create(&mut h, blank(Kind::Environment, None, None), |r| {
+        set_slug(r, "prod")
+    });
+    let node = create(&mut h, blank(Kind::Node, Some(prod.clone()), None), |r| {
+        set_slug(r, "vm-01")
+    });
+    let f5 = create(&mut h, blank(Kind::Infra, Some(prod.clone()), None), |r| {
+        set_slug(r, "f5-01")
+    });
+
+    let rest = [
+        (Kind::Person, None, None),
+        (Kind::EndpointDef, None, Some(container.clone())),
+        (Kind::Relationship, None, None),
+        (Kind::InfraEndpoint, Some(prod.clone()), Some(f5.clone())),
+        (Kind::Instance, Some(prod.clone()), Some(node.clone())),
+        (
+            Kind::SystemInstance,
+            Some(prod.clone()),
+            Some(system.clone()),
+        ),
+    ];
+
+    let mut every_id = vec![system, container, prod, node, f5];
+    for (i, (kind, env, owner)) in rest.into_iter().enumerate() {
+        let id = create(&mut h, blank(kind, env, owner), |r| {
+            set_slug(r, &format!("東西-{i}"))
+        });
+        every_id.push(id);
+    }
+
+    for id in every_id {
+        let mut r = loom_core::resource::find(h.project(), &id)
+            .unwrap_or_else(|| panic!("剛建好的 {id} 找不到"));
+        let what = r.kind_name();
+        *r.memo_mut() = "等年底汰換".into();
+        h.edit(&Edit::UpdateResource(r))
+            .unwrap_or_else(|e| panic!("{what} 的備註改不動：{e}"));
+
+        let saved = loom_core::resource::find(h.project(), &id).expect("改完之後不見了");
+        assert_eq!(saved.memo(), "等年底汰換", "{what} 的備註被吃掉了");
+    }
+}
+
 fn set_slug(r: &mut Resource, slug: &str) {
     match r {
         Resource::Person(p) => p.slug = slug.into(),
