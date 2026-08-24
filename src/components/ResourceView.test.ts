@@ -425,3 +425,79 @@ describe('連線分頁', () => {
     expect(w.find('.box .primary').exists()).toBe(false)
   })
 })
+
+
+/**
+ * 剛開的新專案：**零個環境**。
+ *
+ * 這裡守的是一個會把人卡死的迴圈：新增第一個環境的唯一入口是「環境 ▾ →
+ * 管理環境…」，而那顆鈕本來寫著 `v-if="store.environments.length"`
+ * ——要先有環境才能新增環境。畫面上不會有任何錯誤訊息，只是找不到那顆鈕。
+ */
+describe('一個環境都還沒有的新專案', () => {
+  const emptyEnvironments: Table = {
+    ...environmentTable,
+    rows: [],
+  } as unknown as Table
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const store = useProject()
+    const snap = fakeSnapshot() as unknown as { project: { environments: unknown[] } }
+    snap.project.environments = []
+    store.snapshot = snap as unknown as Snapshot
+    vi.mocked(commands.resourceTables).mockResolvedValue({
+      status: 'ok', data: [emptyEnvironments, containerTable],
+    } as never)
+  })
+
+  async function openIt() {
+    const w = mount(ResourceView)
+    await flushPromises()
+    return w
+  }
+
+  it('環境那顆鈕還在，不然新增第一個環境就沒有入口了', async () => {
+    const w = await openIt()
+    expect(w.find('.env .pick').exists()).toBe(true)
+  })
+
+  it('鈕上直接說「還沒有」，不是只寫「環境」', async () => {
+    // 只寫「環境」看起來像一切正常，而使用者正卡在「那我要去哪裡建」。
+    const w = await openIt()
+    expect(w.find('.env .pick').text()).toContain('還沒有')
+  })
+
+  it('點開之後「管理環境…」按得到', async () => {
+    const w = await openIt()
+    await w.find('.env .pick').trigger('click')
+    const manage = w.findAll('.env .menu button').find((b) => b.text().includes('管理環境'))
+    expect(manage).toBeTruthy()
+
+    await manage!.trigger('click')
+    const add = w.findAll('button').find((b) => b.text().includes('新增環境'))
+    expect(add?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('新增連線時講出「還沒有環境」，而不是按了沒反應', async () => {
+    // 「下一步」在沒有環境時會安靜地 return——按鈕什麼都不做是最難查的那種。
+    const store = useProject()
+    const snap = store.snapshot as unknown as {
+      project: { logical: { relationships: unknown[] } }
+    }
+    snap.project.logical.relationships = [{ id: 'r1', slug: 'a-to-b' }]
+
+    const w = await openIt()
+    const connections = w.findAll('.tabs button').find((b) => b.text().includes('連線'))
+    await connections!.trigger('click')
+    await w.findAll('button').find((b) => b.text().includes('新增'))!.trigger('click')
+
+    // 只看對話框裡的字。看整頁的話，環境那顆鈕上的「還沒有」會讓這條
+    // 測試無論如何都綠——一條永遠會過的測試比沒有測試更糟。
+    const dialog = w.find('[role="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('這個專案還沒有')
+    expect(dialog.text()).toContain('管理環境')
+    expect(dialog.findAll('button').some((b) => b.text() === '下一步')).toBe(false)
+  })
+})

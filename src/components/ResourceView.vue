@@ -169,6 +169,18 @@ const currentEnvironment = computed(
   () => whichEnvironment.value ?? store.environments[0]?.id ?? null,
 )
 
+/**
+ * 那顆鈕上的字。
+ *
+ * 一個環境都沒有的時候要**明講**。只寫「環境」看起來像一切正常，
+ * 而使用者正卡在「那我要去哪裡建第一個環境」。
+ */
+const envLabel = computed(() => {
+  if (!store.environments.length) return '環境：還沒有'
+  if (!environmentMatters.value) return '環境'
+  return `環境：${store.envName(currentEnvironment.value!)}`
+})
+
 function closeEnvMenu() {
   envMenuOpen.value = false
 }
@@ -264,14 +276,21 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
 
       <span class="grow" />
 
-      <!-- 選環境與「管理環境…」在同一顆鈕底下：它們是同一個問題的兩半。 -->
-      <span v-if="store.environments.length" class="env" @keydown.esc="envMenuOpen = false">
+      <!--
+        選環境與「管理環境…」在同一顆鈕底下：它們是同一個問題的兩半。
+
+        ⚠️ **這顆鈕不可以因為「還沒有環境」就消失。** 新專案是零個環境開始
+        的，而「管理環境…」是新增第一個環境的唯一入口——鈕藏起來就等於
+        「要先有環境才能新增環境」，使用者會卡在那裡完全沒有線索。
+      -->
+      <span class="env" @keydown.esc="envMenuOpen = false">
         <button
           class="pick"
+          :class="{ warn: !store.environments.length }"
           :aria-expanded="envMenuOpen"
           @click.stop="toggleEnvMenu()"
         >
-          環境<template v-if="environmentMatters">：{{ store.envName(currentEnvironment!) }}</template>
+          {{ envLabel }}
           <span class="caret">▾</span>
         </button>
         <div v-if="envMenuOpen" class="menu" @click.stop>
@@ -354,7 +373,15 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
     <div v-if="pickingContract" class="scrim" @click.self="pickingContract = false">
       <section class="box" role="dialog" aria-modal="true">
         <h2>新增一條連線</h2>
-        <p v-if="!store.relationships.length" class="muted lead">
+        <!--
+          兩個前提各講各的。少了任何一個都會讓「下一步」按了沒反應，
+          而按鈕安靜地什麼都不做是最難查的那一種。
+        -->
+        <p v-if="!store.environments.length" class="muted lead">
+          這個專案還沒有<strong>環境</strong>。連線是分身——它一定屬於某一個環境，
+          所以要先按右上角的<strong>環境 ▾ → 管理環境…</strong>建一個。
+        </p>
+        <p v-else-if="!store.relationships.length" class="muted lead">
           這個專案還沒有<strong>連線契約</strong>。契約是母版——先在「契約」那一頁
           寫下「誰要連誰」，才有東西可以在這個環境實現。
         </p>
@@ -374,7 +401,11 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
         <footer>
           <span class="grow" />
           <button @click="pickingContract = false">取消</button>
-          <button v-if="store.relationships.length" class="primary" @click="addConnection()">下一步</button>
+          <button
+            v-if="store.relationships.length && store.environments.length"
+            class="primary"
+            @click="addConnection()"
+          >下一步</button>
         </footer>
       </section>
     </div>
@@ -473,6 +504,8 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
 
 .env { position: relative; display: inline-flex; }
 .pick { font-size: 12px; padding: 3px 9px; }
+/* 一個環境都沒有＝這個專案還走不到環境層。那不是錯誤，但要看得見。 */
+.pick.warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); }
 .caret { margin-left: 5px; color: var(--ink-4); }
 
 .menu {
