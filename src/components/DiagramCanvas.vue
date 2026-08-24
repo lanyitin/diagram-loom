@@ -42,6 +42,13 @@ const emit = defineEmits<{
   (e: 'select', cells: Cell[]): void
   /** 排版跑完了，附上花的時間。 */
   (e: 'laid', ms: number): void
+  /**
+   * 使用者點了容器上的 ± 。
+   *
+   * **這裡只是轉達，折疊不在畫布做**：收起來要重算線與排版，那是
+   * `graph/fold.ts` 加上 elkjs 的事（見 `fold.ts` 開頭）。
+   */
+  (e: 'fold', ids: string[], collapse: boolean): void
 }>()
 
 /** 自動縮放的上限。一張只有兩個框的圖被放到 400% 只會讓人以為壞了。 */
@@ -66,6 +73,16 @@ let draws = 0
 
 let repaintGrid = () => {}
 
+/**
+ * 哪些框收得起來。
+ *
+ * ⚠️ 讀的是形狀上的 `foldable` 旗標，**不是問 cell 有沒有小孩**（那是
+ * maxGraph 的預設）：收起來之後小孩根本沒被畫出去，一問就是零，± 圖示會
+ * 跟著消失——收得起來、打不開。那個旗標是 `graph/fold.ts` 從**完整的**
+ * 清單算的，所以它記得「這個框本來有東西」。
+ */
+let foldable = new Set<string>()
+
 onMounted(() => {
   if (!host.value) return
 
@@ -85,6 +102,18 @@ onMounted(() => {
   g.setConstrainChildren(false)
   // 拖到一條線上不要把那條線切斷——draw.io 有，但很容易誤觸。
   g.setSplitEnabled(false)
+
+  // ── 折疊 ──────────────────────────────────────────────
+  //
+  // maxGraph 內建的折疊會把線疊在一起而不是合併，而且不會重算我們算好的
+  // 轉彎點。所以這裡把它整個攔下來：圖示照樣長、點得下去，但真正做事的是
+  // `graph/fold.ts`。
+  g.isCellFoldable = (cell) => foldable.has(cell.id ?? '')
+  g.foldCells = (collapse = false, _recurse = false, cells = null) => {
+    const ids = (cells ?? []).map((c) => c.id).filter((id): id is string => Boolean(id))
+    if (ids.length) emit('fold', ids, collapse)
+    return cells
+  }
 
   repaintGrid = paintGrid(g, host.value)
   panAndZoom(g, repaintGrid)
@@ -118,6 +147,11 @@ async function draw() {
 
   // 灌進去的每一筆都不算使用者改的。給大一點——讀檔會產生好幾筆變更。
   quiet = 3
+
+  // 讀存過的圖時不給折疊：那張圖的座標是使用者的，而折疊一定要重排。
+  foldable = props.xml
+    ? new Set()
+    : new Set(props.shapes.filter((s) => s.foldable).map((s) => s.id))
 
   if (props.xml) {
     g.batchUpdate(() => readXml(g.getDataModel(), props.xml!))

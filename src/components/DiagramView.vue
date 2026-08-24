@@ -29,6 +29,7 @@ import { commands } from '../lib/bindings'
 import { useProject } from '../lib/store'
 import { blankXml, canvasShapes, contextDrawing } from '../lib/diagram'
 import { bind, boundShapes, shapeLabels, unboundShapes } from '../lib/graph/binding'
+import { fold } from '../lib/graph/fold'
 import { matching, step } from '../lib/graph/find'
 import { dim, smeared, spotlight, undim } from '../lib/graph/highlight'
 import { clipboard, contextMenu, keyboard } from '../lib/graph/interact'
@@ -79,7 +80,7 @@ const environment = computed(
  * 用到了誰」。少了人，起點是人的線就會被丟掉，而丟掉一條線會讓後面所有
  * 線的轉彎點錯開（見 `lib/diagram.ts` 的 `canvasShapes`）。
  */
-const drawing = computed(() => {
+const full = computed(() => {
   const env = environment.value
   if (!env || !store.snapshot) return { shapes: [], links: [] }
   if (showing.value === context.value) return contextDrawing(store.snapshot.project, env)
@@ -88,8 +89,37 @@ const drawing = computed(() => {
     links: links.value,
   }
 })
+
+/**
+ * 收起來的那幾個框。**這是檢視狀態，不是模型的一部分。**
+ *
+ * 換一張圖或換一個環境就歸零：id 只在同一張圖裡有意義，留著會讓下一張圖
+ * 莫名其妙少了幾個框，而且沒有任何線索說得出為什麼。
+ */
+const collapsed = ref(new Set<string>())
+
+/** 套完折疊之後，真正要畫的東西。折疊怎麼做見 `graph/fold.ts`。 */
+const drawing = computed(() => fold(full.value.shapes, full.value.links, collapsed.value))
 const shapes = computed(() => drawing.value.shapes)
 const drawn = computed(() => drawing.value.links)
+
+/** 收起來藏了幾個東西。**一定要講出來**，理由見 `graph/fold.ts`。 */
+const hiddenCount = computed(() => full.value.shapes.length - shapes.value.length)
+
+/**
+ * 使用者點了 ± 。
+ *
+ * 存過的圖不給折疊（畫布那邊 `foldable` 是空的），所以這裡只會被自動產生
+ * 的那兩張圖叫到——它們的座標本來就是我們算的，重排不會洗掉任何人的東西。
+ */
+function onFold(ids: string[], collapse: boolean) {
+  const next = new Set(collapsed.value)
+  for (const id of ids) {
+    if (collapse) next.add(id)
+    else next.delete(id)
+  }
+  collapsed.value = next
+}
 
 /**
  * 這個環境一台機器都沒有。
@@ -341,6 +371,8 @@ function reset() {
   spotted.value = null
   unsaved.value = false
   selection.value = []
+  // 折疊的 id 只在同一張圖裡有意義。留著會讓下一張圖莫名其妙少幾個框。
+  collapsed.value = new Set()
 }
 
 /** 存檔。**模型變了 Rust 會擋下來**，這裡負責把理由講給使用者聽。 */
@@ -671,6 +703,17 @@ function onLaid(ms: number) {
         >{{ kind === 'detail' ? '詳圖' : '簡圖 · 不對帳' }}</button>
 
         <span class="muted small">{{ drawn.length }} 條線</span>
+        <!--
+          收起來的東西**一定要說出來**。這個工具存在的理由就是怕漏，
+          而折疊是主動把東西藏起來——有人把一張折疊過的圖貼進文件，
+          讀的人要看得出來這不是全部。
+        -->
+        <button
+          v-if="hiddenCount > 0"
+          class="filter simple"
+          title="這張圖收起了一些框，底下的東西沒有畫出來。點一下全部展開"
+          @click="collapsed = new Set()"
+        >收起 {{ hiddenCount }} 個 · 全部展開</button>
         <span v-if="tooMany" class="warn small">太多了，這張圖已經讀不動——用篩選</span>
 
         <span class="grow" />
@@ -706,6 +749,7 @@ function onLaid(ms: number) {
             :shapes="shapes"
             :links="drawn"
             :xml="xml"
+            @fold="onFold"
             @change="onCanvasChange"
             @select="selection = $event"
             @laid="onLaid"

@@ -59,6 +59,16 @@ export interface Shape {
   /** 巢狀：這個形狀畫在誰裡面。 */
   parent?: string
   style: string
+  /**
+   * 底下有東西，所以收得起來。畫布拿它決定要不要長出那個 ± 圖示。
+   *
+   * ⚠️ **不能問「這個 cell 有沒有小孩」**（那是 maxGraph 的預設）：收起來
+   * 之後小孩根本沒被畫出去，一問就是零，± 圖示會跟著消失——收得起來、
+   * 打不開。所以這件事要由 [`fold`](./graph/fold.ts) 從**完整的**清單算。
+   */
+  foldable?: boolean
+  /** 收起來了。底下的東西不畫，線改接到它身上。 */
+  collapsed?: boolean
 }
 
 /** draw.io 的 style 字串。集中在這裡，不要散在產生邏輯裡。 */

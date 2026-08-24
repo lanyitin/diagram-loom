@@ -82,3 +82,50 @@ describe('重畫的時機', () => {
     expect(ids.filter((id) => id?.startsWith('svc-')), '排版那次蓋掉了讀進來的圖').toEqual([])
   })
 })
+
+
+describe('折疊', () => {
+  /** 一個框，裡面兩個服務。 */
+  function nested(): Shape[] {
+    return [
+      { id: 'vm', loomId: 'vm', kind: 'deploymentNode', label: 'vm-01', style: STYLE.node, foldable: true },
+      { id: 'svc-0', loomId: 'svc-0', kind: 'containerInstance', label: 'a', parent: 'vm', style: STYLE.instance },
+      { id: 'svc-1', loomId: 'svc-1', kind: 'containerInstance', label: 'b', parent: 'vm', style: STYLE.instance },
+    ]
+  }
+
+  const graphOf = (w: ReturnType<typeof canvas>) =>
+    (w.vm as unknown as { graph: { isCellFoldable(cell: unknown): boolean; foldCells(c: boolean, r: boolean, cells: unknown[]): unknown } }).graph
+
+  it('點 ± 只是轉達出去，畫布自己不折疊', async () => {
+    // 折疊要重算線與排版（`graph/fold.ts`）。讓 maxGraph 自己做的話，
+    // 它只會把線疊在一起，而且我們算好的轉彎點會全部作廢。
+    const w = canvas({ shapes: nested(), links: [] })
+    await settle()
+
+    const before = cellsOf(w).length
+    graphOf(w).foldCells(true, false, [{ id: 'vm' }])
+    await settle()
+
+    expect(w.emitted('fold')?.[0]).toEqual([['vm'], true])
+    expect(cellsOf(w).length, '畫布不該自己動手').toBe(before)
+  })
+
+  it('收得起來與否看形狀上的旗標，不是問 cell 有沒有小孩', async () => {
+    // 收起來之後小孩根本沒被畫出去，問 cell 就是零，± 圖示會消失
+    // ——收得起來、打不開。
+    const collapsedShapes: Shape[] = [
+      { id: 'vm', loomId: 'vm', kind: 'deploymentNode', label: 'vm-01', style: STYLE.node, foldable: true, collapsed: true },
+    ]
+    const w = canvas({ shapes: collapsedShapes, links: [] })
+    await settle()
+    expect(graphOf(w).isCellFoldable(cellsOf(w)[0])).toBe(true)
+  })
+
+  it('存過的圖不給折疊', async () => {
+    // 那張圖的座標是使用者排的，而折疊一定要重排。
+    const w = mount(DiagramCanvas, { props: { shapes: nested(), links: [], xml: SAVED } })
+    await settle()
+    expect(graphOf(w).isCellFoldable(cellsOf(w)[0])).toBe(false)
+  })
+})

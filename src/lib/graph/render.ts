@@ -62,6 +62,9 @@ export function render(
     cell.setId(shape.id)
     cell.setVertex(true)
     cell.setConnectable(true)
+    // 只是讓 ± 圖示畫成「＋」。**折疊本身不交給 maxGraph**——它不合併線，
+    // 只是把線疊在一起（見 `fold.ts`）。收起來的框在這裡本來就沒有小孩。
+    cell.collapsed = shape.collapsed ?? false
     parent.insert(cell)
     cells.set(shape.id, cell)
 
