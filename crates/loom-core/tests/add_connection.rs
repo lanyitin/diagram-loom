@@ -371,3 +371,226 @@ mod connectable_places {
         assert_eq!(rules(&project), Vec::<Rule>::new());
     }
 }
+
+/// 一個服務底下混著不同角色的實體。
+///
+/// # 這是真的資料長出來的
+///
+/// Redis 一個 `Container` 底下有 master、replica 與三台 sentinel：
+/// 前兩台提供 6379，後三台只提供 26379。**五台都是同一個服務的實體**，
+/// 這在模型上完全合法——沒有任何規則說「同一個服務的每一台都要提供
+/// 每一個接點」。
+///
+/// 而擬提案與列選單原本都只問「這個服務有幾台」，沒問「哪幾台有這個接點」。
+/// 於是選單寫著「redis-* : redis-tcp（5 台）」，實際上只有 2 台在跑 6379。
+/// 挑下去會展開到三台沒有 6379 的機器上，換來三項 L003——
+/// **選單先騙了人，lint 才在後面收拾。**
+mod mixed_roles {
+    use super::*;
+    use loom_core::logical::{EndpointDef, Protocol};
+
+    const SENTINEL: &str = "e-redis-sentinel";
+
+    /// prod 的 Redis 從 3 台變成 6 台：3 台原本的（6379）＋ 3 台 sentinel（26379）。
+    fn mixed() -> loom_core::Project {
+        let mut project = healthy_project();
+
+        project
+            .logical
+            .containers
+            .iter_mut()
+            .find(|c| c.id == Id::new(REDIS))
+            .expect("找不到 redis")
+            .endpoints
+            .push(EndpointDef {
+                id: Id::new(SENTINEL),
+                slug: "sentinel".into(),
+                protocol: Protocol::Tcp,
+                memo: String::new(),
+            });
+
+        let sentinels: Vec<_> = (1..=3)
+            .map(|n| {
+                let mut i = instance(
+                    "prod",
+                    &format!("redis-sentinel-{n}"),
+                    REDIS,
+                    SENTINEL,
+                    &format!("10.0.1.2{n}:26379"),
+                );
+                i.endpoints[0].slug = "sentinel".into();
+                i
+            })
+            .collect();
+        project.environments[0].nodes.extend(vms("prod", sentinels));
+
+        project
+    }
+
+    /// 目標端那一串裡，屬於「服務（整群）」的那幾項。
+    fn groups(project: &loom_core::Project) -> Vec<String> {
+        let env = &project.environments[0];
+        connect::choices(project, env, ConnectionEnd::To)
+            .into_iter()
+            .filter(|c| c.group == "服務（整群）")
+            .map(|c| c.label)
+            .collect()
+    }
+
+    #[test]
+    fn a_group_counts_only_the_instances_that_actually_serve_that_endpoint() {
+        // 六台 Redis 實體，但只有三台提供 client-port。
+        let project = mixed();
+
+        let client = groups(&project)
+            .into_iter()
+            .find(|l| l.contains("client-port"))
+            .expect("找不到 client-port 的整群選項");
+
+        assert!(
+            client.contains("3 台"),
+            "數的是全部的實體，不是有這個接點的：{client}"
+        );
+        assert!(!client.contains("6 台"), "把 sentinel 也算進去了：{client}");
+    }
+
+    #[test]
+    fn each_role_gets_its_own_pattern() {
+        // 兩群的樣式要分得開。`redis-*` 兩群都抓得到，所以它對誰都不對。
+        let project = mixed();
+        let labels = groups(&project);
+
+        assert!(
+            labels
+                .iter()
+                .any(|l| l.starts_with("redis-0* : client-port")),
+            "client-port 那群的樣式不該框到 sentinel：{labels:?}",
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|l| l.starts_with("redis-sentinel-* : sentinel")),
+            "sentinel 那群沒有自己的樣式：{labels:?}",
+        );
+    }
+
+    #[test]
+    fn a_pattern_that_over_matches_says_so_in_the_label() {
+        // 有時候真的擠不出剛好的樣式（glob 只有 `*`）。那就**寫在標籤上**，
+        // 不要安靜地拿掉——消失的選項跟「工具壞了」長得一樣。
+        let mut project = mixed();
+        // 把 sentinel 改名成 redis-04／05／06，兩群就再也分不開了：
+        // `redis-*` 與 `redis-0*` 都會同時抓到兩群。
+        let mut n = 3;
+        for node in project.environments[0].nodes.iter_mut() {
+            for i in node.instances.iter_mut() {
+                if i.slug.starts_with("redis-sentinel-") {
+                    n += 1;
+                    i.slug = format!("redis-0{n}");
+                }
+            }
+        }
+
+        let client = groups(&project)
+            .into_iter()
+            .find(|l| l.contains("client-port"))
+            .expect("找不到 client-port 的整群選項");
+
+        assert!(client.contains("3 台"), "{client}");
+        assert!(
+            client.contains("會抓到 6 台"),
+            "樣式會多抓，但標籤沒說：{client}"
+        );
+    }
+
+    #[test]
+    fn an_instance_is_not_offered_an_endpoint_it_does_not_have() {
+        // 逐台那一串也是同一個病：sentinel 身上沒有 client-port，
+        // 列出來只是給使用者一個一送出就變成 L003 的選項。
+        let project = mixed();
+        let env = &project.environments[0];
+
+        let labels: Vec<String> = connect::choices(&project, env, ConnectionEnd::To)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+
+        assert!(
+            !labels.iter().any(|l| l == "redis-sentinel-1 : client-port"),
+            "sentinel 身上沒有 client-port，不該列：{labels:?}",
+        );
+        assert!(
+            labels.iter().any(|l| l == "redis-sentinel-1 : sentinel"),
+            "它自己真的有的那個反而不見了：{labels:?}",
+        );
+    }
+
+    #[test]
+    fn the_proposal_leaves_out_the_instances_without_that_endpoint() {
+        let project = mixed();
+        let env = &project.environments[0];
+
+        let p = connect::propose(&project, env, &Id::new(REL_CACHE)).expect("擬不出來");
+        let Some(Endpointing::Instance {
+            target:
+                InstanceRef::Pattern {
+                    slug_pattern,
+                    expect,
+                    ..
+                },
+            ..
+        }) = p.to
+        else {
+            panic!("目標端不是萬用字元：{:?}", p.to)
+        };
+
+        assert_eq!(expect, Some(3), "期望數量把 sentinel 也算進去了");
+        assert_eq!(slug_pattern, "redis-0*");
+    }
+
+    #[test]
+    fn the_proposed_connection_is_clean() {
+        // 這是整組的重點：照提案建出來的連線**不該**帶著 L003／L004 出生。
+        let mut project = mixed();
+        project.environments[0]
+            .connections
+            .retain(|c| c.serves != Id::new(REL_CACHE));
+        let env = project.environments[0].id.clone();
+
+        let p = connect::propose(
+            &project,
+            &project.environments[0].clone(),
+            &Id::new(REL_CACHE),
+        )
+        .expect("擬不出來");
+        create(&mut project, &env, &p);
+
+        let broken: Vec<Rule> = rules(&project)
+            .into_iter()
+            .filter(|r| matches!(r, Rule::L003 | Rule::L004))
+            .collect();
+        assert_eq!(broken, Vec::<Rule>::new(), "提案自己帶了錯誤出生");
+    }
+
+    #[test]
+    fn nowhere_to_land_says_which_of_the_two_problems_it_is() {
+        // 「一台都沒建」與「建了但沒有那個接點」要修的地方完全不同。
+        let mut project = mixed();
+        // 三台 6379 全部拔掉那個接點，只留 sentinel。
+        for node in project.environments[0].nodes.iter_mut() {
+            for i in node.instances.iter_mut() {
+                i.endpoints.retain(|e| e.def != Some(Id::new(REDIS_CLIENT)));
+            }
+        }
+
+        let env = project.environments[0].clone();
+        let p = connect::propose(&project, &env, &Id::new(REL_CACHE)).expect("擬不出來");
+
+        assert!(p.to.is_none());
+        assert!(
+            p.notes.iter().any(|n| n.contains("沒有一台實現接點")),
+            "說成「一台都還沒建」會把人送去建機器，而機器是有的：{:?}",
+            p.notes,
+        );
+    }
+}

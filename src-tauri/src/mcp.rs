@@ -68,7 +68,7 @@ use loom_core::edit::Edit;
 use loom_mcp::Workspace;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
     Implementation, InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
     Tool,
 };
@@ -251,6 +251,12 @@ struct Handler {
     desk: Arc<dyn Desk>,
 }
 
+/// 工具清單可以被客戶端當成新鮮的多久。
+///
+/// 這份清單是編譯期常數（`loom_mcp::tools::list()`），一個行程活著的期間
+/// 不會變，所以留一點快取；真的改了，也就是重新編譯與重啟之後的事。
+const TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1000;
+
 impl ServerHandler for Handler {
     fn get_info(&self) -> InitializeResult {
         // rmcp 的型別都是 non_exhaustive（之後還會加欄位），所以一律走
@@ -274,10 +280,14 @@ impl ServerHandler for Handler {
             .as_array()
             .map(|list| list.iter().map(to_tool).collect())
             .unwrap_or_default();
-        Ok(ListToolsResult {
-            tools,
-            ..ListToolsResult::default()
-        })
+        // `ttlMs` 與 `cacheScope` 在協定 2026-07-28 是**必填**（SEP-2549）。
+        // rmcp 會把它們留成 `None`（因為舊版沒這兩個欄位），但只要客戶端
+        // 談成了 2026-07-28，缺了就會被擋在 schema 驗證外面——Claude Code
+        // 的症狀是「連上了，但抓不到工具」。舊版客戶端會忽略多出來的欄位，
+        // 所以無條件帶上是安全的。
+        Ok(ListToolsResult::with_all_items(tools)
+            .with_ttl_ms(TOOL_LIST_TTL_MS)
+            .with_cache_scope(CacheScope::Private))
     }
 
     async fn call_tool(

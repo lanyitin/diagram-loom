@@ -245,6 +245,21 @@ const targetEndpoints = computed(() => {
   return []
 })
 
+/**
+ * 這個環境裡的設備。VIP 要掛在其中一台上。
+ *
+ * 環境從 draft 自己身上讀（`infraEndpoint.environment`），不是讀畫面上
+ * 現在選的那個——表單開著的時候環境選單還是動得了的。
+ */
+const infraNodes = computed(() => {
+  const envId = (draft.value as { infraEndpoint?: { environment: Id } })?.infraEndpoint?.environment
+  const env = store.environments.find((e) => e.id === envId)
+  return ((env?.infra ?? []) as { id: Id; slug: string }[]).map((n) => ({
+    value: n.id,
+    label: n.slug,
+  }))
+})
+
 /** 可以掛在底下的既有節點。攤平成一層，縮排表示層級。 */
 const placeableNodes = computed(() => {
   const envId = (draft.value as { node?: { environment: Id } })?.node?.environment
@@ -395,10 +410,10 @@ function write(path: string, v: unknown) {
         </label>
         <label>連到目標的哪個接點
           <Picker
-            :model-value="read('relationship.toEndpoint') || null"
+            :model-value="read('relationship.to_endpoint') || null"
             :options="targetEndpoints.map((e) => ({ value: e.id, label: e.slug, hint: e.protocol }))"
             placeholder="打字搜尋接點定義…"
-            @update:model-value="write('relationship.toEndpoint', $event)"
+            @update:model-value="write('relationship.to_endpoint', $event)"
           />
         </label>
         <p v-if="targetEndpoints.length === 0" class="muted hint">
@@ -438,13 +453,33 @@ function write(path: string, v: unknown) {
       <!-- 設備 -->
       <template v-else-if="'infra' in draft">
         <label>名稱<input :value="read('infra.node.slug')" class="mono" placeholder="f5-01" @input="write('infra.node.slug', ($event.target as HTMLInputElement).value)"></label>
-        <p class="muted hint">VIP 位址要另外在「設備」那一列上加。</p>
+        <p class="muted hint">VIP 位址在「設備接點」那一頁加。設備上沒有 VIP 的話，新增連線時選單裡不會出現它。</p>
       </template>
 
       <!-- 設備接點 -->
       <template v-else-if="'infraEndpoint' in draft">
+        <label>掛在哪台設備上
+          <Picker
+            :model-value="read('infraEndpoint.node') || null"
+            :options="infraNodes"
+            placeholder="打字搜尋設備…"
+            @update:model-value="write('infraEndpoint.node', $event)"
+          />
+        </label>
         <label>名稱<input :value="read('infraEndpoint.endpoint.slug')" class="mono" placeholder="vip-redis" @input="write('infraEndpoint.endpoint.slug', ($event.target as HTMLInputElement).value)"></label>
+        <label>協定
+          <select :value="read('infraEndpoint.endpoint.protocol')" @change="write('infraEndpoint.endpoint.protocol', ($event.target as HTMLSelectElement).value)">
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+            <option value="unix-socket">Unix socket</option>
+            <option value="jdbc">JDBC</option>
+            <option value="file">檔案</option>
+          </select>
+        </label>
         <label>位址<input :value="read('infraEndpoint.endpoint.address')" class="mono" placeholder="10.0.0.100:6379" @input="write('infraEndpoint.endpoint.address', ($event.target as HTMLInputElement).value || null)"></label>
+        <p v-if="infraNodes.length === 0" class="muted hint">
+          這個環境還沒有任何設備。要先去「設備」那一頁建一台。
+        </p>
       </template>
 
       <!-- 服務實體：位址就住在這裡 -->

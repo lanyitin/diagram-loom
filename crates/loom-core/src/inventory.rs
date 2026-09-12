@@ -122,6 +122,7 @@ pub fn tables(project: &Project, environment: Option<&Id>) -> Vec<Table> {
         // 才放得上去。
         out.push(nodes_table(env, &severity_of));
         out.push(infra_table(env, &severity_of));
+        out.push(infra_endpoints_table(env, &severity_of));
         out.push(instances_table(project, env, &severity_of));
         out.push(system_instances_table(project, env, &severity_of));
     }
@@ -579,6 +580,59 @@ fn infra_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -
                     environment: env.id.clone(),
                     node: n.clone(),
                 },
+            })
+            .collect(),
+    }
+}
+
+/// 設備上的 VIP。
+///
+/// # 為什麼它要有自己一張表
+///
+/// 設備的接點是**獨立的 [`Resource::InfraEndpoint`]**，不像服務實體的接點
+/// 那樣跟著實體整份存進去（見 `resource::write_into` 對設備的特別處理）。
+/// 既然它是一種資源，就得有一個建得出來的地方。
+///
+/// 這張表缺席過一段時間，症狀非常安靜：F5 建得出來，但它身上的 VIP
+/// 沒有任何畫面加得上去；而 [`crate::connect::choices`] 列的是
+/// **VIP**、不是設備，所以一台沒有 VIP 的 F5 在「補一條連線」的目標
+/// 選單裡是**完全看不見的**——使用者看到的是一個沒有 F5 的選單，
+/// 而不是一句「F5 還沒有 VIP」。
+fn infra_endpoints_table(env: &crate::environment::Environment, sev: SeverityLookup<'_>) -> Table {
+    Table {
+        kind: Kind::InfraEndpoint,
+        title: "設備接點".into(),
+        group: TableGroup::Environment,
+        columns: vec![
+            "掛在哪台設備上".into(),
+            "名稱".into(),
+            "協定".into(),
+            "位址".into(),
+        ],
+        environment: Some(env.id.clone()),
+        empty_hint: "設備上的一個 VIP：F5 對外的那個位址與 port。\
+                     新增連線時「設備」那一組列的就是這些——設備上沒有 VIP 的話，它不會出現在選單裡。"
+            .into(),
+        rows: env
+            .infra
+            .iter()
+            .flat_map(|n| {
+                n.endpoints.iter().map(move |e| ResourceRow {
+                    id: e.id.clone(),
+                    depth: 0,
+                    severity: sev(&e.id),
+                    cells: vec![
+                        n.slug.clone(),
+                        e.slug.clone(),
+                        e.protocol.to_string(),
+                        e.address.clone().unwrap_or_default(),
+                    ],
+                    resource: Resource::InfraEndpoint {
+                        environment: env.id.clone(),
+                        node: n.id.clone(),
+                        endpoint: e.clone(),
+                    },
+                })
             })
             .collect(),
     }

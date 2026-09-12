@@ -186,6 +186,12 @@ function closeEnvMenu() {
 }
 
 function toggleEnvMenu() {
+  // 一個環境都沒有時，那個選單裡只剩「管理環境…」一項。為了一個唯一的
+  // 選項多按一次，等於把入口再藏深一層。
+  if (!store.environments.length) {
+    managingEnvironments.value = true
+    return
+  }
   envMenuOpen.value = !envMenuOpen.value
   // 點畫面別處就收起來。鍵盤的 Escape 由樣板上的 @keydown 處理。
   if (envMenuOpen.value) window.addEventListener('click', closeEnvMenu, { once: true })
@@ -265,6 +271,19 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
           class="group"
           :class="{ second: i > 0 }"
         >{{ GROUP_LABEL[t.group] ?? '' }}</span>
+        <!--
+          零個環境時，「環境層 · 分身」這一組本來會有的機器、設備、服務實體
+          全部不存在——那正是使用者卡住的地方，而空白說不出任何話。
+          所以缺的東西**就長在它缺席的位置上**，一鍵可按。
+
+          藏在「環境 ▾ → 管理環境… → ＋ 新增環境」底下不算修好：使用者看著
+          畫面找不到，不會去點一個看起來像「切換」的下拉選單。
+        -->
+        <button
+          v-if="t.group === 'environment' && t.group !== tabs[i - 1]?.group && !store.environments.length"
+          class="need"
+          @click="managingEnvironments = true"
+        >＋ 新增環境</button>
         <button
           :class="{ on: activeTab === t.title }"
           @click="activeTab = t.title"
@@ -504,6 +523,12 @@ function askDelete(row: ResourceRow, table: Table | null = currentTable.value) {
 
 .env { position: relative; display: inline-flex; }
 .pick { font-size: 12px; padding: 3px 9px; }
+/* 缺的東西長在它缺席的位置上。它不是一個分頁，所以不要長得像分頁。 */
+.need {
+  color: var(--warn);
+  border: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 6px;
+}
 /* 一個環境都沒有＝這個專案還走不到環境層。那不是錯誤，但要看得見。 */
 .pick.warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); }
 .caret { margin-left: 5px; color: var(--ink-4); }

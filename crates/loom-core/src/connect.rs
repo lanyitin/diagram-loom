@@ -161,10 +161,22 @@ fn resolve_end(
         }
 
         RelationshipEnd::Container(container) => {
-            let instance_of: Vec<&ContainerInstance> = env
+            let all_of: Vec<&ContainerInstance> = env
                 .instances()
                 .into_iter()
                 .filter(|i| &i.container == container)
+                .collect();
+            // **只有實現了那個接點的實體才算數。** 同一個服務的實體不一定
+            // 每一台都提供每一個接點：Redis 的 master／replica 提供 6379，
+            // sentinel 提供 26379，三者都是同一個 `Container` 的實體。
+            //
+            // 不濾的話，擬出來的萬用字元會把 sentinel 也框進去，而那三台
+            // 身上根本沒有 6379——送出去就是三項 L003。工具擬了一份自己
+            // 知道會壞的東西，那比擬不出來還糟。
+            let instance_of: Vec<&ContainerInstance> = all_of
+                .iter()
+                .copied()
+                .filter(|i| serves(i, endpoint))
                 .collect();
 
             match instance_of.as_slice() {
@@ -174,10 +186,24 @@ fn resolve_end(
                         .container(container)
                         .map(|c| c.slug.clone())
                         .unwrap_or_else(|| container.to_string());
-                    notes.push(format!(
-                        "{which_end}的服務 {slug} 在 {} 一台都還沒建，要先建機器。",
-                        env.slug
-                    ));
+                    // 「一台都沒建」與「建了但沒有那個接點」要修的地方完全不同，
+                    // 講同一句話會把人送去錯的地方。
+                    notes.push(match (all_of.is_empty(), endpoint) {
+                        (true, _) => format!(
+                            "{which_end}的服務 {slug} 在 {} 一台都還沒建，要先建機器。",
+                            env.slug
+                        ),
+                        (false, Some(def)) => format!(
+                            "{which_end}的服務 {slug} 在 {} 有 {} 台，但沒有一台實現接點 {}——要先在其中幾台補上這個接點。",
+                            env.slug,
+                            all_of.len(),
+                            endpoint_slug(project, container, def),
+                        ),
+                        (false, None) => format!(
+                            "{which_end}的服務 {slug} 在 {} 一台都還沒建，要先建機器。",
+                            env.slug
+                        ),
+                    });
                     None
                 }
                 [one] => Some(Endpointing::Instance {
@@ -193,6 +219,32 @@ fn resolve_end(
     }
 }
 
+/// 這台實體有沒有實現那個接點定義。
+///
+/// `endpoint` 是 `None` 時全部都算——來源端可以不指定接點
+/// （客戶端的 port 通常由作業系統分配）。
+fn serves(instance: &ContainerInstance, endpoint: Option<&Id>) -> bool {
+    match endpoint {
+        None => true,
+        // 比的是 `def`（邏輯層的定義），不是具體 endpoint 的 id——
+        // 連線指的一直都是定義，見 `lint::check_instance_has_endpoint`。
+        Some(def) => instance
+            .endpoints
+            .iter()
+            .any(|e| e.def.as_ref() == Some(def)),
+    }
+}
+
+/// 接點定義的顯示名。查不到就退回 id——訊息是給人看的，寧可醜也不要沒有。
+fn endpoint_slug(project: &Project, container: &Id, def: &Id) -> String {
+    project
+        .logical
+        .container(container)
+        .and_then(|c| c.endpoints.iter().find(|e| &e.id == def))
+        .map(|e| e.slug.clone())
+        .unwrap_or_else(|| def.to_string())
+}
+
 /// 多台就用萬用字元，而不是列出每一台。
 ///
 /// 列出每一台會產生 N 條連線，之後每加一台機器都要記得補一條——
@@ -205,7 +257,7 @@ fn as_pattern(
     notes: &mut Vec<String>,
     which_end: &str,
 ) -> InstanceRef {
-    let slug_pattern = pattern_for(project, container, instance_of);
+    let slug_pattern = pattern_for(project, env, container, instance_of);
     let actually_matched = env.instances_matching(&slug_pattern).len();
 
     // 樣式抓到的若不是這群，就會安靜地把別的機器也算進去。講出來，
@@ -226,17 +278,42 @@ fn as_pattern(
 }
 
 /// 先試「服務名 + `-*`」，抓不準就退回這幾台 slug 的共同前綴。
-fn pattern_for(project: &Project, container: &Id, instance_of: &[&ContainerInstance]) -> String {
-    if let Some(c) = project.logical.container(container) {
-        let candidate = format!("{}-*", c.slug);
-        if instance_of
+///
+/// # 「抓得到這群」還不夠，要「**只**抓到這群」
+///
+/// 兩個候選都可能框到不該框的機器。Redis 是最好的例子：`redis-*` 抓得到
+/// 三台 sentinel，但 sentinel 沒有 6379。所以兩個候選都先拿去實際比一次，
+/// **剛好等於這群的優先**——`redis-sentinel-*` 才是那三台要的樣式。
+///
+/// 兩個都不剛好時退回第一個抓得到的，並由 [`as_pattern`] 把差距講出來。
+/// 硬擠一個「精確」的樣式出來是做不到的（glob 只有 `*`），
+/// 而安靜地挑一個會多抓的，就是把問題往後推給 lint。
+fn pattern_for(
+    project: &Project,
+    env: &Environment,
+    container: &Id,
+    instance_of: &[&ContainerInstance],
+) -> String {
+    let by_container = project
+        .logical
+        .container(container)
+        .map(|c| format!("{}-*", c.slug));
+    let by_prefix = format!("{}*", common_prefix(instance_of));
+
+    let mut fallback = None;
+    for candidate in by_container.into_iter().chain([by_prefix.clone()]) {
+        if !instance_of
             .iter()
             .all(|i| crate::pattern::matches(&candidate, &i.slug))
         {
+            continue;
+        }
+        if env.instances_matching(&candidate).len() == instance_of.len() {
             return candidate;
         }
+        fallback.get_or_insert(candidate);
     }
-    format!("{}*", common_prefix(instance_of))
+    fallback.unwrap_or(by_prefix)
 }
 
 fn common_prefix(instance_of: &[&ContainerInstance]) -> String {
@@ -290,9 +367,15 @@ pub fn choices(
 
         // 接點列的是**邏輯層的定義**，不是這一台的具體 endpoint——
         // 萬用字元會展開成多台，只有定義才是它們共通的東西。
+        //
+        // 但只列**這一台真的實現了的**那幾個。同一個服務的實體不保證每一台
+        // 都提供每一個接點（Redis 的 sentinel 沒有 6379），列出來的話使用者
+        // 挑得到一個一送出就變成 L003 的組合。
         for def in container_of
             .map(|c| c.endpoints.as_slice())
             .unwrap_or_default()
+            .iter()
+            .filter(|def| serves(instance, Some(&def.id)))
         {
             out.push(Choice {
                 kind: SideKind::Instance,
@@ -307,25 +390,52 @@ pub fn choices(
     }
 
     // 整群：同一個服務有多台時才有意義。
+    //
+    // # 「幾台」要一個接點一個接點地算
+    //
+    // 原本這裡先數「這個服務有幾台」，再把那個數字套到它的每一個接點上。
+    // 對 Redis 那種一個 `Container` 底下混著不同角色的服務就是錯的：
+    // 5 台 Redis 實體裡只有 master 與 replica 提供 6379，另外三台是
+    // sentinel，只提供 26379。於是選單寫著「redis-* : redis-tcp（5 台）」，
+    // 而使用者只有 2 台在跑 6379。
+    //
+    // 挑下去的後果不只是數字難看：那條連線會展開到三台沒有 6379 的機器上，
+    // 換來三項 L003。**選單先騙了人，lint 才在後面收拾。**
     for container in &project.logical.containers {
-        let instance_of: Vec<&ContainerInstance> = env
-            .instances()
-            .into_iter()
-            .filter(|i| i.container == container.id)
-            .collect();
-        if instance_of.len() < 2 {
-            continue;
-        }
-        let mut notes = Vec::new();
-        let target = as_pattern(project, env, &container.id, &instance_of, &mut notes, "");
-        let InstanceRef::Pattern { slug_pattern, .. } = &target else {
-            continue;
-        };
-
         for def in &container.endpoints {
+            let serving: Vec<&ContainerInstance> = env
+                .instances()
+                .into_iter()
+                .filter(|i| i.container == container.id && serves(i, Some(&def.id)))
+                .collect();
+            if serving.len() < 2 {
+                continue;
+            }
+
+            let mut notes = Vec::new();
+            let target = as_pattern(project, env, &container.id, &serving, &mut notes, "");
+            let InstanceRef::Pattern { slug_pattern, .. } = &target else {
+                continue;
+            };
+
+            // 樣式抓得到的不一定就是這群（`redis-*` 也會抓到 sentinel）。
+            // 這種時候**照 `as_pattern` 的規矩講出來，不要安靜地拿掉**：
+            // 一個消失的選項跟「工具壞了」長得一樣，而寫在標籤上的數字
+            // 使用者當場看得見。`expect` 仍然是他要的數量，剩下的讓 lint 叫。
+            let caught = env.instances_matching(slug_pattern).len();
+            let label = if caught == serving.len() {
+                format!("{slug_pattern} : {}（{} 台）", def.slug, serving.len())
+            } else {
+                format!(
+                    "{slug_pattern} : {}（{} 台，但這個樣式會抓到 {caught} 台）",
+                    def.slug,
+                    serving.len()
+                )
+            };
+
             out.push(Choice {
                 kind: SideKind::Instance,
-                label: format!("{slug_pattern} : {}（{} 台）", def.slug, instance_of.len()),
+                label,
                 group: "服務（整群）".into(),
                 endpointing: Endpointing::Instance {
                     target: target.clone(),

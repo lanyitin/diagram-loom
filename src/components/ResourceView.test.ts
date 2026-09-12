@@ -468,14 +468,30 @@ describe('一個環境都還沒有的新專案', () => {
     expect(w.find('.env .pick').text()).toContain('還沒有')
   })
 
-  it('點開之後「管理環境…」按得到', async () => {
+  it('分頁列上就有「＋ 新增環境」，不必先去點下拉選單', async () => {
+    // 「環境層 · 分身」那一組本來會有的機器、設備、服務實體全部不存在，
+    // 而空白說不出任何話。缺的東西要長在它缺席的位置上。
+    const w = await openIt()
+    const add = w.findAll('.tabs .need').find((b) => b.text().includes('新增環境'))
+    expect(add).toBeTruthy()
+
+    await add!.trigger('click')
+    expect(w.find('[aria-label="管理環境"]').exists()).toBe(true)
+  })
+
+  it('點那顆鈕直接開管理環境，不用再選一次唯一的選項', async () => {
+    // 選單裡只剩「管理環境…」一項。為了一個唯一的選項多按一次，
+    // 等於把入口再藏深一層。
     const w = await openIt()
     await w.find('.env .pick').trigger('click')
-    const manage = w.findAll('.env .menu button').find((b) => b.text().includes('管理環境'))
-    expect(manage).toBeTruthy()
+    expect(w.find('.env .menu').exists(), '不該多開一層選單').toBe(false)
+    expect(w.find('[aria-label="管理環境"]').exists()).toBe(true)
+  })
 
-    await manage!.trigger('click')
-    const add = w.findAll('button').find((b) => b.text().includes('新增環境'))
+  it('管理環境裡的「＋ 新增環境」按得下去', async () => {
+    const w = await openIt()
+    await w.find('.env .pick').trigger('click')
+    const add = w.findAll('[aria-label="管理環境"] button').find((b) => b.text().includes('新增環境'))
     expect(add?.attributes('disabled')).toBeUndefined()
   })
 
@@ -490,7 +506,9 @@ describe('一個環境都還沒有的新專案', () => {
     const w = await openIt()
     const connections = w.findAll('.tabs button').find((b) => b.text().includes('連線'))
     await connections!.trigger('click')
-    await w.findAll('button').find((b) => b.text().includes('新增'))!.trigger('click')
+    // 指名工具列最右邊那顆主要按鈕。用「文字含新增」去找的話，會先撈到
+    // 分頁列上那顆「＋ 新增環境」——測到的就變成另一件事了。
+    await w.find('button.primary.add').trigger('click')
 
     // 只看對話框裡的字。看整頁的話，環境那顆鈕上的「還沒有」會讓這條
     // 測試無論如何都綠——一條永遠會過的測試比沒有測試更糟。

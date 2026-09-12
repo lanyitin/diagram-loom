@@ -196,6 +196,33 @@ fn a_real_client_can_initialise_and_list_tools() {
     }
 }
 
+/// 協定 2026-07-28 把 `ttlMs` 與 `cacheScope` 列為 list 結果的必填欄位。
+/// rmcp 不會替我們填，而 Claude Code 一旦談成那一版就會照 schema 驗；
+/// 少了就是「Reconnected ... but fetching tools failed」。
+#[test]
+fn the_tool_list_carries_the_cache_hints_the_2026_protocol_requires() {
+    let server = start(Some(TOKEN));
+    let headers = handshake(&server, TOKEN);
+
+    let (status, body) = post(
+        &server,
+        &with_headers(&headers),
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    assert_eq!(status, 200, "{body}");
+
+    let result: Value = serde_json::from_str(&body).expect(&body);
+    let result = &result["result"];
+    assert!(
+        result["ttlMs"].is_u64(),
+        "tools/list 少了 ttlMs（2026-07-28 必填）：{body}"
+    );
+    assert_eq!(
+        result["cacheScope"], "private",
+        "tools/list 的 cacheScope 不對：{body}"
+    );
+}
+
 #[test]
 fn a_tool_call_reaches_the_workspace() {
     let server = start(Some(TOKEN));

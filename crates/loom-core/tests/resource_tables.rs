@@ -12,6 +12,7 @@
 mod common;
 
 use loom_core::inventory::{TableGroup, tables};
+use loom_core::resource::Kind;
 
 /// 只有標題，方便一眼比對。
 fn titles(project: &loom_core::Project, env: Option<&loom_core::id::Id>) -> Vec<String> {
@@ -37,6 +38,7 @@ fn the_tab_order_is_the_order_you_build_things_in() {
             // 環境層（分身）。機器與設備是先有的地，實體才放得上去。
             "機器",
             "設備",
+            "設備接點",
             "服務實體",
             "外部系統實體",
         ],
@@ -140,4 +142,72 @@ fn a_memo_shows_up_in_the_table() {
             .any(|r| r.cells.last().map(String::as_str) == Some("等年底汰換")),
         "備註沒有出現在表格裡",
     );
+}
+
+/// `Kind` 有幾種，分頁列就該有幾張表。
+///
+/// # 為什麼這條比「順序對不對」更要緊
+///
+/// 少一張表**不會讓任何東西壞掉**：Rust 存得下，`resource::write_into`
+/// 收得了，MCP 也寫得進去——只有人在畫面上建不了。沒有錯誤訊息，
+/// 沒有規則會叫，跟備註那一欄當初缺席的方式一模一樣。
+///
+/// 「設備接點」就這樣缺了很久，而它的後果特別遠：
+/// [`loom_core::connect::choices`] 列的是設備身上的 **VIP**，所以一台
+/// 沒有 VIP 的 F5 在「補一條連線」的目標選單裡是**完全看不見的**。
+/// 使用者看到的是「選單裡沒有 F5」，而真正的原因隔了三層。
+#[test]
+fn every_kind_of_resource_has_a_table() {
+    let project = common::healthy_project();
+    let env = project.environments.first().map(|e| &e.id);
+
+    // 用 `Debug` 的字串比，只是為了不必替領域型別加一個 `Ord`——
+    // 排序在這裡是測試的方便，不是模型的性質。
+    let mut has: Vec<String> = tables(&project, env)
+        .into_iter()
+        .map(|t| format!("{:?}", t.kind))
+        .collect();
+    has.sort();
+
+    let mut all: Vec<String> = all_kinds().iter().map(|k| format!("{k:?}")).collect();
+    all.sort();
+
+    assert_eq!(has, all, "有種類沒有自己的表，畫面上就建不出來");
+}
+
+/// 全部的 `Kind`。
+///
+/// 底下那個 `match` 沒有 `_` 分支，只為了一件事：**新增一種資源時這裡
+/// 編不過**，逼著人回來補。否則這份清單自己會過期，而過期的清單
+/// 會讓上面那條測試安靜地變成「我跟我自己一樣」。
+fn all_kinds() -> Vec<Kind> {
+    let all = vec![
+        Kind::Person,
+        Kind::System,
+        Kind::Container,
+        Kind::EndpointDef,
+        Kind::Relationship,
+        Kind::Environment,
+        Kind::Node,
+        Kind::Infra,
+        Kind::InfraEndpoint,
+        Kind::Instance,
+        Kind::SystemInstance,
+    ];
+    for kind in &all {
+        match kind {
+            Kind::Person
+            | Kind::System
+            | Kind::Container
+            | Kind::EndpointDef
+            | Kind::Relationship
+            | Kind::Environment
+            | Kind::Node
+            | Kind::Infra
+            | Kind::InfraEndpoint
+            | Kind::Instance
+            | Kind::SystemInstance => {}
+        }
+    }
+    all
 }

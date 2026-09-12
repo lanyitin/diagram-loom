@@ -184,16 +184,17 @@ describe('選單的規矩', () => {
     const bound = [...source.matchAll(/<select[^>]*read\('([^']+)'\)/g)].map((m) => m[1])
 
     expect(bound.sort()).toEqual(
-      ['endpointDef.def.protocol', 'node.node.kind'].sort(),
+      ['endpointDef.def.protocol', 'infraEndpoint.endpoint.protocol', 'node.node.kind'].sort(),
     )
     // 數量也要對得上，免得有人寫了一個沒綁 read() 的 select 溜過去。
-    expect(source.match(/<select/g) ?? []).toHaveLength(2)
+    expect(source.match(/<select/g) ?? []).toHaveLength(3)
   })
 
   it('參照欄位都用 Picker', () => {
     const source = readFileSync(join(import.meta.dirname, 'ResourceForm.vue'), 'utf8')
-    // 服務 × 1、接點定義 × 1、契約 × 3、機器 × 1、服務實體 × 3、外部系統實體 × 1
-    expect(source.match(/<Picker/g) ?? []).toHaveLength(10)
+    // 服務 × 1、接點定義 × 1、契約 × 3、機器 × 1、設備接點 × 1、
+    // 服務實體 × 3、外部系統實體 × 1
+    expect(source.match(/<Picker/g) ?? []).toHaveLength(11)
   })
 })
 
@@ -364,5 +365,186 @@ describe('備註', () => {
   it('備註只寫一次，不是十一個分支各抄一份', () => {
     // 抄開的那一天，漏掉的那一種不會壞掉，只是安靜地少一個欄位。
     expect(source().match(/<textarea/g) ?? []).toHaveLength(1)
+  })
+})
+
+/**
+ * 契約的目標接點。
+ *
+ * # 這一組在守什麼
+ *
+ * 這一欄一度綁在 `relationship.toEndpoint` 上，而 Rust 的欄位叫
+ * `to_endpoint`（`bindings.ts` 的 `Relationship_Serialize`）。症狀是
+ * **讀不到也寫不進**：本來就選好的接點在畫面上是空的，重新挑一個按了儲存
+ * 也沒有任何錯誤訊息，因為那個值落在一個 Rust 根本不看的鍵上。
+ *
+ * 跟備註那一組是同一類錯——路徑抄錯，安靜地什麼都沒發生。
+ */
+describe('契約的目標接點', () => {
+  let store: ReturnType<typeof useProject>
+
+  /** 一條指著外部系統 `sso` 的契約，現在選的是 `sql`。 */
+  const contract = () => ({
+    relationship: {
+      id: 'r-1',
+      slug: 'shop-連-sso',
+      purpose: '登入',
+      from: { system: 's-shop' },
+      to: { system: 's-sso' },
+      to_endpoint: 'ed-jdbc',
+      memo: '',
+    },
+  }) as unknown as Resource
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    store.snapshot!.project.logical.systems[1]!.endpoints = [
+      { id: 'ed-jdbc', slug: 'sql', protocol: 'jdbc' },
+      { id: 'ed-https', slug: 'https', protocol: 'tcp' },
+    ] as never
+    store.editingResource = { resource: contract(), isNew: false, kind: 'relationship' }
+  })
+
+  /** 「連到目標的哪個接點」那一格。依標籤找，不用位置。 */
+  function endpointPicker(w: ReturnType<typeof mount>) {
+    const label = w.findAll('label').find((l) => l.text().includes('連到目標的哪個接點'))
+    expect(label, '找不到「連到目標的哪個接點」').toBeTruthy()
+    return label!.findComponent({ name: 'Picker' })
+  }
+
+  it('打開時要顯示現在選的那個接點', () => {
+    // 空白跟「還沒選」長得一樣，使用者會以為資料掉了。
+    const w = mount(ResourceForm)
+
+    expect(endpointPicker(w).props('modelValue')).toBe('ed-jdbc')
+  })
+
+  it('改選另一個接點，送出時要落在 to_endpoint 上', async () => {
+    const w = mount(ResourceForm)
+    const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+    const picker = endpointPicker(w)
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[1]!.trigger('click')   // https
+    await w.find('button.primary').trigger('click')
+
+    const sent = applyEdit.mock.calls[0]?.[0] as {
+      updateResource?: { relationship: Record<string, unknown> }
+    }
+    expect(sent?.updateResource?.relationship.to_endpoint).toBe('ed-https')
+    // 落在別的鍵上就是「按了沒反應」——這裡把它釘死。
+    expect(Object.keys(sent!.updateResource!.relationship)).not.toContain('toEndpoint')
+  })
+})
+
+/**
+ * 欄位路徑的大小寫。
+ *
+ * # 為什麼這條值得存在
+ *
+ * `bindings.ts` 裡只有 **`Resource` 的種類名**是 camelCase
+ * （`endpointDef`、`infraEndpoint`、`systemInstance`），那是 enum 的
+ * variant 名；**欄位一律 snake_case**（`to_endpoint`、`memo`、`protocol`）。
+ *
+ * 寫成 camelCase 的欄位不會編不過，也不會有錯誤訊息——`write()` 會開一個新的鍵，
+ * Rust 安靜地忽略它。已經發生過兩次（`toEndpoint`），所以用一條規則擋掉一整類。
+ */
+describe('欄位路徑', () => {
+  it('第一段以外都不准出現大寫', () => {
+    const source = readFileSync(join(import.meta.dirname, 'ResourceForm.vue'), 'utf8')
+    const paths = [...source.matchAll(/\b(?:read|write)\('([^']+)'/g)].map((m) => m[1]!)
+
+    expect(paths.length, '一條 read()/write() 都沒抓到，是不是改寫法了？').toBeGreaterThan(10)
+    const bad = paths.filter((p) => p.split('.').slice(1).some((seg) => /[A-Z]/.test(seg)))
+    expect(bad, `這些路徑的欄位名不是 snake_case：${bad.join('、')}`).toEqual([])
+  })
+})
+
+/**
+ * 設備接點（VIP）。
+ *
+ * # 這一組在守什麼
+ *
+ * 這張表單一度有「名稱」與「位址」，卻沒有「掛在哪台設備上」——而
+ * `Resource::InfraEndpoint` 的 `node` 是必填的，Rust 收到空的會回
+ * `NoSuchSubject`。加上當時分頁列根本沒有「設備接點」這一頁，
+ * 結果是 **VIP 完全建不出來**。
+ *
+ * 而建不出 VIP 的後果隔了三層才顯現：`connect::choices` 列的是設備身上的
+ * VIP，所以一台沒有 VIP 的 F5 在「補一條連線」的目標選單裡是看不見的。
+ * 使用者看到的是「選單裡沒有 F5」。
+ */
+describe('設備接點', () => {
+  let store: ReturnType<typeof useProject>
+
+  const blank = () => ({
+    infraEndpoint: {
+      environment: 'env-prod',
+      node: '',
+      endpoint: { id: 'ep-1', slug: '', def: null, protocol: 'tcp', address: null, memo: '' },
+    },
+  }) as unknown as Resource
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useProject()
+    store.snapshot = fakeSnapshot()
+    store.snapshot!.project.environments[0]!.infra = [
+      { id: 'inf-f5', slug: 'echeck-f5', endpoints: [] },
+    ] as never
+    store.editingResource = { resource: blank(), isNew: true, kind: '設備接點' }
+  })
+
+  /** 「掛在哪台設備上」那一格。依標籤找，不用位置。 */
+  function nodePicker(w: ReturnType<typeof mount>) {
+    const label = w.findAll('label').find((l) => l.text().includes('掛在哪台設備上'))
+    expect(label, '找不到「掛在哪台設備上」').toBeTruthy()
+    return label!.findComponent({ name: 'Picker' })
+  }
+
+  it('選得到這個環境裡的設備', () => {
+    // 沒有這一格的話 `node` 永遠是空字串，Rust 回 NoSuchSubject——
+    // 一張填得完卻永遠存不進去的表單。
+    const w = mount(ResourceForm)
+
+    expect((nodePicker(w).props('options') as { label: string }[]).map((o) => o.label))
+      .toEqual(['echeck-f5'])
+  })
+
+  it('位址與協定都填得了，送出時整份帶著走', async () => {
+    const w = mount(ResourceForm)
+    const applyEdit = vi.spyOn(store, 'applyEdit').mockResolvedValue()
+
+    const picker = nodePicker(w)
+    await picker.find('input').trigger('focus')
+    await picker.findAll('.item')[0]!.trigger('click')
+
+    // 依標籤找，不用位置——Picker 自己也有一個輸入框。
+    const box = (text: string) =>
+      w.findAll('label').find((l) => l.text().includes(text))!.find('input')
+    await box('名稱').setValue('vip-echeck')
+    await box('位址').setValue('10.0.0.100:8443')
+    await w.find('select').setValue('jdbc')
+    await w.find('button.primary').trigger('click')
+
+    const sent = (applyEdit.mock.calls[0]?.[0] as { addResource?: Record<string, never> })
+      ?.addResource?.infraEndpoint as unknown as {
+        node: string
+        endpoint: { slug: string; address: string; protocol: string }
+      }
+    expect(sent.node).toBe('inf-f5')
+    expect(sent.endpoint.slug).toBe('vip-echeck')
+    expect(sent.endpoint.address).toBe('10.0.0.100:8443')
+    expect(sent.endpoint.protocol).toBe('jdbc')
+  })
+
+  it('這個環境一台設備都沒有時，說清楚下一步在哪', () => {
+    // 空的選單跟「壞掉了」長得一樣。
+    store.snapshot!.project.environments[0]!.infra = [] as never
+    const w = mount(ResourceForm)
+
+    expect(w.text()).toContain('還沒有任何設備')
   })
 })
