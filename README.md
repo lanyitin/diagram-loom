@@ -1,8 +1,14 @@
-# diagram-loom
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-loom-logo-dark.svg">
+    <img src="assets/diagram-loom-logo.svg" alt="DiagramLoom" width="320">
+  </picture>
+</p>
 
-> 管理系統的部署與連線資訊，並產出 **C4 Model** 圖的桌面應用程式。
->
-> 重點不是畫圖，是**數百條連線一條都不要漏**。
+<p align="center">
+  管理系統的部署與連線資訊，並產出 <b>C4 Model</b> 圖的桌面應用程式。<br>
+  重點不是畫圖，是<b>數百條連線一條都不要漏</b>。
+</p>
 
 這個 repo 是 diagram-loom 的**原始碼**：Rust 核心 + Tauri 殼 + Vue 前端。
 
@@ -111,7 +117,7 @@ cargo run -q -p diagram-loom --bin bindings
 ├── skills/diagram-loom/ 給使用者裝進 Agent 的 skill
 ├── prototypes/          可丟棄的驗證原型（各自獨立 workspace，有自己的 README）
 ├── fixtures/            測試素材（含刻意留了破洞的範例專案）
-└── assets/              app icon 與 logo 的原始檔
+└── assets/              app icon、logo、社群預覽圖的原始檔
 ```
 
 `loom-core` 的模組大致是：`logical` / `environment`（領域模型）、`repository`＋`store`

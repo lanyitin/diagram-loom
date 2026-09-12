@@ -28,8 +28,11 @@ macOS 的 icon 需要**透明的留白**。手邊唯一能把 SVG 轉點陣的�
 
 import math
 import pathlib
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import zlib
 
 CANVAS = 1024
@@ -47,6 +50,9 @@ BOTTOM = (0x12, 0x7A, 0x58)
 WARP = (0xFF, 0xFF, 0xFF, 0.34)
 WEFT = (0xF2, 0x6B, 0x3A)
 NODE = (0xFF, 0xF2, 0xEA)
+
+SOCIAL_W = 1280
+SOCIAL_H = 640
 
 
 def 夾(v, lo=0.0, hi=1.0):
@@ -79,36 +85,177 @@ def squircle_path(x0, y0, size, steps=26):
     return 'M' + 'L'.join(f'{x:.2f},{y:.2f}' for x, y in pts) + 'Z'
 
 
-def 寫logo(path):
-    """實心版的 logo。線稿在小尺寸會糊成一團，所以主要版本改成實心。"""
-    mark = squircle_path(280, 15, 120)
-    warp = ''.join(
-        f'<line x1="{280 + x}" y1="43" x2="{280 + x}" y2="107" stroke="#fff" '
-        f'stroke-opacity=".34" stroke-width="7" stroke-linecap="round"/>'
-        for x in (25, 60, 95))
-    weft = ('<path d="M305,40 C325,40 325,75 340,75 S360,110 375,110" fill="none" '
-            'stroke="#F26B3A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>')
-    nodes = ''.join(
-        f'<rect x="{280 + x - 9}" y="{15 + y - 9}" width="18" height="18" rx="5.5" fill="#FFF2EA"/>'
-        for x, y in ((25, 25), (60, 60), (95, 95)))
+GRADIENT = ('<linearGradient id="loom-body" x1="0" y1="0" x2="0" y2="1">'
+            '<stop offset="0" stop-color="#27B489"/>'
+            '<stop offset="1" stop-color="#127A58"/>'
+            '</linearGradient>')
 
+FONT = "-apple-system, 'Helvetica Neue', 'PingFang TC', sans-serif"
+
+
+def 標記(x0, y0, size):
+    """織布機標記的 SVG。logo 與社群預覽圖共用，所以兩邊不可能長得不一樣。
+
+    座標沿用原本那個 120×120 的標記空間，等比縮放到 `size`。
+    """
+    k = size / 120
+    at = lambda mx, my: f'{x0 + mx * k:.2f},{y0 + my * k:.2f}'
+
+    warp = ''.join(
+        f'<line x1="{x0 + mx * k:.2f}" y1="{y0 + 28 * k:.2f}"'
+        f' x2="{x0 + mx * k:.2f}" y2="{y0 + 92 * k:.2f}" stroke="#fff"'
+        f' stroke-opacity=".34" stroke-width="{7 * k:.2f}" stroke-linecap="round"/>'
+        for mx in (25, 60, 95))
+    weft = (f'<path d="M{at(25, 25)} C{at(45, 25)} {at(45, 60)} {at(60, 60)}'
+            f' S{at(80, 95)} {at(95, 95)}" fill="none" stroke="#F26B3A"'
+            f' stroke-width="{9 * k:.2f}" stroke-linecap="round" stroke-linejoin="round"/>')
+    nodes = ''.join(
+        f'<rect x="{x0 + (mx - 9) * k:.2f}" y="{y0 + (my - 9) * k:.2f}"'
+        f' width="{18 * k:.2f}" height="{18 * k:.2f}" rx="{5.5 * k:.2f}" fill="#FFF2EA"/>'
+        for mx, my in ((25, 25), (60, 60), (95, 95)))
+
+    return (f'<path d="{squircle_path(x0, y0, size)}" fill="url(#loom-body)"/>'
+            f'{warp}{weft}{nodes}')
+
+
+def 寫logo(path, 字色, 次字色):
+    """實心版的 logo。線稿在小尺寸會糊成一團，所以主要版本改成實心。
+
+    深色底的 README 會把 `#14201c` 的字吃光，所以另外產一份亮字的，
+    由 `<picture>` 的 `prefers-color-scheme` 去挑。
+    """
     pathlib.Path(path).write_text(f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 230" width="680" height="230">
   <!-- 由 assets/make-icon.py 產生。圓角與 app icon 共用同一組超橢圓參數。 -->
-  <defs>
-    <linearGradient id="loom-body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#27B489"/>
-      <stop offset="1" stop-color="#127A58"/>
-    </linearGradient>
-  </defs>
-  <path d="{mark}" fill="url(#loom-body)"/>
-  {warp}
-  {weft}
-  {nodes}
-  <text x="340" y="175" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="600" fill="#14201c">DiagramLoom</text>
-  <text x="340" y="205" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#6B7B76">Weave data into C4 model diagrams</text>
+  <defs>{GRADIENT}</defs>
+  {標記(280, 15, 120)}
+  <text x="340" y="175" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="600" fill="{字色}">DiagramLoom</text>
+  <text x="340" y="205" text-anchor="middle" font-family="sans-serif" font-size="13" fill="{次字色}">Weave data into C4 model diagrams</text>
 </svg>
 ''')
     print(f'寫出 {path}')
+
+
+def 估寬(s, size):
+    """粗估一段字的寬度。只用來排 chip，不必準，不重疊就夠了。"""
+    return sum((1.0 if ord(c) > 0x2E80 else 0.55) * size for c in s)
+
+
+def 藥丸(x0, y0, 標籤, size=15):
+    """一排圓角標籤。回傳 (svg, 右緣)。"""
+    out, x = [], x0
+    for t in 標籤:
+        w = 估寬(t, size) + 28
+        out.append(
+            f'<rect x="{x:.1f}" y="{y0}" width="{w:.1f}" height="34" rx="17" fill="#E7F4EE"/>'
+            f'<text x="{x + w / 2:.1f}" y="{y0 + 22}" text-anchor="middle"'
+            f' font-family="{FONT}" font-size="{size}" fill="#1C6B52">{t}</text>')
+        x += w + 12
+    return ''.join(out), x - 12
+
+
+def 寫social(path):
+    """GitHub 的 social preview（1280×640）。
+
+    左邊是身分，右邊是這個工具真正在乎的事——覆蓋率矩陣上那一格紅的。
+    畫圖的工具很多，會告訴你「dev 少了一條」的沒幾個，所以那格要是主角。
+    """
+    欄 = ('prod', 'test', 'dev')
+    欄心 = (990, 1068, 1146)
+    列 = (('order-api', (1, 1, 1)),
+          ('redis', (1, 1, 0)),
+          ('consul', (1, 1, 1)),
+          ('batch-job', (1, 1, 1)))
+    列心 = (216, 268, 320, 372)
+
+    # 背景那幾條淡到幾乎看不見的直線，是經線。
+    經線 = ''.join(f'<line x1="{x}" y1="0" x2="{x}" y2="640" stroke="#E9F1EE" stroke-width="1.5"/>'
+                   for x in range(40, 1280, 40))
+
+    格 = []
+    for (名字, 有), cy in zip(列, 列心):
+        格.append(f'<text x="740" y="{cy + 6}" font-family="{FONT}" font-size="17"'
+                  f' fill="#2A3A35">{名字}</text>')
+        for cx, 這格 in zip(欄心, 有):
+            if 這格:
+                格.append(f'<path d="M{cx - 8},{cy} L{cx - 2.5},{cy + 6} L{cx + 8},{cy - 7}"'
+                          f' fill="none" stroke="#27B489" stroke-width="3.4"'
+                          f' stroke-linecap="round" stroke-linejoin="round"/>')
+            else:
+                格.append(
+                    f'<rect x="{cx - 26}" y="{cy - 18}" width="52" height="36" rx="9" fill="#FBE1DD"/>'
+                    f'<line x1="{cx - 6}" y1="{cy - 6}" x2="{cx + 6}" y2="{cy + 6}"'
+                    f' stroke="#E0483B" stroke-width="3.4" stroke-linecap="round"/>'
+                    f'<line x1="{cx - 6}" y1="{cy + 6}" x2="{cx + 6}" y2="{cy - 6}"'
+                    f' stroke="#E0483B" stroke-width="3.4" stroke-linecap="round"/>')
+        if cy != 列心[-1]:
+            格.append(f'<line x1="736" y1="{cy + 26}" x2="1168" y2="{cy + 26}" stroke="#EFF5F2"/>')
+
+    欄名 = ''.join(f'<text x="{cx}" y="168" text-anchor="middle" font-family="{FONT}"'
+                   f' font-size="14" fill="#8A9B95">{名}</text>'
+                   for cx, 名 in zip(欄心, 欄))
+
+    藥丸1, _ = 藥丸(80, 428, ('Rust core', 'Tauri + Vue', 'maxGraph'))
+    藥丸2, _ = 藥丸(80, 474, ('Excel 匯入', '.drawio', 'MCP 給 AI Agent'))
+
+    # 畫布刻意做成正方形、卡片垂直置中——這是為了遷就 qlmanage 與 sips：
+    #   * qlmanage 一律輸出正方形縮圖，而且固定用 2× 算，宣告成 640×640
+    #     才會剛好回來 1280×1280（直接宣告 1280 會超過上限，從右邊被裁掉）。
+    #   * sips 的 --cropOffset 沒有作用，裁切永遠從中心。
+    # 兩件事湊起來的唯一解就是：置中擺，然後從中心裁。
+    pathlib.Path(path).write_text(f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SOCIAL_W} {SOCIAL_W}" width="{SOCIAL_W // 2}" height="{SOCIAL_W // 2}">
+  <!-- 由 assets/make-icon.py 產生。改了要重跑 `mise run icon` 並重新上傳到 GitHub。 -->
+  <defs>{GRADIENT}</defs>
+  <rect width="{SOCIAL_W}" height="{SOCIAL_W}" fill="#fff"/>
+  <g transform="translate(0,{(SOCIAL_W - SOCIAL_H) // 2})">
+  <rect width="{SOCIAL_W}" height="{SOCIAL_H}" fill="#F4F8F6"/>
+  {經線}
+
+  {標記(80, 92, 104)}
+  <text x="208" y="150" font-family="{FONT}" font-size="44" font-weight="600" fill="#14201C">DiagramLoom</text>
+  <text x="210" y="182" font-family="{FONT}" font-size="18" fill="#6B7B76">Weave data into C4 model diagrams</text>
+
+  <text x="80" y="290" font-family="{FONT}" font-size="36" font-weight="600" fill="#14201C">把部署與連線資訊</text>
+  <text x="80" y="338" font-family="{FONT}" font-size="36" font-weight="600" fill="#14201C">織成 C4 Model 圖</text>
+  <text x="80" y="386" font-family="{FONT}" font-size="20" fill="#5E706B">重點不是畫圖，是數百條連線一條都不要漏</text>
+  {藥丸1}
+  {藥丸2}
+  <text x="80" y="556" font-family="{FONT}" font-size="16" fill="#93A6A0">github.com/lanyitin/diagram-loom</text>
+
+  <rect x="700" y="76" width="504" height="488" rx="22" fill="#fff" stroke="#DFEAE5"/>
+  <text x="736" y="124" font-family="{FONT}" font-size="23" font-weight="600" fill="#14201C">環境覆蓋率</text>
+  {欄名}
+  <line x1="736" y1="182" x2="1168" y2="182" stroke="#E6EFEB"/>
+  {''.join(格)}
+
+  <rect x="736" y="432" width="432" height="80" rx="14" fill="#FDEDEA"/>
+  <circle cx="766" cy="472" r="6" fill="#E0483B"/>
+  <text x="786" y="466" font-family="{FONT}" font-size="16" font-weight="600" fill="#A32F25">L001 · redis 在 dev 沒有任何實現</text>
+  <text x="786" y="492" font-family="{FONT}" font-size="14" fill="#9A6259">存檔時 lint，缺什麼直接條列出來</text>
+  </g>
+</svg>
+''')
+    print(f'寫出 {path}')
+
+
+def 光柵化(svg, png, w, h):
+    """把 SVG 轉成 PNG——這次可以用 qlmanage。
+
+    社群預覽圖本來就有不透明底，所以 qlmanage 把圖壓在白底上不是問題，
+    app icon 才不能走這條路（它需要透明的留白，見檔頭）。
+
+    `svg` 必須是邊長 `w` 的正方形、內容垂直置中——理由寫在 `寫social`。
+    """
+    svg, png = pathlib.Path(svg), pathlib.Path(png)
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(['qlmanage', '-t', '-s', str(w), '-o', d, str(svg)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        出 = pathlib.Path(d) / (svg.name + '.png')
+        if not 出.exists():
+            raise SystemExit(f'qlmanage 沒有產出 {出.name}')
+        shutil.copyfile(出, png)
+    subprocess.run(['sips', '-c', str(h), str(w), str(png)],
+                   check=True, stdout=subprocess.DEVNULL)
+    print(f'寫出 {png}')
 
 
 def 覆蓋(d):
@@ -312,5 +459,8 @@ def main(out):
 
 if __name__ == '__main__':
     這裡 = pathlib.Path(__file__).parent
-    寫logo(這裡 / 'diagram-loom-logo-solid.svg')
+    寫logo(這裡 / 'diagram-loom-logo-solid.svg', '#14201C', '#6B7B76')
+    寫logo(這裡 / 'diagram-loom-logo-dark.svg', '#EAF2EE', '#9FB3AC')
+    寫social(這裡 / 'social-preview.svg')
+    光柵化(這裡 / 'social-preview.svg', 這裡 / 'social-preview.png', SOCIAL_W, SOCIAL_H)
     main(sys.argv[1] if len(sys.argv) > 1 else str(這裡 / 'app-icon.png'))
